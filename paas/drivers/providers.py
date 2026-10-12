@@ -174,8 +174,8 @@ class AWSSpotProvisioner(Provisioner):
     def max_price(self, plan_id, gpu):
         """Spot bid capped at the cost the margin floor assumes (plans.GPU_COSTS / CPU_HOSTS), so AWS can't bill more."""
         from .. import plans
-        inr = plans.GPU_COSTS.get(plan_id, {}).get(self.name) if gpu else plans.CPU_HOSTS[self.name]["inr_hr"]
-        return E("PAAS_AWS_SPOT_MAX_USD") or f"{(inr or 0) / plans.USD_INR:.4f}"
+        c = plans.GPU_COSTS.get(plan_id, {}).get(self.name) if gpu else ("usd", plans.CPU_HOSTS[self.name]["usd_hr"])
+        return E("PAAS_AWS_SPOT_MAX_USD") or f"{plans._usd(c) if c is not None else 0:.4f}"
     def create(self, node_id, plan_id, script, gpu):
         ec2, ssm = self.clients()
         ami = E("PAAS_AWS_AMI_GPU" if gpu else "PAAS_AWS_AMI") or ssm.get_parameter(Name=self.AMI_PARAMS[bool(gpu)])["Parameter"]["Value"]

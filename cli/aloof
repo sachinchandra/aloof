@@ -35,7 +35,7 @@ pj = lambda x: print(json.dumps(x, indent=2))
 if o.cmd == "signup":
     r = call("POST","/v1/signup",{"email":o.email}); json.dump({"api":API,"key":r["api_key"]}, open(CFG,"w")); print("saved key to", CFG); pj(r)
 elif o.cmd == "plans":
-    for pl in call("GET","/v1/plans")["plans"]: print(f"{pl['id']:<11} {pl['kind']} {pl['vcpu']:>5} vCPU {pl['memory_mb']:>7}MB {pl['gpu'] or '':<18} ₹{pl['price_inr_hr']}/hr  via {pl['provider']}")
+    for pl in call("GET","/v1/plans")["plans"]: print(f"{pl['id']:<11} {pl['kind']} {pl['vcpu']:>5} vCPU {pl['memory_mb']:>7}MB {pl['gpu'] or '':<18} ${pl['price_usd_hr']:.4f}/hr  via {pl['provider']}")
 elif o.cmd == "apps":
     for x in call("GET","/v1/apps"): print(f"{x['name']:<20} {x['status']:<9} {len(x['instances'])} inst  {x['url']}")
 elif o.cmd == "deploy":

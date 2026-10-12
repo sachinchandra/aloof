@@ -28,6 +28,6 @@ with httpx.Client(timeout=30) as h:
     sid = r.headers.get("mcp-session-id"); H2 = {**H, **({"mcp-session-id": sid} if sid else {})}
     h.post(f"{MCP}/mcp", headers=H2, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
     r = h.post(f"{MCP}/mcp", headers=H2, json={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "get_usage", "arguments": {}}})
-    body = r.text; print("   tool response:", r.status_code, body[:300].replace(chr(10)," ")); check(r.status_code == 200 and '"isError":false' in body and 'credit_inr\\": 500' in body, "MCP tool call as the password-logged-in account")
+    body = r.text; print("   tool response:", r.status_code, body[:300].replace(chr(10)," ")); check(r.status_code == 200 and '"isError":false' in body and 'credit_usd\\": 5.0' in body, "MCP tool call as the password-logged-in account")
 check(httpx.get(f"{API}/v1/auth/me", headers={"Authorization": f"Bearer {cli_key}"}).status_code == 200, "user's CLI key still valid after connector login")
 print(f"\n{sum(OK)}/{len(OK)} checks passed"); sys.exit(0 if all(OK) else 1)

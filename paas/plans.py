@@ -1,111 +1,130 @@
-"""Aloof pricing v2 (2026-10-12). Structure mirrors Fly.io (shared vs performance CPU, per-second billing, volumes per
-GB-month, egress per GB) with Railway/Render-style workspace tiers (fee includes the same amount of usage).
-Prices in INR excl. 18% GST; USD at USD_INR. Cost basis (PLAN.md section 2): CPU is bin-packed on E2E C2 4 vCPU/12 GB at
-₹2.25/hr (₹1,620 per 30 days); GPUs are routed to the cheapest provider. A "month" is 720 hours (30 days, same as Fly)."""
+"""Aloof pricing v3 (2026-10-12): sold in USD worldwide, run on low-cost Indian clouds (plus AWS Mumbai spot and self-hosted).
+Structure mirrors Fly.io (shared vs performance CPU, per-second billing, volumes per GB-month, egress per GB) with Railway-style
+workspace tiers (the fee comes back as included usage). Prices are USD excl. sales tax/VAT. A "month" is 720 hours.
+
+Margin floor: every plan and rate must keep >= MIN_MARGIN gross margin AFTER payment fees, against the worst-case cost of every
+pool it can be scheduled on. INR costs are converted at a pessimistic FX (COST_USD_INR, default ₹83/$: fewer rupees per dollar
+means higher USD costs). Payment fees use the worst case: the smallest charge (a $5 Hobby subscription) where the fixed
+$0.30 is 6%, plus card %, the international-card surcharge and Stripe Tax."""
 import os
-USD_INR = float(os.environ.get("PAAS_USD_INR", "88"))
-CPU_POOLS = [p for p in os.environ.get("PAAS_CPU_POOLS", "").split(",") if p]
+E = lambda k, d: os.environ.get(k, d)
+CURRENCY = "USD"
+COST_USD_INR = float(E("PAAS_COST_USD_INR", "83"))     # worst-case FX for costs
+USD_INR = float(E("PAAS_USD_INR", "88"))               # only for legacy INR conversions (Razorpay, v3->v4 migration)
+CPU_POOLS = [p for p in E("PAAS_CPU_POOLS", "").split(",") if p]
 HOURS_MONTH = 720
-HOST = {"name": "E2E C2 4vCPU/12GB", "inr_hr": 2.25, "vcpu": 4, "mem_gb": 12, "overcommit_shared": 8, "ram_fill": 0.9}
-# Krutrim 4vCPU/16GB ₹13/hr, used for below-cost checks if CPU ever lands there
-ALT_HOST = {"name": "Krutrim 4vCPU/16GB", "inr_hr": 13.0, "vcpu": 4, "mem_gb": 16, "overcommit_shared": 8, "ram_fill": 0.9}
-def _cpu(kind, vcpu, mem_mb, month_inr, fly_usd=None, render_usd=None, railway_usd=None, legacy=False):
+# ---------------- payment fees (Stripe) ----------------
+FEES = {"pct": float(E("PAAS_FEE_PCT", "0.029")), "intl_pct": float(E("PAAS_FEE_INTL_PCT", "0.015")),
+        "fixed_usd": float(E("PAAS_FEE_FIXED_USD", "0.30")), "tax_pct": float(E("PAAS_FEE_TAX_PCT", "0.005")),   # Stripe Tax 0.5%
+        "min_topup_usd": float(E("PAAS_MIN_TOPUP_USD", "10"))}
+def _cpu(kind, vcpu, mem_mb, month_usd, fly_usd=None, render_usd=None, railway_usd=None, legacy=False):
     reserve = vcpu / 8 if kind == "shared" else vcpu      # shared vCPU: 1/8 core baseline, bursts to a full core (Fly gives 1/16)
     return {"kind": "cpu", "cpu_class": kind, "vcpu": vcpu, "cpu_reserve": reserve, "memory_mb": mem_mb, "gpu": None,
-            "price_inr_month": month_inr, "price_inr_hr": round(month_inr / HOURS_MONTH, 4), "providers": CPU_POOLS,
+            "price_usd_month": month_usd, "price_usd_hr": round(month_usd / HOURS_MONTH, 6), "providers": CPU_POOLS,
             "compare_usd_month": {"fly": fly_usd, "render": render_usd, "railway": railway_usd}, "legacy": legacy}
-def _gpu(name, vcpu, mem_mb, inr_hr, cost_inr_hr, providers, fly_usd_hr=None, note=""):
+def _gpu(name, vcpu, mem_mb, usd_hr, providers, fly_usd_hr=None, note=""):
     return {"kind": "gpu", "cpu_class": "dedicated", "vcpu": vcpu, "cpu_reserve": vcpu, "memory_mb": mem_mb, "gpu": name,
-            "price_inr_hr": inr_hr, "price_inr_month": None, "providers": providers, "cost_inr_hr": cost_inr_hr,
+            "price_usd_hr": usd_hr, "price_usd_month": None, "providers": providers,
             "compare_usd_hr": {"fly_last_list": fly_usd_hr}, "note": note, "legacy": False}
-# Railway (always-on, full use): $20/vCPU-mo + $10/GB-mo. Render has no 256MB/1GB/2GB shared sizes; its nearest is listed.
+# Railway (always-on, full use): $20/vCPU-mo + $10/GB-mo. Render has no 256MB/1GB/2GB shared sizes.
 PLANS = {
-  "shared-1x-256mb": _cpu("shared", 1, 256,  179,  fly_usd=2.19, railway_usd=22.5),
-  "shared-1x-512mb": _cpu("shared", 1, 512,  299,  fly_usd=3.69, render_usd=7, railway_usd=25),
-  "shared-1x-1gb":   _cpu("shared", 1, 1024, 549,  fly_usd=6.70, railway_usd=30),
-  "shared-2x-2gb":   _cpu("shared", 2, 2048, 1099, fly_usd=13.39, railway_usd=60),
-  "shared-4x-8gb":   _cpu("shared", 4, 8192, 4199, railway_usd=160),
-  "perf-1x-2gb":     _cpu("performance", 1, 2048,  2199,  fly_usd=33,  render_usd=25,  railway_usd=40),
-  "perf-2x-4gb":     _cpu("performance", 2, 4096,  5499,  fly_usd=66,  render_usd=85,  railway_usd=80),
-  "perf-4x-8gb":     _cpu("performance", 4, 8192,  10999, fly_usd=132, render_usd=175, railway_usd=160),
-  "perf-8x-16gb":    _cpu("performance", 8, 16384, 21999, fly_usd=264, render_usd=300, railway_usd=320),
-  "gpu-t4-spot": _gpu("NVIDIA T4 16GB (spot, interruptible)", 4, 15360, 39, 25, ["aws-ap-south-1-spot", "self-hosted"]),
-  "gpu-l4":      _gpu("NVIDIA L4 24GB", 8, 30720, 72, 49, ["e2e", "jarvislabs", "self-hosted"], fly_usd_hr=1.50, note="vs Fly A10 24GB"),
-  "gpu-l40s":    _gpu("NVIDIA L40S 48GB", 8, 61440, 149, 102, ["e2e", "self-hosted"], fly_usd_hr=1.25, note="above Fly's old $1.25 (retired) to hold a 30% margin"),
-  "gpu-a100":    _gpu("NVIDIA A100 80GB", 16, 92160, 279, 189, ["jarvislabs", "krutrim", "e2e", "self-hosted"], fly_usd_hr=3.50, note="vs Fly a100-80gb"),
-  "gpu-h100":    _gpu("NVIDIA H100 80GB", 24, 194560, 369, 256, ["krutrim", "e2e", "jarvislabs", "self-hosted"], note="Fly never offered H100"),
+  "shared-1x-256mb": _cpu("shared", 1, 256,  1.99,  fly_usd=2.19, railway_usd=22.5),
+  "shared-1x-512mb": _cpu("shared", 1, 512,  3.49,  fly_usd=3.69, render_usd=7, railway_usd=25),
+  "shared-1x-1gb":   _cpu("shared", 1, 1024, 5.99,  fly_usd=6.70, railway_usd=30),
+  "shared-2x-2gb":   _cpu("shared", 2, 2048, 11.99, fly_usd=13.39, railway_usd=60),
+  "shared-4x-8gb":   _cpu("shared", 4, 8192, 44,    railway_usd=160),
+  "perf-1x-2gb":     _cpu("performance", 1, 2048,  24,  fly_usd=33,  render_usd=25,  railway_usd=40),
+  "perf-2x-4gb":     _cpu("performance", 2, 4096,  59,  fly_usd=66,  render_usd=85,  railway_usd=80),
+  "perf-4x-8gb":     _cpu("performance", 4, 8192,  119, fly_usd=132, render_usd=175, railway_usd=160),
+  "perf-8x-16gb":    _cpu("performance", 8, 16384, 239, fly_usd=264, render_usd=300, railway_usd=320),
+  "gpu-t4-spot": _gpu("NVIDIA T4 16GB (spot, interruptible)", 4, 15360, 0.55, ["aws-ap-south-1-spot", "self-hosted"]),
+  "gpu-l4":      _gpu("NVIDIA L4 24GB", 8, 30720, 1.10, ["e2e", "jarvislabs", "self-hosted"], fly_usd_hr=1.50, note="vs Fly A10 24GB"),
+  "gpu-l40s":    _gpu("NVIDIA L40S 48GB", 8, 61440, 2.19, ["e2e", "self-hosted"], fly_usd_hr=1.25, note="above Fly's last $1.25 (retired) to hold the margin floor"),
+  "gpu-a100":    _gpu("NVIDIA A100 80GB", 16, 92160, 3.99, ["jarvislabs", "krutrim", "e2e", "self-hosted"], fly_usd_hr=3.50, note="vs Fly a100-80gb"),
+  "gpu-h100":    _gpu("NVIDIA H100 80GB", 24, 194560, 5.49, ["krutrim", "e2e", "jarvislabs", "self-hosted"], note="Fly never offered H100"),
 }
-# v1 plan ids keep working for existing apps (hidden from the pricing page, repriced on the v2 structure)
-PLANS["cpu-nano"]   = _cpu("shared", 0.25, 256, 179, legacy=True)
-PLANS["cpu-small"]  = _cpu("shared", 1, 1024, 549, legacy=True)
-PLANS["cpu-medium"] = _cpu("shared", 2, 4096, 2099, legacy=True)     # shared-2x-2gb + 2 GB extra RAM
-PLANS["cpu-large"]  = _cpu("shared", 4, 8192, 4199, legacy=True)
+# v1 plan ids keep working for existing apps (hidden from the pricing page)
+PLANS["cpu-nano"]   = _cpu("shared", 0.25, 256, 1.99, legacy=True)
+PLANS["cpu-small"]  = _cpu("shared", 1, 1024, 5.99, legacy=True)
+PLANS["cpu-medium"] = _cpu("shared", 2, 4096, 21.99, legacy=True)     # shared-2x-2gb + 2 GB extra RAM
+PLANS["cpu-large"]  = _cpu("shared", 4, 8192, 44, legacy=True)
 for p in PLANS.values(): p["provider"] = (p["providers"] or ["local-docker"])[0]
-# Usage-based extras (Fly: volume $0.15/GB-mo, egress India $0.12/GB; Render disk $0.25, egress $0.15; Railway volume $0.15, egress $0.05)
-RATES = {
-  "volume_inr_gb_month": 16.0,     # $0.18
-  "egress_inr_gb": 4.0,            # $0.045, below all three
-  "extra_ram_inr_gb_month": 499,   # Fly $6/GB-mo = ₹528
-}
-# Workspace tiers: the fee includes the same amount of usage (Railway model); bandwidth allowance as Render
+# Usage-based extras (Fly: volume $0.15/GB-mo, egress $0.02 NA/EU, $0.12 India; Render disk $0.25, egress $0.15; Railway $0.15, $0.05)
+RATES = {"volume_usd_gb_month": 0.22, "egress_usd_gb": 0.06, "extra_ram_usd_gb_month": 5.0}
+# Workspace tiers: the fee comes back as included usage (Railway model). Egress counts against included usage (no separate
+# free allowance) so the tier itself can never fall under the floor.
 TIERS = {
-  "free":  {"fee_inr": 0,    "included_usage_inr": 100,  "egress_gb": 5,   "seats": 1,    "max_apps": 3,   "autoscale": True, "note": "apps sleep after 5 min idle; hard-capped at the included ₹100",
+  "free":  {"fee_usd": 0,  "included_usage_usd": 1,  "seats": 1,    "max_apps": 3,   "autoscale": True, "note": "apps sleep after 5 min idle; hard-capped at the included $1",
             "plans": ["shared-1x-256mb", "shared-1x-512mb"], "max_instances": 1, "idle_seconds": 300, "max_volume_gb": 1, "hard_cap": True,
-            "compare": "Railway Free ($0 + $1 usage), Render Hobby ($0, 5 GB egress), Fly: no free tier"},
-  "hobby": {"fee_inr": 399,  "included_usage_inr": 399,  "egress_gb": 25,  "seats": 1,    "max_apps": 50,  "autoscale": True, "note": "",
-            "compare": "Railway Hobby $5 incl. $5 usage (₹440)"},
-  "pro":   {"fee_inr": 1699, "included_usage_inr": 1699, "egress_gb": 100, "seats": None, "max_apps": None, "autoscale": True, "note": "unlimited seats, per workspace",
-            "compare": "Railway Pro $20 incl. $20 (₹1,760); Render Pro $25 + compute (₹2,200)"},
+            "compare": "Railway Free ($0 + $1 usage), Render Hobby ($0), Fly: no free tier"},
+  "hobby": {"fee_usd": 5,  "included_usage_usd": 5,  "seats": 1,    "max_apps": 50,  "autoscale": True, "note": "",
+            "compare": "Railway Hobby $5 incl. $5 usage"},
+  "pro":   {"fee_usd": 20, "included_usage_usd": 20, "seats": None, "max_apps": None, "autoscale": True, "note": "unlimited seats, per workspace",
+            "compare": "Railway Pro $20 incl. $20; Render Pro $25 + compute"},
 }
-REGIONS = {"in-blr":"Bengaluru","in-mum":"Mumbai","in-del":"Delhi NCR","in-chn":"Chennai","local":"Prototype box"}
-GST_RATE = 0.18
-# ---------------- margin floor (no losses, keep a buffer) ----------------
-MIN_MARGIN = float(os.environ.get("PAAS_MIN_MARGIN", "0.30"))
-COST_BUFFER = 1.5   # unverified costs are inflated 1.5x (E2E CPU repriced 1 Aug 2026; storage/egress not confirmed)
-# CPU hosts per pool, ₹/hr for 4 vCPU. Worst case uses on-demand prices (no committed/spot discounts).
+for t in TIERS.values(): t["egress_gb"] = 0
+# Regions, listed honestly: compute runs in India (and AWS Mumbai); the edge/control plane location is wherever it's deployed.
+REGIONS = {"in-blr": "Bengaluru, India", "in-mum": "Mumbai, India", "in-del": "Delhi NCR, India", "in-chn": "Chennai, India", "local": "Prototype box"}
+REGION_NOTE = "All compute currently runs in India (E2E Networks, Jarvislabs, Ola Krutrim, AWS ap-south-1, or your own nodes). Expect ~120–250 ms RTT from Europe/US; ideal for GPU batch/inference and APIs that aren't latency-critical."
+# ---------------- margin floor ----------------
+MIN_MARGIN = float(E("PAAS_MIN_MARGIN", "0.30"))
+COST_BUFFER = 1.5   # unverified costs inflated 1.5x (E2E CPU repriced 1 Aug 2026; storage/egress not confirmed)
+def fee_rate(charge_usd=None):
+    """Payment fees as a fraction of revenue for a charge; default = worst case (smallest charge we take)."""
+    c = charge_usd or min(FEES["min_topup_usd"], min(t["fee_usd"] for t in TIERS.values() if t["fee_usd"]))
+    return FEES["pct"] + FEES["intl_pct"] + FEES["tax_pct"] + FEES["fixed_usd"] / c
+# CPU hosts per pool for 4 vCPU (inr_hr in INR, or usd_hr for USD-billed providers). Worst case = on-demand list prices.
 CPU_HOSTS = {
-  "e2e":                 {"inr_hr": 2.25 * COST_BUFFER, "vcpu": 4, "mem_gb": 12, "src": "E2E C2 4vCPU/12GB ₹2.25/hr x1.5 buffer (repriced Aug 2026, unverified)"},
+  "e2e":                 {"inr_hr": 2.25 * COST_BUFFER, "vcpu": 4, "mem_gb": 12, "src": "E2E C2 4vCPU/12GB ₹2.25/hr x1.5 buffer"},
   "krutrim":             {"inr_hr": 13.0, "vcpu": 4, "mem_gb": 16, "src": "Krutrim 4vCPU/16GB ₹13/hr"},
-  "aws-ap-south-1-spot": {"inr_hr": 0.1504 * USD_INR * 1.1, "vcpu": 4, "mem_gb": 16, "src": "t3a.xlarge on-demand $0.1504/hr (spot can be reclaimed) +10% FX"},
+  "aws-ap-south-1-spot": {"usd_hr": 0.1504 * 1.1, "vcpu": 4, "mem_gb": 16, "src": "t3a.xlarge on-demand $0.1504/hr +10%"},
   "self-hosted":         {"inr_hr": 2.25 * COST_BUFFER, "vcpu": 4, "mem_gb": 12, "src": "own hardware, priced like E2E until a real cost is set"},
   "local-docker":        {"inr_hr": 2.25 * COST_BUFFER, "vcpu": 4, "mem_gb": 12, "src": "prototype box, priced like E2E"},
 }
-# GPU ₹/hr per pool (on-demand, PLAN.md section 2). Missing = unknown cost, so the pool is refused for that plan.
-# Override with env PAAS_COST_<POOL>_<PLAN>=₹/hr, e.g. PAAS_COST_JARVISLABS_GPU_L4=55
+# GPU cost per pool per hour: float = INR, ("usd", x) = USD. Missing = unknown, so the pool is refused for that plan.
+# Override: PAAS_COST_<POOL>_<PLAN>=USD/hr, e.g. PAAS_COST_JARVISLABS_GPU_L4=0.65
 GPU_COSTS = {
-  "gpu-t4-spot": {"aws-ap-south-1-spot": 25.0},                      # spot capped at MaxPrice = ₹25 (~$0.28); typical ₹18
+  "gpu-t4-spot": {"aws-ap-south-1-spot": ("usd", 0.30)},     # spot bid capped at MaxPrice $0.30 (typical ~$0.21)
   "gpu-l4":      {"e2e": 49.0},
   "gpu-l40s":    {"e2e": 102.0},
   "gpu-a100":    {"jarvislabs": 131.0, "krutrim": 189.0, "e2e": 189.0},
   "gpu-h100":    {"krutrim": 213.0, "e2e": 255.55},
 }
-RATE_COST = {"volume_inr_gb_month": 7.0 * COST_BUFFER, "egress_inr_gb": 1.0 * 2.5, "extra_ram_inr_gb_month": 1620 * COST_BUFFER / 10.8}
+def _usd(v): return v[1] if isinstance(v, tuple) else v / COST_USD_INR
+RATE_COST = {"volume_usd_gb_month": 7.0 * COST_BUFFER / COST_USD_INR, "egress_usd_gb": 1.0 * 2.5 / COST_USD_INR,
+             "extra_ram_usd_gb_month": 1620 * COST_BUFFER / 10.8 / COST_USD_INR}
 def _env_cost(pool, plan_id):
     v = os.environ.get(f"PAAS_COST_{pool.upper().replace('-', '_')}_{plan_id.upper().replace('-', '_')}")
     return float(v) if v else None
-def pool_cost_month(plan_id, pool):
-    """Worst-case ₹ per 30 days for one instance of plan on pool, or None if the cost is unknown."""
+def pool_cost_hr(plan_id, pool):
+    """Worst-case USD/hr for one instance of plan on pool, or None if the cost is unknown."""
     p = PLANS[plan_id]; ov = _env_cost(pool, plan_id)
-    if ov is not None: return ov * HOURS_MONTH
+    if ov is not None: return ov
     if p["kind"] == "gpu":
-        c = GPU_COSTS.get(plan_id, {}).get(pool); return c * HOURS_MONTH if c is not None else None
+        c = GPU_COSTS.get(plan_id, {}).get(pool); return _usd(c) if c is not None else None
     h = CPU_HOSTS.get(pool)
     if not h: return None
+    host_usd = h["usd_hr"] if "usd_hr" in h else h["inr_hr"] / COST_USD_INR
     cpu_share = (p["cpu_reserve"] if p["cpu_class"] == "performance" else p["vcpu"] / 8) / h["vcpu"]
     ram_share = (p["memory_mb"] / 1024) / (h["mem_gb"] * 0.9)
-    return max(cpu_share, ram_share) * h["inr_hr"] * HOURS_MONTH
-def price_month(p): return p["price_inr_month"] or p["price_inr_hr"] * HOURS_MONTH
+    return max(cpu_share, ram_share) * host_usd
+def pool_cost_month(plan_id, pool):
+    c = pool_cost_hr(plan_id, pool); return None if c is None else c * HOURS_MONTH
+def price_month(p): return p["price_usd_month"] or p["price_usd_hr"] * HOURS_MONTH
+def net_margin(price, cost):
+    """Gross margin after payment fees: (price*(1-fees) - cost) / price."""
+    return (price * (1 - fee_rate()) - cost) / price
 def pool_margin(plan_id, pool):
-    c = pool_cost_month(plan_id, pool); return None if c is None else 1 - c / price_month(PLANS[plan_id])
+    c = pool_cost_month(plan_id, pool); return None if c is None else net_margin(price_month(PLANS[plan_id]), c)
 def pool_allowed(plan_id, pool):
     m = pool_margin(plan_id, pool); return m is not None and m >= MIN_MARGIN
 def candidate_pools(plan_id):
     p = PLANS[plan_id]
-    if p["kind"] == "cpu": return list(CPU_HOSTS)      # any CPU pool may be enabled via PAAS_CPU_POOLS
+    if p["kind"] == "cpu": return list(CPU_HOSTS)
     return list(dict.fromkeys(list(p["providers"]) + ["self-hosted"]))
 def allowed_pools(plan_id): return [x for x in candidate_pools(plan_id) if pool_allowed(plan_id, x)]
+def rate_margin(k): return net_margin(RATES[k], RATE_COST[k])
 def margin_report():
-    """[(plan, pool, cost/mo, margin, allowed)] for every plan x candidate pool, plus extras."""
     out = []
     for k in PLANS:
         for pool in sorted(set(candidate_pools(k)) | set(CPU_HOSTS if PLANS[k]["kind"] == "cpu" else GPU_COSTS.get(k, {}))):
@@ -116,12 +135,10 @@ def worst_case_margin(plan_id):
     ms = [pool_margin(plan_id, x) for x in allowed_pools(plan_id)]
     return min(ms) if ms else None
 def check_floor():
-    """Every sellable plan must have >=1 schedulable pool at >= MIN_MARGIN, and every rate must clear it too."""
-    bad = [f"{k}: no pool at >= {MIN_MARGIN:.0%}" for k, p in PLANS.items() if not allowed_pools(k)]
-    bad += [f"{k}: {1 - RATE_COST[k] / RATES[k]:.0%}" for k in RATE_COST if 1 - RATE_COST[k] / RATES[k] < MIN_MARGIN]
+    """Every plan needs >=1 schedulable pool at >= MIN_MARGIN after fees; every rate must clear it too."""
+    bad = [f"{k}: no pool at >= {MIN_MARGIN:.0%}" for k in PLANS if not allowed_pools(k)]
+    bad += [f"{k}: {rate_margin(k):.0%}" for k in RATE_COST if rate_margin(k) < MIN_MARGIN]
     return bad
-# kept for older callers
-def unit_cost_month(p, host=None):
-    k = next(k for k, v in PLANS.items() if v is p); return max((pool_cost_month(k, x) or 0) for x in allowed_pools(k) or [None] if x) if allowed_pools(k) else float("inf")
 def margin(p, host=None):
     k = next(k for k, v in PLANS.items() if v is p); m = worst_case_margin(k); return round(m, 3) if m is not None else -1.0
+def cents(usd): return usd * 100.0

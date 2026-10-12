@@ -11,8 +11,8 @@ print("target:", "postgres" if db.PG else "sqlite"); s = sqlite3.connect(src); s
 rows = lambda t: [dict(r) for r in s.execute(f"select * from {t}")]
 n = {}
 for a in rows("accounts"):
-    db.q("insert into accounts(id,email,api_key_hash,api_key_prefix,created,credit_inr,email_verified) values(?,?,?,?,?,?,0) on conflict(id) do nothing",
-         (a["id"], a["email"], sha256(a["api_key"]), a["api_key"][:10], a["created"], a["credit_inr"])); n["accounts"] = n.get("accounts", 0) + 1
+    db.q("insert into accounts(id,email,api_key_hash,api_key_prefix,created,credit_inr,credit_cents,email_verified) values(?,?,?,?,?,?,?,0) on conflict(id) do nothing",
+         (a["id"], a["email"], sha256(a["api_key"]), a["api_key"][:10], a["created"], a["credit_inr"], a["credit_inr"] * 100.0 / 88.0)); n["accounts"] = n.get("accounts", 0) + 1
 for a in rows("apps"):
     spec = json.loads(a["spec"]); spec.setdefault("env", {})
     db.q("insert into apps(name,account_id,spec,status,provider,created,updated,error) values(?,?,?,?,?,?,?,?) on conflict(name) do nothing",

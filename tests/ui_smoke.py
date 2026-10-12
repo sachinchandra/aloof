@@ -3,7 +3,7 @@ every dashboard tab and the app detail panel. Fails on JS errors or failed reque
 import re, sys
 from playwright.sync_api import sync_playwright
 B = "http://localhost:8000"; OUT = "/workspace/paas/data/outbox.log"; errs = []; bad = []
-EXPECTED = ("lumberjack.razorpay.com", "/v1/auth/me")   # Razorpay's telemetry beacon; the pre-login 401 that triggers the redirect
+EXPECTED = ("/v1/auth/me",)   # the pre-login 401 that triggers the redirect
 with sync_playwright() as p:
     br = p.chromium.launch(channel="chrome", headless=True); pg = br.new_page(viewport={"width": 1300, "height": 900})
     pg.on("pageerror", lambda e: errs.append(str(e)))
@@ -21,7 +21,7 @@ with sync_playwright() as p:
     print("detail:", pg.inner_text("#detail h3")[:40].replace("\n", " ")); pg.screenshot(path="/workspace/paas/data/ui-app.png", full_page=True)
     for t in ("volumes", "billing", "account"):
         pg.click(f"header a[data-t={t}]"); pg.wait_for_timeout(1200); pg.screenshot(path=f"/workspace/paas/data/ui-{t}.png", full_page=True)
-    print("balance:", pg.inner_text("#bal"), "|", pg.inner_text("#rzpnote"))
-    print("razorpay checkout.js loaded:", pg.evaluate("typeof window.Razorpay"))
+    print("balance:", pg.inner_text("#bal"), "|", pg.inner_text("#paynote"))
+    bal = pg.text_content("#bal"); print("balance shown:", bal); assert bal.startswith("$") or bal.startswith("−$"), bal
     br.close()
 print("JS errors:", errs or "none"); print("failed requests:", bad or "none"); sys.exit(1 if errs or bad else 0)

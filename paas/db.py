@@ -36,6 +36,23 @@ create index if not exists api_keys_acct on api_keys(account_id);
 alter table accounts add column tier TEXT default 'free';
 alter table accounts add column month_key TEXT;
 create table if not exists usage_month(account_id bigint, month TEXT, kind TEXT, qty REAL default 0, cost_inr REAL default 0, primary key(account_id, month, kind));
+"""),
+    # v4: sell in USD. Wallet/ledger/usage in US cents (REAL, so per-second metering keeps sub-cent precision); Stripe.
+    # Existing INR balances are converted once at ₹88/$ (the old display rate); *_inr columns are kept but unused.
+    (4, """
+alter table accounts add column credit_cents REAL default 500;
+alter table accounts add column stripe_customer TEXT;
+alter table accounts add column stripe_subscription TEXT;
+alter table accounts add column country TEXT;
+alter table accounts add column tax_id TEXT;
+update accounts set credit_cents = round(cast(credit_inr * 100.0 / 88.0 as numeric), 4);
+alter table ledger add column amount_cents REAL;
+update ledger set amount_cents = amount_inr * 100.0 / 88.0;
+alter table usage_month add column cost_cents REAL default 0;
+update usage_month set cost_cents = cost_inr * 100.0 / 88.0;
+create table if not exists stripe_sessions(id TEXT primary key, account_id bigint, kind TEXT, credit_cents REAL, amount_cents bigint, tier TEXT,
+  status TEXT, payment_intent TEXT, invoice_id TEXT, invoice_url TEXT, created REAL, updated REAL);
+create table if not exists stripe_events(id TEXT primary key, type TEXT, received REAL);
 """)
 ]
 def _dialect(sql):

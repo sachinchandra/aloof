@@ -52,59 +52,139 @@ def test_env_encrypted_at_rest():
     raw = q("select spec from apps where name='encapp'", one=True)["spec"]; assert "hunter2" not in raw
     assert engine.load_spec(raw)["env"]["DATABASE_PASSWORD"] == "hunter2-very-secret"
 
-# ---------------- Razorpay ----------------
+# ---------------- Razorpay (optional) ----------------
 def _acct_client(email):
     c = TestClient(api.app, base_url="http://api.aloof.test")
     k = c.post("/v1/signup", json={"email": email}).json()["api_key"]; c.headers["Authorization"] = f"Bearer {k}"; return c
 @respx.mock
-def test_razorpay_checkout_and_webhook_idempotent():
+def test_razorpay_disabled_by_default():
+    c = _acct_client("norzp@example.in")
+    assert c.post("/v1/billing/razorpay/orders", json={"credit_inr": 1000}).status_code == 404
+    assert TestClient(api.app).post("/v1/billing/razorpay/webhook", content=b"{}").status_code == 404
+@respx.mock
+def test_razorpay_optional_checkout_and_webhook_idempotent(monkeypatch):
+    monkeypatch.setenv("PAAS_RAZORPAY_ENABLED", "1")
     c = _acct_client("pay@example.in")
     route = respx.post("https://api.razorpay.com/v1/orders").mock(return_value=httpx.Response(200, json={"id": "order_T1", "amount": 118000, "currency": "INR"}))
-    assert c.post("/v1/billing/orders", json={"credit_inr": 50}).status_code == 400
-    o = c.post("/v1/billing/orders", json={"credit_inr": 1000}).json()
+    assert c.post("/v1/billing/razorpay/orders", json={"credit_inr": 50}).status_code == 400
+    o = c.post("/v1/billing/razorpay/orders", json={"credit_inr": 1000}).json()
     assert o["order_id"] == "order_T1" and o["amount"] == 118000 and o["key_id"] == "rzp_test_X"
     sent = json.loads(route.calls[0].request.content); assert sent["amount"] == 118000 and sent["currency"] == "INR"
     assert route.calls[0].request.headers["authorization"] == "Basic " + base64.b64encode(b"rzp_test_X:ks_secret").decode()
-    before = c.get("/v1/billing").json()["credit_inr"]
+    before = c.get("/v1/billing").json()["credit_cents"]
     bad = {"razorpay_order_id": "order_T1", "razorpay_payment_id": "pay_1", "razorpay_signature": "00"}
-    assert c.post("/v1/billing/verify", json=bad).status_code == 400
+    assert c.post("/v1/billing/razorpay/verify", json=bad).status_code == 400
     good = dict(bad, razorpay_signature=sig("ks_secret", "order_T1|pay_1"))
-    r = c.post("/v1/billing/verify", json=good).json(); assert r["ok"] and r["credited_inr"] == 1000
+    r = c.post("/v1/billing/razorpay/verify", json=good).json(); assert r["ok"] and r["credited_inr"] == 1000 and abs(r["credited_cents"] - 1136.36) < 0.01
     ev = json.dumps({"id": "evt_1", "event": "payment.captured", "payload": {"payment": {"entity": {"id": "pay_1", "order_id": "order_T1", "amount": 118000}}}}).encode()
     w = TestClient(api.app)
-    assert w.post("/v1/billing/webhook", content=ev, headers={"X-Razorpay-Signature": "bad"}).status_code == 400
-    r = w.post("/v1/billing/webhook", content=ev, headers={"X-Razorpay-Signature": sig("wh_secret", ev)}); assert r.status_code == 200 and r.json().get("duplicate")
-    assert w.post("/v1/billing/webhook", content=ev, headers={"X-Razorpay-Signature": sig("wh_secret", ev)}).json().get("duplicate_event")
-    b = c.get("/v1/billing").json(); assert round(b["credit_inr"] - before, 2) == 1000      # credited exactly once
-    inv = b["invoices"][0]; assert inv["igst"] == 180 and inv["cgst"] == 0 and inv["total_inr"] == 1180 and re.match(r"ALF/\d{4}-\d\d/\d{6}", inv["number"])
+    assert w.post("/v1/billing/razorpay/webhook", content=ev, headers={"X-Razorpay-Signature": "bad"}).status_code == 400
+    r = w.post("/v1/billing/razorpay/webhook", content=ev, headers={"X-Razorpay-Signature": sig("wh_secret", ev)}); assert r.status_code == 200 and r.json().get("duplicate")
+    assert w.post("/v1/billing/razorpay/webhook", content=ev, headers={"X-Razorpay-Signature": sig("wh_secret", ev)}).json().get("duplicate_event")
+    b = c.get("/v1/billing").json(); assert abs(b["credit_cents"] - before - 1136.36) < 0.01      # credited exactly once, ₹1000 @ ₹88/$
+    inv = q("select * from invoices where order_id='order_T1'", one=True)
+    assert inv["igst"] == 180 and inv["cgst"] == 0 and inv["total_inr"] == 1180 and re.match(r"ALF/\d{4}-\d\d/\d{6}", inv["number"])
     assert "IGST @18%" in c.get(f"/v1/billing/invoices/{inv['id']}").text
 
 @respx.mock
-def test_webhook_only_capture_intrastate_cgst_sgst():
+def test_razorpay_webhook_only_capture_intrastate_cgst_sgst(monkeypatch):
+    monkeypatch.setenv("PAAS_RAZORPAY_ENABLED", "1")
     c = _acct_client("ka@example.in")
     assert c.put("/v1/billing/profile", json={"billing_name": "KA Pvt Ltd", "gstin": "29AAACK1234A1Z5"}).json()["billing_state"] == "Karnataka"
     assert c.put("/v1/billing/profile", json={"gstin": "nonsense"}).status_code == 400
-    c.put("/v1/billing/profile", json={"billing_name": "KA Pvt Ltd", "gstin": "29AAACK1234A1Z5"})
+    assert c.put("/v1/billing/profile", json={"country": "Germany"}).status_code == 400
+    c.put("/v1/billing/profile", json={"billing_name": "KA Pvt Ltd", "gstin": "29AAACK1234A1Z5", "country": "IN"})
     respx.post("https://api.razorpay.com/v1/orders").mock(return_value=httpx.Response(200, json={"id": "order_K"}))
-    c.post("/v1/billing/orders", json={"credit_inr": 500})
+    c.post("/v1/billing/razorpay/orders", json={"credit_inr": 500})
     ev = json.dumps({"id": "evt_k", "event": "payment.captured", "payload": {"payment": {"entity": {"id": "pay_k", "order_id": "order_K", "amount": 59000}}}}).encode()
-    r = TestClient(api.app).post("/v1/billing/webhook", content=ev, headers={"X-Razorpay-Signature": sig("wh_secret", ev)}).json()
+    r = TestClient(api.app).post("/v1/billing/razorpay/webhook", content=ev, headers={"X-Razorpay-Signature": sig("wh_secret", ev)}).json()
     assert r["credited_inr"] == 500 and r["invoice"]["cgst"] == 45 and r["invoice"]["sgst"] == 45 and r["invoice"]["igst"] == 0
-    # amount tampering rejected
     respx.post("https://api.razorpay.com/v1/orders").mock(return_value=httpx.Response(200, json={"id": "order_K2"}))
-    c.post("/v1/billing/orders", json={"credit_inr": 500})
+    c.post("/v1/billing/razorpay/orders", json={"credit_inr": 500})
     ev2 = json.dumps({"id": "evt_k2", "event": "payment.captured", "payload": {"payment": {"entity": {"id": "pay_k2", "order_id": "order_K2", "amount": 100}}}}).encode()
-    assert TestClient(api.app).post("/v1/billing/webhook", content=ev2, headers={"X-Razorpay-Signature": sig("wh_secret", ev2)}).json()["error"] == "amount mismatch"
+    assert TestClient(api.app).post("/v1/billing/razorpay/webhook", content=ev2, headers={"X-Razorpay-Signature": sig("wh_secret", ev2)}).json()["error"] == "amount mismatch"
+
+# ---------------- Stripe (primary) ----------------
+def _stripe_ev(eid, typ, obj):
+    raw = json.dumps({"id": eid, "type": typ, "data": {"object": obj}}).encode()
+    from paas import stripe_billing
+    return raw, {"Stripe-Signature": stripe_billing.sign(raw, "whsec_test")}
+@respx.mock
+def test_stripe_topup_checkout_webhook_idempotent():
+    c = _acct_client("stripe@example.com"); w = TestClient(api.app)
+    cust = respx.post("https://api.stripe.com/v1/customers").mock(return_value=httpx.Response(200, json={"id": "cus_1"}))
+    sess = respx.post("https://api.stripe.com/v1/checkout/sessions").mock(return_value=httpx.Response(200, json={"id": "cs_1", "url": "https://checkout.stripe.com/c/cs_1"}))
+    assert c.post("/v1/billing/checkout", json={"credit_usd": 5}).status_code == 400          # below $10 minimum
+    o = c.post("/v1/billing/checkout", json={"credit_usd": 25}).json(); assert o["url"].startswith("https://checkout.stripe.com") and o["credit_usd"] == 25
+    form = dict(httpx.QueryParams(sess.calls[-1].request.content.decode()))
+    assert form["mode"] == "payment" and form["line_items[0][price_data][currency]"] == "usd" and form["line_items[0][price_data][unit_amount]"] == "2500"
+    assert form["customer"] == "cus_1" and form["metadata[credit_cents]"] == "2500" and form["invoice_creation[enabled]"] == "true"
+    assert "automatic_tax[enabled]" not in form                                                  # STRIPE_TAX off by default
+    assert sess.calls[-1].request.headers["authorization"] == "Bearer sk_test_X" and sess.calls[-1].request.headers.get("idempotency-key")
+    before = c.get("/v1/billing").json()["credit_cents"]
+    obj = {"id": "cs_1", "object": "checkout.session", "mode": "payment", "payment_status": "paid", "amount_subtotal": 2500, "amount_total": 2975,
+           "customer": "cus_1", "payment_intent": "pi_1", "invoice": "in_1", "metadata": {"account_id": "x"}}
+    raw, h = _stripe_ev("evt_s1", "checkout.session.completed", obj)
+    assert w.post("/v1/billing/stripe/webhook", content=raw, headers={"Stripe-Signature": "t=1,v1=bad"}).status_code == 400
+    old = {"Stripe-Signature": __import__("paas.stripe_billing").stripe_billing.sign(raw, "whsec_test", ts=time.time() - 3600)}
+    assert w.post("/v1/billing/stripe/webhook", content=raw, headers=old).status_code == 400      # replay outside tolerance
+    r = w.post("/v1/billing/stripe/webhook", content=raw, headers=h).json(); assert r["ok"] and r["credited_cents"] == 2500
+    assert w.post("/v1/billing/stripe/webhook", content=raw, headers=h).json()["duplicate_event"]
+    raw2, h2 = _stripe_ev("evt_s1b", "checkout.session.async_payment_succeeded", obj)            # same session, new event id
+    assert w.post("/v1/billing/stripe/webhook", content=raw2, headers=h2).json()["duplicate"]
+    raw3, h3 = _stripe_ev("evt_inv", "invoice.paid", {"id": "in_1", "customer": "cus_1", "amount_paid": 2975, "hosted_invoice_url": "https://invoice.stripe.com/i/1"})
+    w.post("/v1/billing/stripe/webhook", content=raw3, headers=h3)
+    b = c.get("/v1/billing").json()
+    assert b["currency"] == "USD" and abs(b["credit_cents"] - before - 2500) < 1e-6 and b["credit_usd"] == round((before + 2500) / 100, 2)
+    assert any(i["invoice_url"] == "https://invoice.stripe.com/i/1" for i in b["invoices"]) and b["ledger"][0]["kind"] == "topup"
+    # tampered amount rejected
+    respx.post("https://api.stripe.com/v1/checkout/sessions").mock(return_value=httpx.Response(200, json={"id": "cs_2", "url": "u"}))
+    c.post("/v1/billing/checkout", json={"credit_usd": 10})
+    raw4, h4 = _stripe_ev("evt_s2", "checkout.session.completed", dict(obj, id="cs_2", amount_subtotal=1))
+    assert w.post("/v1/billing/stripe/webhook", content=raw4, headers=h4).json()["error"] == "amount mismatch"
+    assert cust.call_count == 1                                                                   # customer reused
+
+@respx.mock
+def test_stripe_subscription_tier_and_cancel(monkeypatch):
+    monkeypatch.setenv("STRIPE_TAX", "1")
+    c = _acct_client("sub@example.com"); w = TestClient(api.app)
+    aid = c.get("/v1/auth/me").json()["id"]
+    respx.post("https://api.stripe.com/v1/customers").mock(return_value=httpx.Response(200, json={"id": "cus_s"}))
+    sess = respx.post("https://api.stripe.com/v1/checkout/sessions").mock(return_value=httpx.Response(200, json={"id": "cs_sub", "url": "https://checkout.stripe.com/c/cs_sub"}))
+    assert c.post("/v1/billing/subscribe", json={"tier": "free"}).status_code == 400
+    assert c.post("/v1/billing/subscribe", json={"tier": "pro"}).status_code == 200
+    form = dict(httpx.QueryParams(sess.calls[-1].request.content.decode()))
+    assert form["mode"] == "subscription" and form["line_items[0][price]"] == "price_pro" and form["automatic_tax[enabled]"] == "true" and form["tax_id_collection[enabled]"] == "true"
+    raw, h = _stripe_ev("evt_sub1", "checkout.session.completed", {"id": "cs_sub", "mode": "subscription", "customer": "cus_s", "subscription": "sub_1",
+                                                                   "metadata": {"account_id": str(aid), "tier": "pro"}})
+    assert w.post("/v1/billing/stripe/webhook", content=raw, headers=h).json()["tier"] == "pro"
+    b = c.get("/v1/billing").json(); assert b["month"]["tier"] == "pro" and b["subscription"] == "sub_1"
+    assert c.put("/v1/billing/tier", json={"tier": "hobby"}).status_code == 409                 # managed by Stripe
+    credit0 = b["credit_cents"]; billing.meter_tick(time.time() + 40 * 86400)                     # next month: no wallet fee for subscribers
+    assert c.get("/v1/billing").json()["credit_cents"] == credit0
+    portal = respx.post("https://api.stripe.com/v1/billing_portal/sessions").mock(return_value=httpx.Response(200, json={"url": "https://billing.stripe.com/p/1"}))
+    assert c.post("/v1/billing/portal").json()["url"] == "https://billing.stripe.com/p/1"
+    assert dict(httpx.QueryParams(portal.calls[0].request.content.decode()))["customer"] == "cus_s"
+    raw, h = _stripe_ev("evt_sub2", "customer.subscription.deleted", {"id": "sub_1", "status": "canceled"})
+    assert w.post("/v1/billing/stripe/webhook", content=raw, headers=h).json()["tier"] == "free"
+    b = c.get("/v1/billing").json(); assert b["month"]["tier"] == "free" and not b["subscription"]
+
+def test_stripe_signature_helper():
+    from paas import stripe_billing as S
+    raw = b'{"id":"evt"}'; h = S.sign(raw, "whsec_test", ts=1000)
+    assert S.verify_signature(raw, h, "whsec_test", now=1100) and not S.verify_signature(raw, h, "whsec_test", now=2000)
+    assert not S.verify_signature(raw + b" ", h, "whsec_test", now=1100) and not S.verify_signature(raw, h, "other", now=1100)
+    assert S.verify_signature(raw, h + ",v1=deadbeef", "whsec_test", now=1100)                  # multiple v1 (secret rotation)
 
 def test_meter_charges_and_suspends(monkeypatch):
     a = engine.create_account("meter@example.in")
-    q("update accounts set credit_inr=0.001, tier='hobby' where id=?", (a["id"],))   # free tier never draws on the wallet
+    q("update accounts set credit_cents=0.001, tier='hobby' where id=?", (a["id"],))   # free tier never draws on the wallet
     q("insert into apps(name,account_id,spec,status,provider,created,updated) values(?,?,?,?,?,?,?)",
       ("meterapp", a["id"], crypto.dump_spec({"plan": "cpu-small", "instances": 1}), "running", "local-docker", 0, 0))
-    q("insert into instances(id,app,status,started,host,port) values(?,?,?,?,?,?)", ("i-meter", "meterapp", "running", time.time() - 3600 * 300, "127.0.0.1", 1))   # ~₹229, beyond the Free tier included ₹100
+    q("insert into instances(id,app,status,started,host,port) values(?,?,?,?,?,?)", ("i-meter", "meterapp", "running", time.time() - 3600 * 1000, "127.0.0.1", 1))   # ~₹229, beyond the Free tier included ₹100
     calls = []; monkeypatch.setattr(engine, "scale", lambda n, k, reason="": calls.append((n, k)))
     billing.meter_tick()
-    assert q("select credit_inr from accounts where id=?", (a["id"],), one=True)["credit_inr"] < 0
+    assert q("select credit_cents from accounts where id=?", (a["id"],), one=True)["credit_cents"] < 0
     assert calls == [("meterapp", 0)] and q("select status from apps where name='meterapp'", one=True)["status"] == "suspended"
 
 # ---------------- TXT verification against a real DNS server (dnslib) ----------------
@@ -206,7 +286,7 @@ def test_aws_spot(monkeypatch):
         ss.add_response("get_parameter", {"Parameter": {"Value": "ami-gpu123"}}, {"Name": p.AMI_PARAMS[True]})
         se.add_response("run_instances", {"Instances": [{"InstanceId": "i-0abc"}]},
                         {"ImageId": "ami-gpu123", "InstanceType": "g4dn.xlarge", "MinCount": 1, "MaxCount": 1, "UserData": SCRIPT,
-                         "InstanceMarketOptions": {"MarketType": "spot", "SpotOptions": {"SpotInstanceType": "one-time", "InstanceInterruptionBehavior": "terminate", "MaxPrice": "0.2841"}},
+                         "InstanceMarketOptions": {"MarketType": "spot", "SpotOptions": {"SpotInstanceType": "one-time", "InstanceInterruptionBehavior": "terminate", "MaxPrice": "0.3000"}},
                          "BlockDeviceMappings": ANY, "MetadataOptions": {"HttpTokens": "required"}, "TagSpecifications": ANY})
         assert p.create("n1", "gpu-t4-spot", SCRIPT, True) == "i-0abc"
         se.add_response("describe_instances", {"Reservations": [{"Instances": [{"InstanceId": "i-0abc", "State": {"Name": "running", "Code": 16}, "PublicIpAddress": "13.2.3.4"}]}]}, {"InstanceIds": ["i-0abc"]})
@@ -256,47 +336,58 @@ def test_local_volume_is_bind_backed(tmp_path, monkeypatch):
     d._ensure_volume("pgdata", 5)
     assert created["paas-vol-pgdata"]["driver_opts"] == {"type": "none", "o": "bind", "device": str(tmp_path / "pgdata")} and (tmp_path / "pgdata").is_dir()
 
-def test_pricing_v2_margins_and_structure():
-    from paas.plans import PLANS, TIERS, RATES, RATE_COST, margin
+def test_pricing_v3_usd_margins_and_structure():
+    from paas.plans import PLANS, TIERS, RATES, RATE_COST, margin, fee_rate, rate_margin, CURRENCY
+    assert CURRENCY == "USD" and fee_rate() > 0.10        # worst case: $0.30 on a $5 charge + 2.9% + 1.5% intl + 0.5% tax
     sellable = {k: p for k, p in PLANS.items() if not p["legacy"]}
     assert {"shared", "performance"} <= {p["cpu_class"] for p in sellable.values() if p["kind"] == "cpu"}
     for k, p in sellable.items():
-        assert margin(p) >= 0.30, f"{k} below 30% margin"
+        assert margin(p) >= 0.30, f"{k} below 30% margin after fees"
         c = p.get("compare_usd_month") or {}
-        if c.get("fly"): assert p["price_inr_month"] / 88 <= c["fly"] * 1.0001, f"{k} above Fly"
-    for k in RATE_COST: assert RATES[k] > RATE_COST[k]
-    assert TIERS["hobby"]["included_usage_inr"] == TIERS["hobby"]["fee_inr"]
+        if c.get("fly"): assert p["price_usd_month"] <= c["fly"], f"{k} above Fly"
+        if c.get("render"): assert p["price_usd_month"] <= c["render"], f"{k} above Render"
+        assert round(p["price_usd_month"] or p["price_usd_hr"], 2) == (p["price_usd_month"] or p["price_usd_hr"])   # clean cent prices
+    for k in RATE_COST: assert rate_margin(k) >= 0.30
+    assert (TIERS["free"]["fee_usd"], TIERS["hobby"]["fee_usd"], TIERS["pro"]["fee_usd"]) == (0, 5, 20)
+    assert all(t["included_usage_usd"] == t["fee_usd"] for k, t in TIERS.items() if k != "free")
     assert all(PLANS[k]["legacy"] for k in ("cpu-nano", "cpu-small", "cpu-medium", "cpu-large"))
+
+def test_margin_floor_tightens_with_worse_fx(monkeypatch):
+    import paas.plans as P
+    monkeypatch.setattr(P, "COST_USD_INR", 60)       # rupee much stronger -> USD costs up ~38% -> GPU pools must be refused
+    assert not P.pool_allowed("gpu-h100", "e2e") and P.check_floor()
+    monkeypatch.undo(); assert P.check_floor() == []
 
 def test_meter_volume_egress_included_usage_and_tier_fee():
     a = engine.create_account("meter2@example.in"); aid = a["id"]; now = time.time()
     billing.meter_tick(now)   # first tick of the month: sets month_key, free tier fee 0
-    q("update accounts set credit_inr=1000, tier='hobby' where id=?", (aid,))   # hobby: ₹399 included, 25 GB egress (fee already paid this month)
+    q("update accounts set credit_cents=100000, tier='hobby' where id=?", (aid,))   # $1000; hobby: $5 included (fee already paid this month)
     q("insert into apps(name,account_id,spec,status,provider,created,updated) values(?,?,?,?,?,?,?)", ("bwapp", aid, crypto.dump_spec({"plan": "perf-1x-2gb"}), "running", "local-docker", 0, 0))
     q("insert into instances(id,app,status,started,host,port) values(?,?,?,?,?,?)", ("i-bw", "bwapp", "running", now - 3600 * 10, "127.0.0.1", 1))
     q("insert into volumes(name,account_id,size_gb,created) values(?,?,?,?)", ("bigvol", aid, 100, now - 720 * 3600))   # 100 GB for a full month
-    billing.EGRESS["bwapp"] = int(35e9)   # 35 GB; hobby includes 25
+    billing.EGRESS["bwapp"] = int(35e9)   # 35 GB, counts toward included usage
     billing.meter_tick(now)
-    m = billing.month_summary(aid)
-    assert abs(m["usage"]["volume"]["cost_inr"] - 1600) < 0.5            # 100 GB-month × ₹16
-    assert abs(m["usage"]["egress"]["cost_inr"] - 40) < 0.01              # (35-25) GB × ₹4
-    assert abs(m["usage"]["compute"]["cost_inr"] - 10 * 2199 / 720) < 0.05
-    credit = q("select credit_inr from accounts where id=?", (aid,), one=True)["credit_inr"]
-    assert abs((1000 - credit) - (m["usage_total_inr"] - 399)) < 0.05     # first ₹399 of usage included on Hobby
-    # egress allowance is consumed once: next 1 GB is fully billable
+    m = billing.month_summary(aid); assert m["currency"] == "USD"
+    assert abs(m["usage"]["volume"]["cost_cents"] - 2200) < 0.5           # 100 GB-month × $0.22
+    assert abs(m["usage"]["egress"]["cost_cents"] - 210) < 0.01            # 35 GB × $0.06
+    assert abs(m["usage"]["compute"]["cost_cents"] - 10 * 2400 / 720) < 0.05
+    credit = q("select credit_cents from accounts where id=?", (aid,), one=True)["credit_cents"]
+    assert abs((100000 - credit) - (m["usage_total_cents"] - 500)) < 0.05   # first $5 of usage included on Hobby
     billing.EGRESS["bwapp"] = int(1e9); billing.meter_tick(now)
-    assert abs(billing.month_summary(aid)["usage"]["egress"]["cost_inr"] - 44) < 0.01
-    # tier fee charged once at month rollover
-    q("update accounts set tier='pro', month_key='1999-01', credit_inr=5000 where id=?", (aid,)); q("delete from instances where id='i-bw'"); q("delete from volumes where name='bigvol'")
+    assert abs(billing.month_summary(aid)["usage"]["egress"]["cost_cents"] - 216) < 0.01
+    # tier fee charged once at month rollover (wallet-paid)
+    q("update accounts set tier='pro', month_key='1999-01', credit_cents=500000 where id=?", (aid,)); q("delete from instances where id='i-bw'"); q("delete from volumes where name='bigvol'")
     billing.meter_tick(now); billing.meter_tick(now)
-    assert abs(q("select credit_inr from accounts where id=?", (aid,), one=True)["credit_inr"] - (5000 - 1699)) < 0.01
+    assert abs(q("select credit_cents from accounts where id=?", (aid,), one=True)["credit_cents"] - (500000 - 2000)) < 0.01
 
 def test_tier_api(client):
     c = _acct_client("tier@example.in")
+    assert c.get("/v1/billing").json()["credit_usd"] == 5.0                     # $5 signup credit
     assert c.put("/v1/billing/tier", json={"tier": "gold"}).status_code == 400
     r = c.put("/v1/billing/tier", json={"tier": "hobby"}); assert r.status_code == 200
-    b = c.get("/v1/billing").json(); assert b["month"]["tier"] == "hobby" and b["credit_inr"] < 500 and any(l["kind"] == "plan" for l in b["ledger"])
-    p = TestClient(api.app).get("/v1/plans").json(); assert "cost_inr_hr" not in json.dumps(p) and "cpu-small" not in [x["id"] for x in p["plans"]]
+    b = c.get("/v1/billing").json(); assert b["month"]["tier"] == "hobby" and b["credit_cents"] < 500 and any(l["kind"] == "plan" for l in b["ledger"])
+    p = TestClient(api.app).get("/v1/plans").json(); assert p["currency"] == "USD" and "inr" not in json.dumps(p["plans"]).lower() and "₹" not in json.dumps(p["plans"], ensure_ascii=False) and "cpu-small" not in [x["id"] for x in p["plans"]]
+    assert list(p["regions"])[0].startswith("in-") and "India" in p["region_note"]
 
 
 def test_min_margin_floor_every_plan_every_pool():
@@ -324,7 +415,7 @@ def test_scheduler_refuses_under_floor_pool(monkeypatch):
     assert engine.pick_provider({"plan": "shared-1x-1gb"}) == "e2e"            # krutrim skipped
     monkeypatch.setitem(plans.PLANS["shared-1x-1gb"], "providers", ["krutrim"])
     assert engine.pick_provider({"plan": "shared-1x-1gb"}) == "local-docker"
-    monkeypatch.setenv("PAAS_COST_LOCAL_DOCKER_SHARED_1X_1GB", "1.0")          # ₹720/mo cost > ₹549 price
+    monkeypatch.setenv("PAAS_COST_LOCAL_DOCKER_SHARED_1X_1GB", "1.0")          # $720/mo cost > $5.99 price
     with pytest.raises(engine.NoCapacity, match="floor"): engine.pick_provider({"plan": "shared-1x-1gb"})
 
 def test_free_tier_limits_and_hard_cap():
@@ -337,11 +428,11 @@ def test_free_tier_limits_and_hard_cap():
     q("insert into apps(name,account_id,spec,status,provider,created,updated) values(?,?,?,?,?,?,?)",
       ("fc-ok", aid, json.dumps(sp), "running", "local-docker", now, now))
     q("insert into instances(id,app,provider,host,port,status,started) values(?,?,?,?,?,?,?)", ("fc-i1", "fc-ok", "local-docker", "x", 1, "running", now - 3600 * 24 * 30 * 2))
-    credit0 = q("select credit_inr from accounts where id=?", (aid,), one=True)["credit_inr"]
+    credit0 = q("select credit_cents from accounts where id=?", (aid,), one=True)["credit_cents"]
     import unittest.mock as um
     with um.patch.object(engine, "scale", lambda *a, **k: q("update instances set status='stopped' where app=?", (a[0],))): billing.meter_tick(now)
     assert q("select status from apps where name='fc-ok'", one=True)["status"] == "capped"
-    assert q("select credit_inr from accounts where id=?", (aid,), one=True)["credit_inr"] == credit0   # free never draws on wallet
+    assert q("select credit_cents from accounts where id=?", (aid,), one=True)["credit_cents"] == credit0   # free never draws on wallet
     billing.uncap_account(aid, "test"); assert q("select status from apps where name='fc-ok'", one=True)["status"] == "idle"
 
 def test_autoscale_does_not_idle_right_after_redeploy(monkeypatch):

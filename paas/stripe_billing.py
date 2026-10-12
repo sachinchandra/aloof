@@ -1,0 +1,148 @@
+"""Stripe: primary payment provider (USD).
+* Top-ups: POST /v1/billing/checkout {credit_usd} -> Checkout Session (mode=payment) for the credit amount (+ tax when Stripe Tax is on)
+  -> webhook checkout.session.completed (or async_payment_succeeded) with payment_status=paid -> credit the wallet exactly once.
+* Tiers: POST /v1/billing/subscribe {tier} -> Checkout Session (mode=subscription, STRIPE_PRICE_HOBBY/PRO) -> webhook sets the tier;
+  invoice.paid renews it; customer.subscription.deleted / unpaid drops to Free.
+* Customer portal: POST /v1/billing/portal -> billing_portal session (cards, invoices, cancel).
+* Invoices/VAT: Stripe issues the invoice (invoice_creation for top-ups, subscription invoices). Set STRIPE_TAX=1 to enable
+  automatic_tax (Stripe Tax computes VAT/GST/sales tax from the customer's address and collects tax IDs).
+Webhooks are verified with the Stripe-Signature header (HMAC-SHA256 over "t.payload", 5 min tolerance) and de-duplicated by event id."""
+import os, hmac, hashlib, json, time, httpx, logging
+from urllib.parse import urlencode
+from .db import q
+from . import billing
+from .crypto import load_spec
+log = logging.getLogger("paas.stripe")
+E = lambda k, d=None: os.environ.get(k, d)
+API = lambda: E("STRIPE_API_BASE", "https://api.stripe.com/v1")
+MIN_TOPUP, MAX_TOPUP = 10, 5000
+def configured(): return bool(E("STRIPE_SECRET_KEY"))
+def tax_enabled(): return E("STRIPE_TAX", "0") == "1"
+def tier_price(tier): return E(f"STRIPE_PRICE_{tier.upper()}")
+def _flat(d, pre=""):
+    """Stripe's form encoding: a[b][0][c]=v."""
+    out = []
+    for k, v in (d.items() if isinstance(d, dict) else enumerate(d)):
+        key = f"{pre}[{k}]" if pre else str(k)
+        if isinstance(v, (dict, list)): out += _flat(v, key)
+        elif v is not None: out.append((key, "true" if v is True else "false" if v is False else str(v)))
+    return out
+def _call(method, path, data=None, idem=None, client=None):
+    if not configured(): raise RuntimeError("Stripe not configured (STRIPE_SECRET_KEY)")
+    c = client or httpx.Client(timeout=30)
+    h = {"Authorization": f"Bearer {E('STRIPE_SECRET_KEY')}", "Stripe-Version": E("STRIPE_API_VERSION", "2024-06-20"),
+         "Content-Type": "application/x-www-form-urlencoded"}
+    if idem: h["Idempotency-Key"] = idem
+    r = c.request(method, f"{API()}{path}", content=urlencode(_flat(data or {})), headers=h)
+    if r.status_code >= 400: raise RuntimeError(f"stripe {path} failed: {r.status_code} {r.text[:200]}")
+    return r.json()
+def _urls():
+    base = E("PAAS_PUBLIC_API_URL", "http://localhost:8000").rstrip("/")
+    return f"{base}/dashboard#billing?paid={{CHECKOUT_SESSION_ID}}", f"{base}/dashboard#billing"
+def ensure_customer(a, client=None):
+    if a.get("stripe_customer"): return a["stripe_customer"]
+    c = _call("POST", "/customers", {"email": a["email"], "name": a.get("billing_name") or None, "metadata": {"account_id": a["id"]}},
+              idem=f"cust-{a['id']}", client=client)
+    q("update accounts set stripe_customer=? where id=?", (c["id"], a["id"])); return c["id"]
+def _tax(d):
+    if tax_enabled(): d |= {"automatic_tax": {"enabled": True}, "tax_id_collection": {"enabled": True}, "customer_update": {"address": "auto", "name": "auto"}}
+    return d
+def create_topup_session(a, credit_usd, client=None):
+    cents = int(round(float(credit_usd) * 100))
+    if cents < MIN_TOPUP * 100 or cents > MAX_TOPUP * 100: raise ValueError(f"top-up must be between ${MIN_TOPUP} and ${MAX_TOPUP:,}")
+    ok, cancel = _urls()
+    d = _tax({"mode": "payment", "customer": ensure_customer(a, client), "client_reference_id": a["id"], "success_url": ok, "cancel_url": cancel,
+              "line_items": [{"quantity": 1, "price_data": {"currency": "usd", "unit_amount": cents, "tax_behavior": "exclusive",
+                              "product_data": {"name": "Aloof prepaid credit", "description": f"${cents/100:,.2f} of cloud usage credit"}}}],
+              "invoice_creation": {"enabled": True}, "metadata": {"account_id": a["id"], "kind": "topup", "credit_cents": cents},
+              "payment_intent_data": {"metadata": {"account_id": a["id"], "kind": "topup"}}})
+    s = _call("POST", "/checkout/sessions", d, idem=f"topup-{a['id']}-{cents}-{int(time.time())}", client=client)
+    q("insert into stripe_sessions(id,account_id,kind,credit_cents,amount_cents,status,created,updated) values(?,?,?,?,?,?,?,?)",
+      (s["id"], a["id"], "topup", cents, cents, "created", time.time(), time.time()))
+    return {"id": s["id"], "url": s.get("url"), "credit_usd": cents / 100, "tax": "calculated at checkout" if tax_enabled() else "not collected (STRIPE_TAX off)"}
+def create_subscription_session(a, tier, client=None):
+    from .plans import TIERS
+    if tier not in TIERS or not TIERS[tier]["fee_usd"]: raise ValueError("tier must be hobby or pro")
+    price = tier_price(tier)
+    if not price: raise RuntimeError(f"STRIPE_PRICE_{tier.upper()} not set")
+    ok, cancel = _urls()
+    d = _tax({"mode": "subscription", "customer": ensure_customer(a, client), "client_reference_id": a["id"], "success_url": ok, "cancel_url": cancel,
+              "line_items": [{"price": price, "quantity": 1}], "metadata": {"account_id": a["id"], "kind": "subscription", "tier": tier},
+              "subscription_data": {"metadata": {"account_id": a["id"], "tier": tier}}})
+    s = _call("POST", "/checkout/sessions", d, idem=f"sub-{a['id']}-{tier}-{int(time.time())}", client=client)
+    q("insert into stripe_sessions(id,account_id,kind,tier,status,created,updated) values(?,?,?,?,?,?,?)", (s["id"], a["id"], "subscription", tier, "created", time.time(), time.time()))
+    return {"id": s["id"], "url": s.get("url"), "tier": tier}
+def portal(a, client=None):
+    _, ret = _urls()
+    return {"url": _call("POST", "/billing_portal/sessions", {"customer": ensure_customer(a, client), "return_url": ret}, client=client)["url"]}
+def verify_signature(raw: bytes, header: str, secret=None, tolerance=300, now=None):
+    secret = secret or E("STRIPE_WEBHOOK_SECRET")
+    if not secret or not header: return False
+    parts = [p.split("=", 1) for p in header.split(",") if "=" in p]
+    ts = next((v for k, v in parts if k == "t"), None); sigs = [v for k, v in parts if k == "v1"]
+    if not ts or not sigs or not ts.isdigit(): return False
+    if abs((now or time.time()) - int(ts)) > tolerance: return False
+    exp = hmac.new(secret.encode(), f"{ts}.".encode() + raw, hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(exp, s) for s in sigs)
+def sign(raw: bytes, secret, ts=None):
+    """Build a Stripe-Signature header (tests / local replays)."""
+    ts = int(ts or time.time()); return f"t={ts},v1=" + hmac.new(secret.encode(), f"{ts}.".encode() + raw, hashlib.sha256).hexdigest()
+def _acct_from(obj):
+    md = obj.get("metadata") or {}
+    if md.get("account_id"): return int(md["account_id"])
+    if obj.get("client_reference_id"): return int(obj["client_reference_id"])
+    r = q("select id from accounts where stripe_customer=?", (obj.get("customer"),), one=True) if obj.get("customer") else None
+    return r["id"] if r else None
+def fulfill_topup(s):
+    """Credit exactly once per Checkout Session; the credited amount is the pre-tax subtotal we created the session for."""
+    row = q("select * from stripe_sessions where id=?", (s["id"],), one=True)
+    if not row or row["kind"] != "topup": return {"ok": False, "error": "unknown session"}
+    if s.get("amount_subtotal") is not None and int(s["amount_subtotal"]) != int(row["amount_cents"]): return {"ok": False, "error": "amount mismatch"}
+    won = q("update stripe_sessions set status='paid', payment_intent=?, invoice_id=?, updated=? where id=? and status!='paid' returning id",
+            (s.get("payment_intent"), s.get("invoice"), time.time(), s["id"]))
+    if not won: return {"ok": True, "duplicate": True}
+    billing.credit(row["account_id"], row["credit_cents"], "topup", f"stripe {s['id']}" + (f" (total incl. tax ${s['amount_total']/100:.2f})" if s.get("amount_total") else ""))
+    return {"ok": True, "credited_cents": row["credit_cents"]}
+def set_tier(acct, tier, sub_id=None, why="stripe"):
+    from .plans import TIERS
+    if tier not in TIERS: return
+    q("update accounts set tier=?, stripe_subscription=?, month_key=? where id=?", (tier, sub_id, billing.month_key(), acct))
+    q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (acct, time.time(), 0, "plan", f"{tier} via {why}" + (f" {sub_id}" if sub_id else "")))
+    if TIERS[tier].get("hard_cap"):     # dropped to Free: bigger apps can't keep running for free
+        bad = [r["name"] for r in q("select name, spec from apps where account_id=? and status in ('running','idle')", (acct,))
+               if load_spec(r["spec"]).get("plan") not in TIERS[tier]["plans"]]
+        if bad: billing.cap_account(acct)
+    else: billing.uncap_account(acct, f"{tier} plan")
+def handle_webhook(raw: bytes, sig_header):
+    if not verify_signature(raw, sig_header): return 400, {"error": "invalid signature"}
+    ev = json.loads(raw); eid = ev.get("id")
+    if not eid: return 400, {"error": "no event id"}
+    if not q("insert into stripe_events(id,type,received) values(?,?,?) on conflict(id) do nothing returning id", (eid, ev.get("type"), time.time())):
+        return 200, {"ok": True, "duplicate_event": True}
+    t = ev.get("type"); o = (ev.get("data") or {}).get("object") or {}
+    if t in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        if o.get("mode") == "payment":
+            return 200, (fulfill_topup(o) if o.get("payment_status") == "paid" else {"ok": True, "pending": o.get("payment_status")})
+        if o.get("mode") == "subscription":
+            acct = _acct_from(o); tier = (o.get("metadata") or {}).get("tier")
+            if acct and tier:
+                if o.get("customer"): q("update accounts set stripe_customer=? where id=? and stripe_customer is null", (o["customer"], acct))
+                q("update stripe_sessions set status='paid', updated=? where id=?", (time.time(), o.get("id")))
+                set_tier(acct, tier, o.get("subscription"), why="stripe checkout"); return 200, {"ok": True, "tier": tier}
+        return 200, {"ok": True, "ignored": "session"}
+    if t == "invoice.paid":
+        acct = _acct_from(o)
+        if acct:
+            q("insert into stripe_sessions(id,account_id,kind,amount_cents,status,invoice_id,invoice_url,created,updated) values(?,?,?,?,?,?,?,?,?) on conflict(id) do nothing",
+              (o.get("id"), acct, "invoice", o.get("amount_paid"), "paid", o.get("id"), o.get("hosted_invoice_url"), time.time(), time.time()))
+            q("update stripe_sessions set invoice_url=? where invoice_id=? and kind='topup'", (o.get("hosted_invoice_url"), o.get("id")))
+        return 200, {"ok": True}
+    if t in ("customer.subscription.deleted", "customer.subscription.updated"):
+        r = q("select id, tier from accounts where stripe_subscription=?", (o.get("id"),), one=True)
+        if not r: return 200, {"ok": True, "ignored": "unknown subscription"}
+        if t.endswith("deleted") or o.get("status") in ("canceled", "unpaid", "incomplete_expired"):
+            set_tier(r["id"], "free", None, why=f"stripe {t} ({o.get('status')})"); return 200, {"ok": True, "tier": "free"}
+        tier = (o.get("metadata") or {}).get("tier")
+        if tier and tier != r["tier"]: set_tier(r["id"], tier, o["id"], why="stripe plan change")
+        return 200, {"ok": True}
+    return 200, {"ok": True, "ignored": t}

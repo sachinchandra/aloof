@@ -4,9 +4,9 @@ from fastapi.responses import PlainTextResponse, HTMLResponse, FileResponse, Str
 from pydantic import BaseModel
 from . import engine
 from .db import q
-from .plans import PLANS, REGIONS, TIERS, RATES, USD_INR
+from .plans import PLANS, REGIONS, REGION_NOTE, TIERS, RATES
 from .drivers import get_drivers
-from . import controller, auth, billing, domains as doms
+from . import controller, auth, billing, stripe_billing, razorpay_legacy as rzp, domains as doms
 from .drivers import remote
 from .drivers.providers import PROVISIONERS
 BRAND = os.environ.get("PAAS_BRAND", "Aloof")
@@ -47,14 +47,13 @@ def signup(s: Signup):
     try: e = auth._check_email(s.email)
     except ValueError as x: raise HTTPException(400, str(x))
     if q("select 1 from accounts where email=?", (e,), one=True): raise HTTPException(409, "exists")
-    a = engine.create_account(e); return {"email":a["email"],"api_key":a["api_key"],"credit_inr":a["credit_inr"]}
+    a = engine.create_account(e); return {"email":a["email"],"api_key":a["api_key"],"credit_usd":billing.usd(a.get("credit_cents"))}
 @app.get("/v1/plans")
 def plans(legacy: bool = False):
-    """Pricing v2: per-second plans (INR excl. 18% GST, USD shown at the configured rate), usage rates and workspace tiers."""
-    out = [{"id": k, **{x: y for x, y in v.items() if x not in ("cost_inr_hr", "providers")}, "price_usd_hr": round(v["price_inr_hr"] / USD_INR, 5)}
-           for k, v in PLANS.items() if legacy or not v["legacy"]]
-    return {"currency": "INR", "gst_rate": 0.18, "usd_inr": USD_INR, "billing": "per second while running; volumes per provisioned GB-month; egress per GB beyond tier allowance",
-            "plans": out, "rates": RATES, "tiers": TIERS, "regions": REGIONS}
+    """Pricing v3 (USD excl. tax/VAT): per-second plans, usage rates, workspace tiers and regions."""
+    out = [{"id": k, **{x: y for x, y in v.items() if x not in ("providers",)}} for k, v in PLANS.items() if legacy or not v["legacy"]]
+    return {"currency": "USD", "tax": "excluded; VAT/GST/sales tax added at checkout where applicable", "billing": "per second while running; volumes per provisioned GB-month; egress per GB (counts toward included usage)",
+            "plans": out, "rates": RATES, "tiers": TIERS, "regions": REGIONS, "region_note": REGION_NOTE}
 @app.get("/v1/providers")
 def providers():
     out = []
@@ -160,63 +159,105 @@ def tls_ask(domain: str):
     if d.endswith("." + BASE_DOMAIN) and q("select 1 from apps where name=? and status!='destroyed'", (d[:-len(BASE_DOMAIN)-1],), one=True): return {"ok": True}
     if q("select 1 from domains where domain=? and verified=1", (d,), one=True): return {"ok": True}
     raise HTTPException(403, "unknown domain")
+def _wallet(a): return {"credit_cents": round(a.get("credit_cents") or 0, 4), "credit_usd": billing.usd(a.get("credit_cents"))}
 @app.get("/v1/usage")
-def usage(a=Depends(acct)): return engine.usage(a["id"]) | {"credit_inr": a["credit_inr"], "month": billing.month_summary(a["id"])}
+def usage(a=Depends(acct)): return engine.usage(a["id"]) | _wallet(a) | {"month": billing.month_summary(a["id"])}
+# ---- Stripe (primary) ----
+class CheckoutReq(BaseModel): credit_usd: float
+@app.post("/v1/billing/checkout")
+def billing_checkout(o: CheckoutReq, a=Depends(acct)):
+    """Stripe Checkout for a prepaid USD top-up ($10–$5,000). Returns {url}; the wallet is credited by the webhook."""
+    try: return stripe_billing.create_topup_session(a, o.credit_usd)
+    except ValueError as e: raise HTTPException(400, str(e))
+    except RuntimeError as e: raise HTTPException(503, str(e))
+class SubReq(BaseModel): tier: str
+@app.post("/v1/billing/subscribe")
+def billing_subscribe(o: SubReq, a=Depends(acct)):
+    """Stripe Checkout (subscription) for the Hobby or Pro tier; the tier switches when Stripe confirms."""
+    if o.tier in TIERS and not TIERS[o.tier]["fee_usd"]: raise HTTPException(400, "Free needs no subscription; cancel in the customer portal")
+    try: return stripe_billing.create_subscription_session(a, o.tier)
+    except ValueError as e: raise HTTPException(400, str(e))
+    except RuntimeError as e: raise HTTPException(503, str(e))
+@app.post("/v1/billing/portal")
+def billing_portal(a=Depends(acct)):
+    """Stripe customer portal: payment methods, invoices (with tax), cancel or change the subscription."""
+    try: return stripe_billing.portal(a)
+    except RuntimeError as e: raise HTTPException(503, str(e))
+@app.post("/v1/billing/stripe/webhook")
+async def stripe_webhook(request: Request):
+    code, body = stripe_billing.handle_webhook(await request.body(), request.headers.get("stripe-signature"))
+    return JSONResponse(body, status_code=code)
+# ---- Razorpay (optional INR top-ups, off unless PAAS_RAZORPAY_ENABLED=1) ----
+def _rzp():
+    if not rzp.enabled(): raise HTTPException(404, "Razorpay is disabled; use Stripe (/v1/billing/checkout)")
 class OrderReq(BaseModel): credit_inr: int
-@app.post("/v1/billing/orders")
+@app.post("/v1/billing/razorpay/orders")
 def billing_order(o: OrderReq, a=Depends(acct)):
-    try: return billing.create_order(a, o.credit_inr)
+    _rzp()
+    try: return rzp.create_order(a, o.credit_inr)
     except ValueError as e: raise HTTPException(400, str(e))
     except RuntimeError as e: raise HTTPException(503, str(e))
 class VerifyReq(BaseModel): razorpay_order_id: str; razorpay_payment_id: str; razorpay_signature: str
-@app.post("/v1/billing/verify")
+@app.post("/v1/billing/razorpay/verify")
 def billing_verify(v: VerifyReq, a=Depends(acct)):
+    _rzp()
     p = q("select * from payments where order_id=? and account_id=?", (v.razorpay_order_id, a["id"]), one=True)
     if not p: raise HTTPException(404, "order not found")
-    if not billing.verify_checkout_signature(v.razorpay_order_id, v.razorpay_payment_id, v.razorpay_signature): raise HTTPException(400, "invalid payment signature")
-    return billing.capture(v.razorpay_order_id, v.razorpay_payment_id, source="checkout")
-@app.post("/v1/billing/webhook")
+    if not rzp.verify_checkout_signature(v.razorpay_order_id, v.razorpay_payment_id, v.razorpay_signature): raise HTTPException(400, "invalid payment signature")
+    return rzp.capture(v.razorpay_order_id, v.razorpay_payment_id, source="checkout")
+@app.post("/v1/billing/razorpay/webhook")
 async def billing_webhook(request: Request):
-    code, body = billing.handle_webhook(await request.body(), request.headers.get("x-razorpay-signature"))
+    if not rzp.enabled(): return JSONResponse({"error": "razorpay disabled"}, status_code=404)
+    code, body = rzp.handle_webhook(await request.body(), request.headers.get("x-razorpay-signature"))
     return JSONResponse(body, status_code=code)
 @app.get("/v1/billing")
 def billing_summary(a=Depends(acct)):
     a = q("select * from accounts where id=?", (a["id"],), one=True)
-    return {"credit_inr": round(a["credit_inr"], 2), "razorpay": billing.configured(), "gst_rate": 0.18, "month": billing.month_summary(a["id"]), "tiers": TIERS,
-            "profile": {k: a.get(k) for k in ("billing_name", "billing_state", "gstin")},
-            "payments": q("select order_id,amount_paise,credit_inr,status,payment_id,created from payments where account_id=? order by created desc limit 50", (a["id"],)),
-            "invoices": q("select id,number,total_inr,taxable_inr,cgst,sgst,igst,created from invoices where account_id=? order by id desc", (a["id"],)),
-            "ledger": q("select ts,amount_inr,kind,ref from ledger where account_id=? order by id desc limit 50", (a["id"],))}
+    return _wallet(a) | {"currency": "USD", "stripe": stripe_billing.configured(), "stripe_tax": stripe_billing.tax_enabled(), "razorpay": rzp.enabled(),
+            "subscription": a.get("stripe_subscription"), "month": billing.month_summary(a["id"]), "tiers": TIERS,
+            "profile": {k: a.get(k) for k in ("billing_name", "country", "tax_id")},
+            "payments": q("select id,kind,credit_cents,amount_cents,tier,status,invoice_url,created from stripe_sessions where account_id=? order by created desc limit 50", (a["id"],)),
+            "invoices": [r for r in q("select id,invoice_id,amount_cents,invoice_url,created from stripe_sessions where account_id=? and invoice_url is not null order by created desc", (a["id"],))],
+            "ledger": q("select ts,amount_cents,kind,ref from ledger where account_id=? and amount_cents is not null order by id desc limit 50", (a["id"],))}
 class TierReq(BaseModel): tier: str
 @app.put("/v1/billing/tier")
 def billing_tier(t: TierReq, a=Depends(acct)):
-    """Switch workspace tier. Upgrades charge the new fee now (pro-rated by remaining days); downgrades apply immediately with no refund."""
+    """Switch tier paid from the prepaid wallet. Upgrades charge the fee difference now (pro-rated); downgrades apply immediately, no refund.
+    With a Stripe subscription use /v1/billing/subscribe or the portal instead."""
+    from .crypto import load_spec
     if t.tier not in TIERS: raise HTTPException(400, f"tier must be one of {list(TIERS)}")
+    if a.get("stripe_subscription"): raise HTTPException(409, "tier is managed by your Stripe subscription; use the customer portal")
     old = TIERS.get(a.get("tier") or "free", TIERS["free"]); new = TIERS[t.tier]
     if new.get("plans"):
-        bad = [r["name"] for r in q("select name, spec from apps where account_id=? and status!='destroyed'", (a["id"],)) if json.loads(r["spec"]).get("plan") not in new["plans"]]
+        bad = [r["name"] for r in q("select name, spec from apps where account_id=? and status!='destroyed'", (a["id"],)) if load_spec(r["spec"]).get("plan") not in new["plans"]]
         if bad: raise HTTPException(400, f"{t.tier} tier only runs {', '.join(new['plans'])}; change or destroy: {', '.join(bad)}")
-    diff = new["fee_inr"] - old["fee_inr"]
+    diff = (new["fee_usd"] - old["fee_usd"]) * 100
     if diff > 0:
         lt = time.localtime(); days = 30 - min(lt.tm_mday - 1, 29); charge = round(diff * days / 30, 2)
-        if a["credit_inr"] < charge: raise HTTPException(402, f"insufficient credit: upgrade costs ₹{charge} now; top up first")
-        q("update accounts set credit_inr=credit_inr-? where id=?", (charge, a["id"]))
-        q("insert into ledger(account_id,ts,amount_inr,kind,ref) values(?,?,?,?,?)", (a["id"], time.time(), -charge, "plan", f"upgrade to {t.tier} (pro-rated {days}d)"))
+        if (a.get("credit_cents") or 0) < charge: raise HTTPException(402, f"insufficient credit: upgrade costs ${charge/100:.2f} now; top up first")
+        q("update accounts set credit_cents=credit_cents-? where id=?", (charge, a["id"]))
+        q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (a["id"], time.time(), -charge, "plan", f"upgrade to {t.tier} (pro-rated {days}d)"))
     q("update accounts set tier=?, month_key=? where id=?", (t.tier, billing.month_key(), a["id"]))
     if not new.get("hard_cap"): billing.uncap_account(a["id"], f"upgraded to {t.tier}")
     return {"ok": True, "tier": t.tier}
-class Profile(BaseModel): billing_name: str|None=None; billing_state: str|None=None; gstin: str|None=None
+class Profile(BaseModel): billing_name: str|None=None; country: str|None=None; tax_id: str|None=None; gstin: str|None=None; billing_state: str|None=None
 @app.put("/v1/billing/profile")
 def billing_profile(p: Profile, a=Depends(acct)):
+    """Name/country/tax ID for invoices. With Stripe Tax on, Checkout also collects the address and VAT/GST ID.
+    gstin/billing_state are only used by the optional Razorpay INR invoices."""
+    c = (p.country or "").upper() or None
+    if c and not _re.match(r"^[A-Z]{2}$", c): raise HTTPException(400, "country must be an ISO 3166-1 alpha-2 code, e.g. US, DE, IN")
     if p.gstin and not _re.match(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$", p.gstin.upper()): raise HTTPException(400, "invalid GSTIN format")
-    st = billing.STATES.get((p.gstin or "")[:2].upper()) or p.billing_state
-    q("update accounts set billing_name=?, billing_state=?, gstin=? where id=?", (p.billing_name, st, (p.gstin or "").upper() or None, a["id"]))
+    st = rzp.STATES.get((p.gstin or "")[:2].upper()) or p.billing_state
+    q("update accounts set billing_name=?, country=?, tax_id=?, gstin=?, billing_state=? where id=?",
+      (p.billing_name, c, (p.tax_id or "").strip() or None, (p.gstin or "").upper() or None, st, a["id"]))
     return {"ok": True, "billing_state": st}
 @app.get("/v1/billing/invoices/{inv_id}", response_class=HTMLResponse)
 def invoice(inv_id: int, a=Depends(acct)):
+    """Legacy Razorpay GST invoices (INR). Stripe invoices are linked from GET /v1/billing (invoice_url)."""
     inv = q("select * from invoices where id=? and account_id=?", (inv_id, a["id"]), one=True)
     if not inv: raise HTTPException(404, "invoice not found")
-    return billing.invoice_html(inv)
+    return rzp.invoice_html(inv)
 # ---- auth: password, magic link, sessions ----
 class Creds(BaseModel): email: str; password: str
 class MagicReq(BaseModel): email: str
@@ -250,7 +291,7 @@ def auth_logout(request: Request):
 @app.get("/v1/auth/me")
 def auth_me(a=Depends(acct)):
     return {"id": a["id"], "email": a["email"], "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")),
-            "api_key_prefix": a.get("api_key_prefix"), "credit_inr": round(a["credit_inr"], 2)}
+            "api_key_prefix": a.get("api_key_prefix"), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}
 @app.post("/v1/auth/mcp-key")

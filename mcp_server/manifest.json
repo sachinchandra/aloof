@@ -2,7 +2,7 @@
   "schema_version": "2025-06",
   "name": "aloof",
   "display_name": "Aloof",
-  "description": "Deploy backend apps and GPU workloads to low-cost Indian cloud capacity, billed in INR. Apps at https://<app>.aloof.si. Docker image or git+Dockerfile; volumes, autoscaling, scale-to-zero, custom domains.",
+  "description": "Cheap global GPUs and backends: deploy apps and GPU workloads, billed per second in USD (compute runs in India). Apps at https://<app>.aloof.si. Docker image or git+Dockerfile; volumes, autoscaling, scale-to-zero, custom domains.",
   "transports": [
     {
       "type": "streamable-http",

@@ -202,9 +202,9 @@ def usage(account_id):
     tot = {}; now = time.time()
     for r in rows:
         plan = load_spec(r["spec"])["plan"]; hrs = ((r["stopped"] or now) - r["started"])/3600
-        t = tot.setdefault(r["name"], {"plan":plan,"hours":0,"cost_inr":0}); t["hours"] += hrs; t["cost_inr"] += hrs*PLANS[plan]["price_inr_hr"]
-    for t in tot.values(): t["hours"]=round(t["hours"],4); t["cost_inr"]=round(t["cost_inr"],2)
-    return {"apps": tot, "total_inr": round(sum(t["cost_inr"] for t in tot.values()),2)}
+        t = tot.setdefault(r["name"], {"plan":plan,"hours":0,"cost_usd":0}); t["hours"] += hrs; t["cost_usd"] += hrs*PLANS[plan]["price_usd_hr"]
+    for t in tot.values(): t["hours"]=round(t["hours"],4); t["cost_usd"]=round(t["cost_usd"],2)
+    return {"apps": tot, "total_usd": round(sum(t["cost_usd"] for t in tot.values()),2)}
 def new_api_key(): return "pk_" + secrets.token_urlsafe(24)
 def create_account(email, password_hash=None, verified=False):
     """API keys are stored only as SHA-256 hashes; the plaintext key is returned once."""
