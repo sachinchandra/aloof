@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""aloof CLI. Config: ~/.aloof.json (falls back to ~/.paas.json) {api, key} or env ALOOF_API_URL / ALOOF_API_KEY."""
+import argparse, json, os, sys, time, urllib.request, urllib.error
+CFG = os.path.expanduser("~/.aloof.json")
+if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")
+cfg = json.load(open(CFG)) if os.path.exists(CFG) else {}
+API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", cfg.get("api", "http://localhost:8000"))); KEY = os.environ.get("ALOOF_API_KEY", os.environ.get("PAAS_API_KEY", cfg.get("key")))
+def call(m, p, body=None, raw=False):
+    req = urllib.request.Request(API+p, method=m, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type":"application/json", **({"Authorization":f"Bearer {KEY}"} if KEY else {})})
+    try: d = urllib.request.urlopen(req, timeout=120).read().decode()
+    except urllib.error.HTTPError as e: sys.exit(f"error {e.code}: {e.read().decode()}")
+    return d if raw else json.loads(d)
+p = argparse.ArgumentParser(prog="aloof"); s = p.add_subparsers(dest="cmd", required=True)
+a = s.add_parser("signup"); a.add_argument("email")
+s.add_parser("plans"); s.add_parser("apps"); s.add_parser("usage")
+a = s.add_parser("deploy"); a.add_argument("name"); g = a.add_mutually_exclusive_group(required=True)
+g.add_argument("--image"); g.add_argument("--git"); a.add_argument("--ref"); a.add_argument("--plan", default="cpu-small")
+a.add_argument("--port", type=int, default=8080); a.add_argument("-e","--env", action="append", default=[]); a.add_argument("-n","--instances", type=int, default=1)
+a.add_argument("--no-wait", action="store_true")
+for c in ("status","logs","destroy"): s.add_parser(c).add_argument("name")
+a = s.add_parser("scale"); a.add_argument("name"); a.add_argument("instances", type=int)
+a = s.add_parser("env"); a.add_argument("name"); a.add_argument("pairs", nargs="+", help="K=V or K= to unset")
+a = s.add_parser("volumes"); vs = a.add_subparsers(dest="vcmd", required=True)
+x = vs.add_parser("create"); x.add_argument("name"); x.add_argument("--size", type=int, default=1)
+vs.add_parser("list"); x = vs.add_parser("delete"); x.add_argument("name")
+x = vs.add_parser("attach"); x.add_argument("app"); x.add_argument("name"); x.add_argument("--path", default="/data")
+x = vs.add_parser("detach"); x.add_argument("app"); x.add_argument("name")
+a = s.add_parser("autoscale"); a.add_argument("name"); a.add_argument("--min", type=int, default=1); a.add_argument("--max", type=int, default=3)
+a.add_argument("--concurrency", type=int, default=10); a.add_argument("--cpu", type=float); a.add_argument("--idle", type=int, default=60); a.add_argument("--off", action="store_true")
+a = s.add_parser("domains"); a.add_argument("name"); a.add_argument("action", choices=["add","list","verify","remove"]); a.add_argument("domain", nargs="?")
+a = s.add_parser("health"); a.add_argument("name"); a.add_argument("--path", default="/"); a.add_argument("--failures", type=int, default=3)
+o = p.parse_args()
+pj = lambda x: print(json.dumps(x, indent=2))
+if o.cmd == "signup":
+    r = call("POST","/v1/signup",{"email":o.email}); json.dump({"api":API,"key":r["api_key"]}, open(CFG,"w")); print("saved key to", CFG); pj(r)
+elif o.cmd == "plans":
+    for pl in call("GET","/v1/plans")["plans"]: print(f"{pl['id']:<11} {pl['kind']} {pl['vcpu']:>5} vCPU {pl['memory_mb']:>7}MB {pl['gpu'] or '':<18} ₹{pl['price_inr_hr']}/hr  via {pl['provider']}")
+elif o.cmd == "apps":
+    for x in call("GET","/v1/apps"): print(f"{x['name']:<20} {x['status']:<9} {len(x['instances'])} inst  {x['url']}")
+elif o.cmd == "deploy":
+    src = {"image": o.image} if o.image else {"git": o.git, **({"ref": o.ref} if o.ref else {})}
+    r = call("POST","/v1/apps",{"name":o.name,"source":src,"plan":o.plan,"port":o.port,"instances":o.instances,"env":dict(e.split("=",1) for e in o.env)})
+    print("deploying", r["name"], "on", r["provider"])
+    while not o.no_wait:
+        time.sleep(2); r = call("GET", f"/v1/apps/{o.name}"); print(" ", r["status"])
+        if r["status"] in ("running","failed"): break
+    print(r.get("error") or f"live: {r['url']}  (or {r['path_url']})")
+elif o.cmd == "status": pj(call("GET", f"/v1/apps/{o.name}"))
+elif o.cmd == "logs": print(call("GET", f"/v1/apps/{o.name}/logs", raw=True))
+elif o.cmd == "scale": pj(call("POST", f"/v1/apps/{o.name}/scale", {"instances": o.instances}))
+elif o.cmd == "env": pj(call("POST", f"/v1/apps/{o.name}/env", {"env": {k:(v or None) for k,v in (x.split("=",1) for x in o.pairs)}}))
+elif o.cmd == "destroy": pj(call("DELETE", f"/v1/apps/{o.name}"))
+elif o.cmd == "usage": pj(call("GET","/v1/usage"))
+elif o.cmd == "volumes":
+    if o.vcmd == "create": pj(call("POST","/v1/volumes",{"name":o.name,"size_gb":o.size}))
+    elif o.vcmd == "list":
+        for v in call("GET","/v1/volumes"): print(f"{v['name']:<20} {v['size_gb']}GB  {(v['app'] or '-')+':'+(v['mount_path'] or ''):<30}")
+    elif o.vcmd == "delete": pj(call("DELETE", f"/v1/volumes/{o.name}"))
+    elif o.vcmd == "attach": r = call("POST", f"/v1/apps/{o.app}/volumes", {"volume":o.name,"path":o.path}); print("attached; redeploying", r["name"])
+    elif o.vcmd == "detach": r = call("DELETE", f"/v1/apps/{o.app}/volumes/{o.name}"); print("detached; redeploying", r["name"])
+elif o.cmd == "autoscale":
+    r = call("DELETE", f"/v1/apps/{o.name}/autoscale") if o.off else call("PUT", f"/v1/apps/{o.name}/autoscale", {"min":o.min,"max":o.max,"target_concurrency":o.concurrency,"cpu_percent":o.cpu,"idle_seconds":o.idle})
+    pj(r["spec"].get("autoscale"))
+elif o.cmd == "domains":
+    def show(d):
+        st = "verified, HTTPS on" if d["verified"] else f"pending (ownership {'ok' if d['owned'] else 'missing'}, routing {'ok' if d['routed'] else 'missing'})"
+        print(f"{d['domain']}: {st}")
+        if not d["verified"]:
+            r = d["dns_records"]; print("  add these DNS records at your DNS provider:")
+            print(f"    TXT    {r['ownership']['name']}  \"{r['ownership']['value']}\"")
+            print(f"    CNAME  {d['domain']}  {r['routing'][0]['value']}" + "".join(f"\n    (or A  {d['domain']}  {x['value']}  for apex domains)" for x in r["routing"][1:]))
+            for m in d.get("detail") or []: print("  -", m)
+            print(f"  then: aloof domains {o.name} verify {d['domain']}")
+    if o.action == "add": show(call("POST", f"/v1/apps/{o.name}/domains", {"domain": o.domain}))
+    elif o.action == "list": [show(d) for d in call("GET", f"/v1/apps/{o.name}/domains")]
+    elif o.action == "verify": show(call("POST", f"/v1/apps/{o.name}/domains/{o.domain}/verify"))
+    else: pj(call("DELETE", f"/v1/apps/{o.name}/domains/{o.domain}"))
+elif o.cmd == "health": pj(call("PUT", f"/v1/apps/{o.name}/health", {"path": o.path, "failures": o.failures})["spec"]["health"])

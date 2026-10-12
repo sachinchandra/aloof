@@ -1,0 +1,112 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name=viewport content="width=device-width,initial-scale=1"><title>{{BRAND}} dashboard</title>
+<style>*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;color:#1d1d1f;background:#f7f7f6}
+header{display:flex;gap:18px;align-items:center;padding:12px 24px;background:#fff;border-bottom:1px solid #e8e8e8}header b{font-size:18px}
+header a{color:#444;text-decoration:none;padding:6px 10px;border-radius:6px;cursor:pointer}header a.on{background:#111;color:#fff}.sp{flex:1}
+main{max-width:1180px;margin:20px auto;padding:0 20px}.card{background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:16px;margin-bottom:16px}
+h3{margin:0 0 10px}table{width:100%;border-collapse:collapse}td,th{padding:7px;border-bottom:1px solid #eee;text-align:left;font-size:14px;vertical-align:top}
+input,select{padding:7px;border:1px solid #ccc;border-radius:6px;margin:2px;font-size:14px}button{padding:7px 12px;border:1px solid #bbb;background:#fff;border-radius:6px;cursor:pointer;margin:2px}
+button.p{background:#111;color:#fff;border-color:#111}pre{background:#111;color:#cfc;padding:10px;border-radius:8px;max-height:320px;overflow:auto;font-size:12px;white-space:pre-wrap}
+.s-running{color:#080}.s-failed,.s-suspended{color:#c00}.s-idle{color:#888}.muted{color:#777;font-size:13px}.ok{color:#080}.bad{color:#c00}code{background:#f0f0ef;padding:1px 4px;border-radius:4px}
+.row{display:flex;gap:16px;flex-wrap:wrap}.row>.card{flex:1;min-width:300px}#toast{position:fixed;bottom:20px;right:20px;background:#111;color:#fff;padding:10px 16px;border-radius:8px;display:none}</style>
+<script src="https://checkout.razorpay.com/v1/checkout.js" async></script></head><body>
+<header><b>{{BRAND}}</b><a data-t=apps class=on>Apps</a><a data-t=volumes>Volumes</a><a data-t=billing>Billing &amp; usage</a><a data-t=account>Account</a><span class=sp></span><span id=who class=muted></span><a onclick="logout()">Log out</a></header>
+<main>
+<section id=t-apps>
+ <div class=card><h3>Deploy</h3><input id=d_name placeholder="app-name" size=14> <input id=d_image placeholder="image, e.g. nginx:alpine" size=24> or <input id=d_git placeholder="git URL with Dockerfile" size=26>
+  <select id=d_plan></select> port <input id=d_port value=8080 size=5> <input id=d_env placeholder="K=V,K2=V2" size=16> <button class=p onclick="deploy()">Deploy</button></div>
+ <div class=card><h3>Apps</h3><table id=apps></table></div>
+ <div class=card id=detail style="display:none"></div>
+</section>
+<section id=t-volumes style="display:none"><div class=card><h3>Volumes</h3><input id=v_name placeholder="volume-name"> <input id=v_size value=1 size=3> GB <button class=p onclick="mkvol()">Create</button>
+ <table id=vols></table></div></section>
+<section id=t-billing style="display:none"><div class=row>
+ <div class=card><h3>Balance</h3><div style="font-size:32px;font-weight:700" id=bal></div><p class=muted>Prepaid INR credit. Usage is billed per second. Top-ups include 18% GST.</p>
+  ₹ <input id=amt value=1000 size=7> <button class=p onclick="topup()">Top up</button> <span id=rzpnote class=muted></span></div>
+ <div class=card><h3>Plan</h3><div id=tierinfo class=muted></div><select id=tiersel></select> <button onclick="setTier()">Switch</button>
+ <table id=month style="margin-top:8px"></table></div>
+ <div class=card><h3>GST profile</h3><input id=b_name placeholder="Legal / billing name" size=28><br><input id=b_gstin placeholder="GSTIN (optional)" size=20> <input id=b_state placeholder="State (if no GSTIN)" size=16><br><button onclick="saveProfile()">Save</button></div></div>
+ <div class=card><h3>Usage</h3><table id=usage></table></div>
+ <div class=row><div class=card><h3>Invoices</h3><table id=invoices></table></div><div class=card><h3>Payments</h3><table id=payments></table></div></div>
+ <div class=card><h3>Ledger</h3><table id=ledger></table></div></section>
+<section id=t-account style="display:none"><div class=card><h3>Account</h3><div id=acct></div>
+ <p><button onclick="rotate()">Rotate API key</button> <span class=muted>Use it for the CLI and MCP. It's shown only once.</span></p><pre id=newkey style="display:none"></pre>
+ <p>Set password <input id=newpw type=password placeholder="min 10 chars"> <button onclick="setpw()">Save</button></p>
+ <p class=muted>CLI: <code>~/.aloof.json</code> = <code>{"api": "<span class=origin></span>", "key": "pk_..."}</code> · MCP: <a href="/docs/mcp">connect an assistant</a></p></div></section>
+</main><div id=toast></div>
+<script>
+const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+document.querySelectorAll('.origin').forEach(e=>e.textContent=location.origin);
+function toast(m){$('toast').textContent=m;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',3500)}
+async function api(m,p,b){const r=await fetch(p,{method:m,credentials:'same-origin',headers:{'Content-Type':'application/json','X-Aloof-CSRF':'1'},body:b?JSON.stringify(b):undefined});
+ if(r.status==401){location='/login';return new Promise(()=>{})} const t=await r.text(); let j; try{j=JSON.parse(t)}catch{j=t}
+ if(!r.ok){toast(typeof j=='object'?(typeof j.detail=='string'?j.detail:JSON.stringify(j.detail)):t);throw j} return j}
+let tab='apps', open=null;
+document.querySelectorAll('header a[data-t]').forEach(a=>a.onclick=()=>{tab=a.dataset.t;document.querySelectorAll('header a[data-t]').forEach(x=>x.classList.toggle('on',x==a));
+ document.querySelectorAll('main>section').forEach(s=>s.style.display=s.id=='t-'+tab?'':'none');refresh()});
+async function refresh(){if(tab=='apps')await apps();if(tab=='volumes')await vols();if(tab=='billing')await bill();if(tab=='account')await account()}
+async function apps(){const a=await api('GET','/v1/apps');
+ $('apps').innerHTML='<tr><th>App</th><th>Status</th><th>Plan</th><th>Where</th><th>Inst.</th><th>URL</th><th></th></tr>'+a.map(x=>`<tr><td><a href="#" onclick="show('${x.name}');return false"><b>${esc(x.name)}</b></a></td>
+ <td class="s-${x.status}">${esc(x.status)} <span class=muted>${esc(x.error||'')}</span></td><td>${x.plan.id}</td><td>${esc(x.provider)}</td><td>${x.instances.length}${x.spec.autoscale?` <span class=muted>(${x.spec.autoscale.min}–${x.spec.autoscale.max})</span>`:''}</td>
+ <td><a href="${x.url}" target=_blank>${esc(x.url)}</a>${(x.domains||[]).map(d=>`<br><a href="https://${esc(d)}/" target=_blank>${esc(d)}</a>`).join('')}</td><td><button onclick="show('${x.name}')">Manage</button></td></tr>`).join('');
+ if(open)show(open,true)}
+async function show(n,quiet){open=n;const a=await api('GET','/v1/apps/'+n), d=await api('GET','/v1/apps/'+n+'/domains'), v=await api('GET','/v1/volumes'), s=a.spec.autoscale||{}, h=a.spec.health||{};
+ const D=$('detail');D.style.display='';if(quiet&&D.dataset.app==n&&D.contains(document.activeElement))return;D.dataset.app=n;
+ D.innerHTML=`<h3>${esc(n)} <span class="s-${a.status}">${a.status}</span> <button onclick="destroy('${n}')" style="float:right">Destroy</button></h3>
+ <div class=row><div class=card><b>Scale</b><br>instances <input id=sc value=${a.instances.length} size=3> <button onclick="scale()">Apply</button>
+  <hr><b>Autoscale</b> ${a.spec.autoscale?'<span class=ok>on</span>':'<span class=muted>off</span>'}<br>min <input id=as_min value=${s.min??0} size=2> max <input id=as_max value=${s.max??3} size=2>
+  conc. <input id=as_c value=${s.target_concurrency??10} size=3> cpu% <input id=as_cpu value="${s.cpu_percent??''}" size=3> idle s <input id=as_idle value=${s.idle_seconds??60} size=4><br>
+  <button onclick="autoscale(true)">Enable / update</button> <button onclick="autoscale(false)">Disable</button>
+  <hr><b>Health check</b><br>path <input id=h_path value="${esc(h.path||'')}" placeholder="/healthz" size=12> failures <input id=h_f value=${h.failures||3} size=2> <button onclick="health()">Save</button></div>
+ <div class=card><b>Environment</b> <span class=muted>(values are encrypted at rest and never shown)</span><br>${a.env_keys.map(k=>`<code>${esc(k)}</code> <a href="#" onclick="unset('${esc(k)}');return false">×</a>`).join(' ')||'<span class=muted>none</span>'}
+  <br><input id=e_k placeholder=KEY size=12> <input id=e_v placeholder=value size=18> <button onclick="setenv()">Set</button>
+  <hr><b>Volumes</b><br>${(a.spec.volumes||[]).map(x=>`<code>${esc(x.name)}</code> → ${esc(x.path)} <button onclick="detach('${x.name}')">Detach</button>`).join('<br>')||'<span class=muted>none</span>'}
+  <br><select id=va>${v.filter(x=>!x.app).map(x=>`<option>${esc(x.name)}</option>`).join('')}</select> at <input id=vp value=/data size=10> <button onclick="attach()">Attach</button></div></div>
+ <div class=card><b>Custom domains</b><br><input id=dn placeholder="api.example.in" size=24> <button onclick="adddom()">Add</button>
+  <table>${d.map(x=>`<tr><td><b>${esc(x.domain)}</b><br>${x.verified?'<span class=ok>verified ✓ HTTPS on</span>':`<span class=bad>pending</span> ownership ${x.owned?'✓':'✗'} · routing ${x.routed?'✓':'✗'}`}</td>
+  <td class=muted>TXT <code>${esc(x.dns_records.ownership.name)}</code> = <code>${esc(x.dns_records.ownership.value)}</code><br>CNAME <code>${esc(x.domain)}</code> → <code>${esc(x.dns_records.routing[0].value)}</code></td>
+  <td><button onclick="verifydom('${esc(x.domain)}')">Verify</button><button onclick="rmdom('${esc(x.domain)}')">Remove</button></td></tr>`).join('')}</table></div>
+ <div class=card><b>Logs</b> <button onclick="logs()">Refresh</button><pre id=lg>…</pre></div>`;logs()}
+const A=()=>open;
+async function logs(){$('lg').textContent=await api('GET','/v1/apps/'+A()+'/logs?tail=100')}
+async function scale(){await api('POST','/v1/apps/'+A()+'/scale',{instances:+$('sc').value});toast('scaling');apps()}
+async function autoscale(on){if(on)await api('PUT','/v1/apps/'+A()+'/autoscale',{min:+$('as_min').value,max:+$('as_max').value,target_concurrency:+$('as_c').value,cpu_percent:$('as_cpu').value?+$('as_cpu').value:null,idle_seconds:+$('as_idle').value});
+ else await api('DELETE','/v1/apps/'+A()+'/autoscale');toast('autoscale '+(on?'updated':'disabled'));apps()}
+async function health(){await api('PUT','/v1/apps/'+A()+'/health',{path:$('h_path').value||null,failures:+$('h_f').value});toast('health check saved');apps()}
+async function setenv(){await api('POST','/v1/apps/'+A()+'/env',{env:{[$('e_k').value]:$('e_v').value}});toast('env set; rolling restart');show(A())}
+async function unset(k){await api('POST','/v1/apps/'+A()+'/env',{env:{[k]:null}});show(A())}
+async function attach(){await api('POST','/v1/apps/'+A()+'/volumes',{volume:$('va').value,path:$('vp').value});toast('attached; redeploying');show(A())}
+async function detach(v){await api('DELETE','/v1/apps/'+A()+'/volumes/'+v);show(A())}
+async function adddom(){await api('POST','/v1/apps/'+A()+'/domains',{domain:$('dn').value});show(A())}
+async function verifydom(d){const r=await api('POST','/v1/apps/'+A()+'/domains/'+d+'/verify');toast(r.verified?'verified':'not yet: '+(r.detail||[]).join('; '));show(A())}
+async function rmdom(d){await api('DELETE','/v1/apps/'+A()+'/domains/'+d);show(A())}
+async function destroy(n){if(!confirm('Destroy '+n+'? This cannot be undone.'))return;await api('DELETE','/v1/apps/'+n);open=null;$('detail').style.display='none';apps()}
+async function deploy(){const src=$('d_image').value?{image:$('d_image').value}:{git:$('d_git').value};const env=Object.fromEntries($('d_env').value?$('d_env').value.split(',').map(x=>x.split('=')):[]);
+ await api('POST','/v1/apps',{name:$('d_name').value,source:src,plan:$('d_plan').value,port:+$('d_port').value,env});toast('deploying '+$('d_name').value);apps()}
+async function vols(){const v=await api('GET','/v1/volumes');$('vols').innerHTML='<tr><th>Name</th><th>Size</th><th>Attached to</th><th>Node</th><th></th></tr>'+v.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.size_gb} GB</td><td>${x.app?esc(x.app)+':'+esc(x.mount_path):'<span class=muted>—</span>'}</td><td>${esc(x.node_id||'local')}</td><td>${x.app?'':`<button onclick="rmvol('${x.name}')">Delete</button>`}</td></tr>`).join('')}
+async function mkvol(){await api('POST','/v1/volumes',{name:$('v_name').value,size_gb:+$('v_size').value});vols()}
+async function rmvol(n){if(confirm('Delete volume '+n+' and its data?')){await api('DELETE','/v1/volumes/'+n);vols()}}
+const inr=x=>(+x<0?'−':'')+'₹'+Math.abs(+x).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}), dt=t=>new Date(t*1000).toLocaleString('en-IN');
+async function bill(){const b=await api('GET','/v1/billing'), u=await api('GET','/v1/usage');$('bal').textContent=inr(b.credit_inr);$('bal').className=b.credit_inr>0?'':'bad';
+ $('rzpnote').textContent=b.razorpay?'':'Razorpay keys not configured on this server';renderMonth(b);
+ $('b_name').value=b.profile.billing_name||'';$('b_gstin').value=b.profile.gstin||'';$('b_state').value=b.profile.billing_state||'';
+ $('usage').innerHTML='<tr><th>App</th><th>Plan</th><th>Instance-hours</th><th>Cost</th></tr>'+Object.entries(u.apps).map(([k,x])=>`<tr><td>${esc(k)}</td><td>${x.plan}</td><td>${x.hours}</td><td>${inr(x.cost_inr)}</td></tr>`).join('')+`<tr><td colspan=3><b>Total</b></td><td><b>${inr(u.total_inr)}</b></td></tr>`;
+ $('invoices').innerHTML='<tr><th>Number</th><th>Date</th><th>Total</th><th></th></tr>'+b.invoices.map(i=>`<tr><td>${esc(i.number)}</td><td>${dt(i.created)}</td><td>${inr(i.total_inr)}</td><td><a href="/v1/billing/invoices/${i.id}" target=_blank>View / print</a></td></tr>`).join('');
+ $('payments').innerHTML='<tr><th>Order</th><th>Amount</th><th>Credit</th><th>Status</th></tr>'+b.payments.map(p=>`<tr><td class=muted>${esc(p.order_id)}</td><td>${inr(p.amount_paise/100)}</td><td>${inr(p.credit_inr)}</td><td>${esc(p.status)}</td></tr>`).join('');
+ $('ledger').innerHTML='<tr><th>When</th><th>Kind</th><th>Amount</th><th>Ref</th></tr>'+b.ledger.map(l=>`<tr><td>${dt(l.ts)}</td><td>${l.kind}</td><td class=${l.amount_inr<0?'bad':'ok'}>${inr(l.amount_inr)}</td><td class=muted>${esc(l.ref)}</td></tr>`).join('')}
+async function setTier(){const t=$('tiersel').value;if(!confirm('Switch to '+t+'? Upgrades are charged pro-rata now.'))return;await api('PUT','/v1/billing/tier',{tier:t});toast('plan: '+t);bill()}
+function renderMonth(b){const m=b.month;$('tiersel').innerHTML=Object.entries(b.tiers).map(([k,t])=>`<option value=${k} ${k==m.tier?'selected':''}>${k}: ₹${t.fee_inr}/mo, incl. ₹${t.included_usage_inr} usage</option>`).join('');
+ $('tierinfo').textContent=`${m.tier} · ${m.month} · ${inr(m.included_usage_inr)} usage and ${m.egress_included_gb} GB egress included`;
+ $('month').innerHTML='<tr><th>This month</th><th>Qty</th><th>Cost</th></tr>'+[['compute','instance-hours'],['volume','GB-months'],['egress','GB']].map(([k,u])=>`<tr><td>${k}</td><td>${(m.usage[k]||{qty:0}).qty} ${u}</td><td>${inr((m.usage[k]||{cost_inr:0}).cost_inr)}</td></tr>`).join('')+`<tr><td><b>Billable beyond included</b></td><td></td><td><b>${inr(m.billable_inr)}</b></td></tr>`}
+async function topup(){const o=await api('POST','/v1/billing/orders',{credit_inr:+$('amt').value});
+ if(!window.Razorpay){toast('Razorpay checkout failed to load');return}
+ new Razorpay({key:o.key_id,amount:o.amount,currency:'INR',order_id:o.order_id,name:o.name,description:o.description,prefill:o.prefill,theme:{color:'#111111'},
+  handler:async r=>{const v=await api('POST','/v1/billing/verify',r);toast(v.ok?'Credited '+inr(v.credited_inr||0):'Payment pending');bill()}}).open()}
+async function saveProfile(){await api('PUT','/v1/billing/profile',{billing_name:$('b_name').value||null,gstin:$('b_gstin').value||null,billing_state:$('b_state').value||null});toast('saved');bill()}
+async function account(){const m=await api('GET','/v1/auth/me');$('acct').innerHTML=`<p><b>${esc(m.email)}</b> ${m.email_verified?'<span class=ok>verified</span>':''}<br>API key: <code>${esc(m.api_key_prefix)}…</code> · password ${m.has_password?'set':'not set'} · credit ${inr(m.credit_inr)}</p>`}
+async function rotate(){if(!confirm('Rotate API key? The old key stops working immediately.'))return;const r=await api('POST','/v1/auth/api-key');$('newkey').style.display='';$('newkey').textContent=r.api_key}
+async function setpw(){await api('POST','/v1/auth/password',{password:$('newpw').value});toast('password updated')}
+async function logout(){await api('POST','/v1/auth/logout');location='/login'}
+(async()=>{const me=await api('GET','/v1/auth/me');$('who').textContent=me.email;
+ if(sessionStorage.newKey){tab='account';document.querySelector('[data-t=account]').click();$('newkey').style.display='';$('newkey').textContent='Your API key (shown once): '+sessionStorage.newKey;delete sessionStorage.newKey}
+ const p=await api('GET','/v1/plans');$('d_plan').innerHTML=p.plans.map(x=>`<option value=${x.id}>${x.id} (${x.price_inr_month?'₹'+x.price_inr_month+'/mo':'₹'+x.price_inr_hr+'/hr'})</option>`).join('');refresh();setInterval(()=>{if(tab=='apps')apps()},6000)})();
+</script></body></html>

@@ -1,0 +1,48 @@
+{
+  "schema_version": "2025-06",
+  "name": "aloof",
+  "display_name": "Aloof",
+  "description": "Deploy backend apps and GPU workloads to low-cost Indian cloud capacity, billed in INR. Apps at https://<app>.aloof.si. Docker image or git+Dockerfile; volumes, autoscaling, scale-to-zero, custom domains.",
+  "transports": [
+    {
+      "type": "streamable-http",
+      "url": "http://localhost:8001/mcp"
+    },
+    {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "mcp_server/server.py"
+      ],
+      "env": {
+        "ALOOF_API_URL": "https://api.aloof.si",
+        "ALOOF_API_KEY": "<your pk_ key>"
+      }
+    }
+  ],
+  "auth": {
+    "type": "oauth2.1",
+    "pkce": "S256",
+    "dynamic_client_registration": true,
+    "also_accepts": "Bearer API key (pk_...)"
+  },
+  "tools": [
+    "list_plans",
+    "signup",
+    "deploy_app",
+    "get_status",
+    "list_apps",
+    "get_logs",
+    "scale_app",
+    "set_env",
+    "destroy_app",
+    "get_usage",
+    "create_volume",
+    "list_volumes",
+    "attach_volume",
+    "detach_volume",
+    "set_autoscale",
+    "add_domain"
+  ],
+  "docs": "http://localhost:8000/llms.txt"
+}

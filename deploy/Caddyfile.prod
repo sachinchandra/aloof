@@ -1,0 +1,30 @@
+# Production edge for aloof.si: real certificates from Let's Encrypt (ZeroSSL fallback), issued on demand
+# per hostname (HTTP-01/TLS-ALPN-01), gated by the control plane's /v1/tls/ask so only known hosts get certs.
+# DNS needed (not done yet): A  aloof.si, www.aloof.si, api.aloof.si, mcp.aloof.si -> EDGE_IP ;  A  *.aloof.si -> EDGE_IP
+{
+	email {$ACME_EMAIL}
+	on_demand_tls {
+		ask http://127.0.0.1:8000/v1/tls/ask
+	}
+}
+# landing page, pricing, docs, login, dashboard
+{$PAAS_BASE_DOMAIN:aloof.si} {
+	reverse_proxy 127.0.0.1:8000
+}
+www.{$PAAS_BASE_DOMAIN:aloof.si} {
+	redir https://{$PAAS_BASE_DOMAIN:aloof.si}{uri} permanent
+}
+{$PAAS_API_HOST:api.aloof.si} {
+	reverse_proxy 127.0.0.1:8000
+}
+{$PAAS_MCP_HOST:mcp.aloof.si} {
+	reverse_proxy 127.0.0.1:8001
+}
+https:// {
+	tls {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-Proto https
+	}
+}

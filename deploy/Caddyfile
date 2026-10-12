@@ -1,0 +1,45 @@
+# Edge TLS. Dev: Caddy internal CA (locally trusted). Prod: set PAAS_TLS_MODE to your ACME email
+# by replacing "tls internal { on_demand }" with "tls you@example.com { on_demand }" (Let's Encrypt/ZeroSSL),
+# or use a DNS-01 wildcard for *.{$PAAS_BASE_DOMAIN}.
+{
+	on_demand_tls {
+		ask http://127.0.0.1:8000/v1/tls/ask
+	}
+	admin localhost:2019
+}
+# landing page, pricing, docs, login, dashboard
+{$PAAS_BASE_DOMAIN} {
+	tls internal {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8000
+}
+www.{$PAAS_BASE_DOMAIN} {
+	tls internal {
+		on_demand
+	}
+	redir https://{$PAAS_BASE_DOMAIN}{uri} permanent
+}
+api.{$PAAS_BASE_DOMAIN} {
+	tls internal {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8000
+}
+mcp.{$PAAS_BASE_DOMAIN} {
+	tls internal {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8001
+}
+https:// {
+	tls internal {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-Proto https
+	}
+}
+http:// {
+	redir https://{host}{uri} permanent
+}

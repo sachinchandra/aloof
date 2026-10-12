@@ -1,0 +1,81 @@
+"""DB layer: Postgres (default when PAAS_DB_URL or data/database_url is set) or SQLite fallback.
+SQL is written with '?' placeholders and portable `on conflict` upserts; versioned migrations below."""
+import os, time, threading, sqlite3
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+_url_file = os.path.join(ROOT, "data", "database_url")
+DB_URL = os.environ.get("PAAS_DB_URL") or (open(_url_file).read().strip() if os.path.exists(_url_file) else "")
+if os.environ.get("PAAS_DB"): DB_URL = ""          # explicit sqlite path (tests/preview)
+PG = DB_URL.startswith("postgres")
+MIGRATIONS = [
+ (1, """
+create table if not exists accounts(id AUTOPK, email text unique, api_key_hash text unique, api_key_prefix text, password_hash text,
+  email_verified int default 0, created REAL, credit_inr REAL default 500, billing_name text, billing_state text, gstin text);
+create table if not exists apps(name text primary key, account_id int, spec text, status text, provider text, created REAL, updated REAL, error text);
+create table if not exists instances(id text primary key, app text, provider text, host text, port int, status text, started REAL, stopped REAL, node_id text);
+create table if not exists events(id AUTOPK, app text, ts REAL, msg text);
+create index if not exists events_app on events(app, id);
+create table if not exists volumes(name text primary key, account_id int, size_gb int, app text, mount_path text, created REAL, node_id text);
+create table if not exists domains(domain text primary key, app text, account_id int, verified int default 0, created REAL, txt_token text, routed int default 0, owned int default 0);
+create table if not exists nodes(id text primary key, provider text, provider_ref text, status text, public_ip text, wg_ip text, wg_pubkey text,
+  agent_url text, agent_token_enc text, vcpu REAL, mem_mb int, gpus int, gpu_model text, plan text, created REAL, last_seen REAL, error text, dedicated_app text);
+create table if not exists sessions(token_hash text primary key, account_id int, expires REAL, created REAL);
+create table if not exists magic_links(token_hash text primary key, email text, expires REAL, used int default 0);
+create table if not exists payments(order_id text primary key, account_id int, amount_paise int, credit_inr REAL, status text, payment_id text unique, created REAL, updated REAL);
+create table if not exists webhook_events(id text primary key, received REAL);
+create table if not exists invoices(id AUTOPK, number text unique, account_id int, order_id text unique, payment_id text, taxable_inr REAL, cgst REAL, sgst REAL, igst REAL,
+  total_inr REAL, place_of_supply text, gstin text, billing_name text, created REAL);
+create table if not exists ledger(id AUTOPK, account_id int, ts REAL, amount_inr REAL, kind text, ref text);
+create table if not exists meter(instance_id text primary key, last_billed REAL);
+create table if not exists kv(kind text, k text, v text, exp REAL, primary key(kind, k));
+"""),
+    (2, """
+create table if not exists api_keys(id TEXT primary key, account_id bigint not null, key_hash TEXT unique not null, prefix TEXT, label TEXT, created REAL, last_used REAL);
+create index if not exists api_keys_acct on api_keys(account_id);
+"""),
+    (3, """
+alter table accounts add column tier TEXT default 'free';
+alter table accounts add column month_key TEXT;
+create table if not exists usage_month(account_id bigint, month TEXT, kind TEXT, qty REAL default 0, cost_inr REAL default 0, primary key(account_id, month, kind));
+""")
+]
+def _dialect(sql):
+    if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
+    return sql.replace("AUTOPK", "integer primary key autoincrement")
+_lock = threading.RLock()
+if PG:
+    from psycopg_pool import ConnectionPool
+    from psycopg.rows import dict_row
+    _pool = ConnectionPool(DB_URL, min_size=2, max_size=20, kwargs={"autocommit": True, "row_factory": dict_row}, open=True)
+    import atexit; atexit.register(_pool.close)
+    def q(sql, args=(), one=False):
+        with _pool.connection() as c:
+            cur = c.execute(sql.replace("?", "%s"), args)
+            rows = cur.fetchall() if cur.description else []
+        return (rows[0] if rows else None) if one else rows
+    def executescript(sql):
+        with _pool.connection() as c:
+            for stmt in [s for s in sql.split(";") if s.strip()]: c.execute(stmt)
+else:
+    DB = os.environ.get("PAAS_DB", os.path.join(ROOT, "data", "paas.sqlite"))
+    os.makedirs(os.path.dirname(DB), exist_ok=True)
+    _c = sqlite3.connect(DB, check_same_thread=False); _c.row_factory = sqlite3.Row
+    def q(sql, args=(), one=False):
+        with _lock:
+            cur = _c.execute(sql, args); rows = [dict(r) for r in cur.fetchall()] if cur.description else []; _c.commit()
+        return (rows[0] if rows else None) if one else rows
+    def executescript(sql):
+        with _lock: _c.executescript(sql); _c.commit()
+def migrate():
+    q("create table if not exists schema_migrations(version int primary key, applied double precision)" if PG else "create table if not exists schema_migrations(version int primary key, applied REAL)")
+    done = {r["version"] for r in q("select version from schema_migrations")}
+    for v, sql in MIGRATIONS:
+        if v in done: continue
+        executescript(_dialect(sql)); q("insert into schema_migrations values(?,?)", (v, time.time()))
+migrate()
+def event(app, msg): q("insert into events(app,ts,msg) values(?,?,?)", (app, time.time(), msg))
+def kv_put(kind, k, v, ttl=None):
+    q("insert into kv(kind,k,v,exp) values(?,?,?,?) on conflict(kind,k) do update set v=excluded.v, exp=excluded.exp", (kind, k, v, time.time()+ttl if ttl else None))
+def kv_get(kind, k):
+    r = q("select v, exp from kv where kind=? and k=?", (kind, k), one=True)
+    return None if not r or (r["exp"] and r["exp"] < time.time()) else r["v"]
+def kv_del(kind, k): q("delete from kv where kind=? and k=?", (kind, k))

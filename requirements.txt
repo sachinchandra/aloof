@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+httpx
+pydantic
+python-multipart
+docker
+mcp<2
+psycopg[binary]
+psycopg_pool
+cryptography
+dnspython
+boto3
+# dev / tests
+pytest
+respx
+dnslib
+playwright
