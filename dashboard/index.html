@@ -1,4 +1,4 @@
-<!doctype html><html lang=en><head><meta charset="utf-8"><meta name=viewport content="width=device-width,initial-scale=1"><title>{{BRAND}} dashboard</title>
+<!doctype html><html lang=en><head><meta charset="utf-8"><meta name=viewport content="width=device-width,initial-scale=1"><title>Dashboard · {{BRAND}}</title><meta name=description content="Manage your {{BRAND}} apps, volumes, Postgres, API keys and billing."><meta name=robots content="noindex, nofollow">
 <link rel=icon href="/favicon.ico" sizes="any"><link rel=icon href="/icon.svg" type="image/svg+xml"><link rel=apple-touch-icon href="/apple-touch-icon.png"><link rel=manifest href="/site.webmanifest"><link rel=stylesheet href="/static/aloof.css?v=8">
 <script>(function(){var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t})();function setTheme(n){var d=document.documentElement;d.dataset.theme=n;localStorage.setItem('theme',n);document.querySelectorAll('.seg [data-th]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.th==n)})}function toggleTheme(){setTheme((document.documentElement.dataset.theme||'dark')=='dark'?'light':'dark')}</script></head><body>
 <div class=app><aside class=side aria-label="Dashboard navigation"><a class=logo href="/"><i></i>{{BRAND}}</a>
@@ -82,7 +82,7 @@ async function confirmCost(title,rows,month){ME=await api('GET','/v1/auth/me');c
  return ask('',{title,ok:'Create',block:low&&bal<=0,html:`<dl class=summary>${rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')}<dt>Estimate</dt><dd>${hr(month/730)} · ${usd(month)}/mo</dd><dt>Your credit</dt><dd class=${low?'bad':''}>${usd(bal)}${bal>0?` · about ${Math.floor(bal/(month/730)/24)} days at this rate`:''}</dd></dl>`+
  (low?`<div class="note warn">${bal<=0?'You have no credit left. Add credit in Billing before creating this.':'Your credit covers less than a day at this rate. Consider adding credit in Billing.'}</div>`:'<p class=muted style="font-size:13px">Billed per second from your prepaid credit. You can stop or destroy it at any time.</p>')})}
 async function api(m,p,b){const r=await fetch(p,{method:m,credentials:'same-origin',headers:{'Content-Type':'application/json','X-Aloof-CSRF':'1'},body:b?JSON.stringify(b):undefined});
- if(r.status==401){location='/login';return new Promise(()=>{})} const t=await r.text(); let j; try{j=JSON.parse(t)}catch{j=t}
+ if(r.status==401){location.replace('/login?next='+encodeURIComponent(location.pathname));return new Promise(()=>{})} const t=await r.text(); let j; try{j=JSON.parse(t)}catch{j=t}
  if(!r.ok){toast(typeof j=='object'?(typeof j.detail=='string'?j.detail:JSON.stringify(j.detail)):t,1);throw j} return j}
 let tab='apps', open=null;
 const TITLE={apps:'Apps',volumes:'Volumes',pg:'Postgres',audit:'Audit log',billing:'Billing & usage',account:'Account',keys:'API keys'};

@@ -21,7 +21,7 @@ URL_DOMAIN = os.environ.get("PAAS_URL_DOMAIN") or BASE_DOMAIN
 API_HOST = os.environ.get("PAAS_API_HOST", f"api.{BASE_DOMAIN}"); MCP_HOST = os.environ.get("PAAS_MCP_HOST", f"mcp.{BASE_DOMAIN}")
 PUBLIC_API_URL = os.environ.get("PAAS_PUBLIC_API_URL", f"https://{API_HOST}"); PUBLIC_MCP_URL = os.environ.get("PAAS_PUBLIC_MCP_URL", f"https://{MCP_HOST}/mcp")
 ROOT = os.path.dirname(os.path.dirname(__file__))
-app = FastAPI(title=f"{BRAND} control plane", version="0.3", docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
+app = FastAPI(title=f"{BRAND} control plane", version="0.3", docs_url=None, redoc_url=None, openapi_url="/api/openapi.json")
 # Security headers on control-plane responses (www/api/dashboard). Caddy sets the same non-CSP headers at the edge; setdefault keeps
 # any per-route override. CSP only on HTML: our pages use inline <script>/<style> and same-origin fetch/WebSocket, nothing third-party.
 SEC_HEADERS = {"Strict-Transport-Security": "max-age=31536000; includeSubDomains", "X-Content-Type-Options": "nosniff",
@@ -518,10 +518,25 @@ def static_css(): return FileResponse(os.path.join(ROOT, "paas", "static", "aloo
 @app.get("/privacy", response_class=HTMLResponse)
 @app.get("/terms", response_class=HTMLResponse)
 def legal_page(request: Request): return www.at(request.url.path, "default", site.legal, request.url.path.strip("/"), BRAND)
+SWAGGER_V = "5.17.14"; SWAGGER_SRI = {"js": "sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep", "css": "sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn"}
+@app.get("/static/swagger/{f}", include_in_schema=False)
+def swagger_asset(f: str):
+    if f not in ("swagger-ui-bundle.js", "swagger-ui.css"): raise HTTPException(404, "Not Found")
+    return FileResponse(os.path.join(ROOT, "paas", "static", "swagger", f), media_type="text/css" if f.endswith(".css") else "text/javascript", headers={"Cache-Control": "public, max-age=604800, immutable"})
+@app.get("/api/docs", response_class=HTMLResponse, include_in_schema=False)
+def api_docs():
+    return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>API reference · {BRAND}</title>
+<meta name=description content="Interactive reference for the {BRAND} REST API: apps, deploys, volumes, Postgres, domains, billing and keys. Authenticate with Authorization: Bearer.">
+<link rel=icon href="/favicon.ico" sizes="any"><link rel=icon href="/icon.svg" type="image/svg+xml"><link rel=apple-touch-icon href="/apple-touch-icon.png">
+<link rel=stylesheet href="/static/swagger/swagger-ui.css?v={SWAGGER_V}" integrity="{SWAGGER_SRI['css']}" crossorigin=anonymous><link rel=stylesheet href="/static/aloof.css?v=8">
+<style>body{{margin:0;background:#fff}}.topbar{{display:none}}.abar{{display:flex;align-items:center;gap:14px;padding:14px 24px;background:#0b0c10;color:#eef0f6}}.abar .logo{{color:#eef0f6!important}}.abar a{{color:#a9b0c3}}.abar .sp{{flex:1}}</style></head>
+<body><div class=abar><a class=logo href="/"><i></i>{BRAND}</a><span style="color:#8b93a7">API reference</span><span class=sp></span><a href="/docs/api">Guide</a><a href="/dashboard">Dashboard</a></div><div id=swagger-ui></div>
+<script src="/static/swagger/swagger-ui-bundle.js?v={SWAGGER_V}" integrity="{SWAGGER_SRI['js']}" crossorigin=anonymous></script>
+<script>SwaggerUIBundle({{url:"/api/openapi.json",dom_id:"#swagger-ui",deepLinking:true,persistAuthorization:false}})</script></body></html>"""
 @app.get("/dashboard", response_class=HTMLResponse)
 def dash(request: Request):
     if not auth.session_account(request.cookies.get(auth.COOKIE)): return RedirectResponse("/login?next=/dashboard", 303)
-    return open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND)
+    return HTMLResponse(open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND), headers={"X-Robots-Tag": "noindex, nofollow"})
 
 
 # ---------------- Fly parity: releases/rollback, managed Postgres, snapshots, exec/console, log drains/history, audit ----------------
@@ -782,6 +797,18 @@ from fastapi.exception_handlers import http_exception_handler as _default_http
 @app.exception_handler(_StarHTTP)
 async def _http_exc(request: Request, exc):
     p = request.url.path
-    if exc.status_code == 404 and "text/html" in request.headers.get("accept", "") and not p.startswith(("/v1/", "/api/", "/mcp", "/.well-known", "/_app/")):
+    if exc.status_code == 404 and ("text/html" in request.headers.get("accept", "") or request.headers.get("sec-fetch-mode") == "navigate") and not p.startswith(("/v1/", "/api/", "/mcp", "/.well-known", "/_app/")):
         return HTMLResponse(site.not_found(BRAND), 404)
     return await _default_http(request, exc)
+
+# HEAD wherever GET works: run the GET handler, drop the body (Starlette routes only register GET)
+class _HeadAsGet:
+    def __init__(self, a): self.a = a
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "HEAD": return await self.a(scope, receive, send)
+        scope = dict(scope, method="GET")
+        async def snd(m):
+            if m["type"] == "http.response.body": m = {"type": "http.response.body", "body": b"", "more_body": m.get("more_body", False)}
+            await send(m)
+        await self.a(scope, receive, snd)
+app.add_middleware(_HeadAsGet)

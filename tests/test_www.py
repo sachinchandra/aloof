@@ -75,3 +75,13 @@ def test_admin_access_control_and_metrics():
     assert o.post(f"/v1/admin/accounts/{aid}/test", json={"is_test": True}, headers={"X-Aloof-CSRF": "1"}).status_code == 200
 def test_login_next_redirect_js_has_no_backslash_regex():
     h = c.get("/login?next=/admin").text; assert "get('next')" in h and "fromCharCode(92)" in h and "/^\\/" not in h
+def test_qa_head_404_docs():
+    from fastapi.testclient import TestClient
+    from paas import api
+    c = TestClient(api.app)
+    r = c.head("/"); assert r.status_code == 200 and r.content == b""
+    assert c.head("/pricing").status_code == 200
+    r = c.get("/nonexistent", headers={"sec-fetch-mode": "navigate"}); assert r.status_code == 404 and "text/html" in r.headers["content-type"]
+    assert c.get("/v1/nonexistent").headers["content-type"].startswith("application/json")
+    d = c.get("/api/docs").text; assert "integrity=" in d and "5.17.14" in d and "meta name=description" in d
+    assert c.get("/static/swagger/swagger-ui.css").status_code == 200
