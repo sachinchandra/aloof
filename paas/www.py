@@ -2,7 +2,7 @@
 import os, time, json, html, ssl, socket, shutil, threading, logging, csv, io, datetime, urllib.request
 from email.utils import formatdate
 from fastapi import APIRouter, HTTPException, Request, Header, Depends
-from fastapi.responses import HTMLResponse, Response, PlainTextResponse, FileResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, Response, PlainTextResponse, FileResponse
 from . import site
 from .db import q
 from .plans import PLANS, TIERS
@@ -61,10 +61,9 @@ def guide(slug: str):
     return render(f"/guides/{slug}", f"Deploy {n} · Aloof guides", f"Deploy a {n} app to Aloof: aloof launch, aloof.toml, Postgres, deploy.",
                   f"<article class='wrap prose' style='max-width:760px;padding:64px 24px 60px'><a class=muted href='/guides'>← Guides</a><h1>Deploy {n}</h1>{guide_html(slug)}</article>", og="guides")
 # ---------------- changelog ----------------
-@R.get("/changelog", response_class=HTMLResponse)
-def changelog():
-    rows = "".join(f"<div class='cl reveal'><time datetime='{d}'>{_d(d)}</time><div><h3>{t}</h3><ul>{''.join(f'<li>{i}</li>' for i in items)}</ul></div></div>" for d, t, items in CHANGELOG)
-    return render("/changelog", "Changelog · Aloof", "What has shipped on Aloof, by date.", shell("Changelog", "What's shipped", "Taken from the repository history. Only things that are live are listed.", rows, narrow=True), og="changelog")
+@R.get("/changelog", include_in_schema=False)
+def changelog():   # removed from the UI; keep old inbound links working. CHANGELOG data still feeds sitemap lastmod.
+    return RedirectResponse("/", 301)
 # ---------------- example architectures ----------------
 PARTNER_FORM = """<form class="card form-card" id=dp onsubmit="event.preventDefault();var f=this;fetch('/v1/waitlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:f.email.value,kind:'design_partner',company:f.company.value,note:f.note.value})}).then(r=>r.json().then(j=>{f.innerHTML='<p class='+(r.ok?'ok':'bad')+'><b>'+(j.message||j.detail)+'</b></p>'}))">
 <h3>Become a design partner</h3><p>Run a real workload on Aloof and tell us what's missing. In return: direct access to the people building it, priority on the features you need, and credits while we iterate.</p>
@@ -148,7 +147,7 @@ def status_page():
 @R.get("/robots.txt", response_class=PlainTextResponse)
 def robots(): return f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /dashboard\nDisallow: /v1/\nSitemap: {SITE}/sitemap.xml\n"
 def urls():
-    u = ["/", "/pricing", "/docs", "/blog", "/guides", "/changelog", "/customers", "/regions", "/about", "/security", "/status", "/privacy", "/terms", "/login"]
+    u = ["/", "/pricing", "/docs", "/blog", "/guides", "/customers", "/regions", "/about", "/security", "/status", "/privacy", "/terms", "/login"]
     u += [f"/blog/{p['slug']}" for p in POSTS] + [f"/guides/{k}" for k in GUIDES]
     u += [f"/docs/{k}" for k in ("quickstart", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "mcp")]
     return u

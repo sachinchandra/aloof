@@ -5,7 +5,7 @@ from paas import api, www, site
 from paas.db import q
 from paas.plans import PLANS
 c = TestClient(api.app, base_url="http://api.aloof.test")
-PAGES = ["/blog", "/guides", "/changelog", "/customers", "/regions", "/about", "/security", "/status", "/", "/pricing", "/docs"]
+PAGES = ["/blog", "/guides", "/customers", "/regions", "/about", "/security", "/status", "/", "/pricing", "/docs"]
 def test_pages_render_with_seo():
     for p in PAGES + [f"/blog/{x['slug']}" for x in www.POSTS] + [f"/guides/{k}" for k in www.GUIDES]:
         r = c.get(p); assert r.status_code == 200, p
@@ -85,3 +85,9 @@ def test_qa_head_404_docs():
     assert c.get("/v1/nonexistent").headers["content-type"].startswith("application/json")
     d = c.get("/api/docs").text; assert "integrity=" in d and "5.17.14" in d and "meta name=description" in d
     assert c.get("/static/swagger/swagger-ui.css").status_code == 200
+
+def test_changelog_removed():
+    from fastapi.testclient import TestClient
+    from paas import api
+    c = TestClient(api.app); r = c.get("/changelog", follow_redirects=False); assert r.status_code == 301 and r.headers["location"] == "/"
+    assert "changelog" not in c.get("/").text.lower() and "/changelog" not in c.get("/sitemap.xml").text
