@@ -360,8 +360,8 @@ def account_by_key(key):
     if not key: return None
     h = sha256(key); a = q("select * from accounts where api_key_hash=?", (h,), one=True)
     if a: return a
-    k = q("select account_id from api_keys where key_hash=?", (h,), one=True)
-    if k: return q("select * from accounts where id=?", (k["account_id"],), one=True)
+    k = q("select id,account_id from api_keys where key_hash=?", (h,), one=True)
+    if k: q("update api_keys set last_used=? where id=?", (time.time(), k["id"])); return q("select * from accounts where id=?", (k["account_id"],), one=True)
     if key.startswith("dt_"):   # deploy token: scoped to one app (or the whole account = org), optional expiry
         t = q("select * from deploy_tokens where token_hash=?", (h,), one=True)
         if not t or (t["expires"] and t["expires"] < time.time()): return None

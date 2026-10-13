@@ -209,3 +209,6 @@ input,select{transition:border-color .15s,box-shadow .15s}input:focus,select:foc
 /* ---- logo v2: Apex mark (alt concepts in /static/icons/alt) ---- */
 .logo{text-transform:lowercase;font-weight:650;letter-spacing:-.035em;gap:10px}
 .logo i{width:22px;height:22px;border-radius:0;box-shadow:none;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3.5 28.5 27.5h-6.2L16 15.2 9.7 27.5H3.5Z'/%3E%3Ccircle cx='16' cy='24.2' r='3'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3.5 28.5 27.5h-6.2L16 15.2 9.7 27.5H3.5Z'/%3E%3Ccircle cx='16' cy='24.2' r='3'/%3E%3C/svg%3E") center/contain no-repeat}
+.uses{gap:12px;margin-top:12px}.use{border:1px solid var(--line);border-radius:var(--r-md);padding:14px;background:var(--panel2);font-size:13px;color:var(--fg2)}.use b{display:block;color:var(--fg);font-size:14px;margin-bottom:4px}
+pre .copy{position:absolute;top:8px;right:8px}pre{position:relative}
+.modal label{display:block}

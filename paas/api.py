@@ -390,6 +390,25 @@ def auth_me(a=Depends(acct)):
             "api_key_prefix": a.get("api_key_prefix"), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}
+class KeyReq(BaseModel): label: str
+@app.get("/v1/auth/keys")
+def auth_keys(a=Depends(acct)):
+    """Full-access API keys: the primary key (rotate-only) plus named extra keys. Scoped deploy tokens live at /v1/tokens."""
+    ac = q("select id,api_key_prefix,created from accounts where id=?", (a["id"],), one=True)
+    return [{"id": "primary", "label": "Default key", "prefix": ac["api_key_prefix"], "created": ac["created"], "last_used": None, "kind": "primary", "scope": "full access"}] + \
+           [{"id": r["id"], "label": r["label"], "prefix": r["prefix"], "created": r["created"], "last_used": r["last_used"], "kind": "named", "scope": "full access"}
+            for r in q("select * from api_keys where account_id=? order by created desc", (a["id"],))]
+@app.post("/v1/auth/keys")
+def auth_key_create(b: KeyReq, request: Request, a=Depends(acct)):
+    label = (b.label or "").strip()[:60]
+    if not label: raise HTTPException(400, "name the key")
+    if label == "mcp-oauth": raise HTTPException(400, "that name is reserved")
+    k = engine.create_named_key(a["id"], label, replace=False); _audit(a["id"], None, "key.create", label, _ip(request))
+    return {"api_key": k, "prefix": k[:10], "label": label, "detail": "shown once"}
+@app.delete("/v1/auth/keys/{kid}")
+def auth_key_revoke(kid: str, request: Request, a=Depends(acct)):
+    if kid == "primary": raise HTTPException(400, "the default key can be rotated, not revoked")
+    q("delete from api_keys where id=? and account_id=?", (kid, a["id"])); _audit(a["id"], None, "key.revoke", kid, _ip(request)); return {"ok": True}
 @app.post("/v1/auth/mcp-key")
 def auth_mcp_key(a=Depends(acct)):
     """Key bound to the MCP OAuth connector; doesn't revoke the CLI key. Re-login rotates only this one."""
