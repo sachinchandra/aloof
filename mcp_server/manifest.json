@@ -55,7 +55,12 @@
     "exec_command",
     "add_log_drain",
     "list_offsite_backups",
-    "restore_offsite_backup"
+    "restore_offsite_backup",
+    "registry_login",
+    "add_git_credential",
+    "deploy_with_config",
+    "app_status",
+    "create_deploy_token"
   ],
   "docs": "http://localhost:8000/llms.txt"
 }

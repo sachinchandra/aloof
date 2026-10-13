@@ -312,14 +312,15 @@ def test_agent_gpu_container_args(monkeypatch):
     calls = []
     def fake_sh(*a, check=True):
         calls.append(list(a))
-        if a[1] == "run":
+        if a[1] == "create":
             ef = a[a.index("--env-file") + 1]; calls.append(("envfile", open(ef).read(), oct(os.stat(ef).st_mode & 0o777)))
-        return "abcdef123456789" if a[1] == "run" else ""
+        return "abcdef123456789" if a[1] == "create" else ""
     monkeypatch.setattr(ag, "sh", fake_sh); monkeypatch.setattr(ag, "host_port", lambda cid, port: 31000)
     monkeypatch.setattr(ag.subprocess, "run", lambda *a, **k: None)
     r = ag.run_container({"wg_ip": "10.88.0.7"}, {"name": "aloof-llm-0", "image": "10.88.0.1:5000/llm:1", "port": 8000, "gpu": 1, "cpus": 8, "mem_mb": 65536,
                                               "env": {"HF_TOKEN": "hf_secret"}, "volumes": [{"name": "models", "path": "/models"}]})
-    run = next(c for c in calls if isinstance(c, list) and c[1] == "run")
+    run = next(c for c in calls if isinstance(c, list) and c[1] == "create")
+    assert ["docker", "start", "abcdef123456"] in calls
     assert ["--gpus", "all"] == run[run.index("--gpus"):run.index("--gpus") + 2] and "10.88.0.7::8000" in run
     assert "aloof-vol-models:/models" in run and "hf_secret" not in " ".join(run)
     ef = next(c for c in calls if c[0] == "envfile"); assert "HF_TOKEN=hf_secret" in ef[1] and ef[2] == "0o600"

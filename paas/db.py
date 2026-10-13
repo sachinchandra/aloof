@@ -64,6 +64,19 @@ create index if not exists archives_owner on archives(kind, owner);
 create table if not exists audit(id AUTOPK, ts REAL, account_id bigint, app TEXT, action TEXT, detail TEXT, ip TEXT);
 create index if not exists audit_acct on audit(account_id, id);
 create table if not exists drains(id TEXT primary key, app TEXT, account_id bigint, kind TEXT, url TEXT, created REAL, last_ok REAL, last_error TEXT, sent bigint default 0);
+"""),
+    # v6: private registries/git, source uploads, deploy tokens, GitHub App, cron
+    (6, """
+create table if not exists registry_creds(id TEXT primary key, account_id bigint, app TEXT, server TEXT, kind TEXT, username TEXT, secret_enc TEXT, created REAL);
+create index if not exists registry_creds_acct on registry_creds(account_id);
+create table if not exists git_creds(id TEXT primary key, account_id bigint, app TEXT, host TEXT, kind TEXT, username TEXT, secret_enc TEXT, public_key TEXT, created REAL);
+create index if not exists git_creds_acct on git_creds(account_id);
+create table if not exists deploy_tokens(id TEXT primary key, account_id bigint, app TEXT, label TEXT, token_hash TEXT unique, prefix TEXT, expires REAL, created REAL, last_used REAL);
+create table if not exists github_installs(installation_id bigint primary key, account_id bigint, login TEXT, created REAL);
+create table if not exists github_links(app TEXT primary key, account_id bigint, installation_id bigint, repo TEXT, branch TEXT, previews int default 1, created REAL);
+create table if not exists uploads(id TEXT primary key, account_id bigint, app TEXT, path TEXT, size_bytes bigint, created REAL);
+create table if not exists cron_runs(id AUTOPK, app TEXT, job TEXT, ts REAL, exit_code int, output TEXT);
+create index if not exists cron_runs_app on cron_runs(app, id);
 """)
 ]
 def _dialect(sql):

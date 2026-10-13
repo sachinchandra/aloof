@@ -37,6 +37,17 @@
 - Exec/console (audited): POST /v1/apps/{name}/exec {"command":"ls /"}; WebSocket /v1/apps/{name}/console (Bearer key; CLI `aloof ssh <app>`); GET /v1/audit
 - Logs: GET /v1/apps/{name}/logs/history?since=&contains= (retention 1/7/30 days on free/hobby/pro);
   POST/GET/DELETE /v1/apps/{name}/drains {"url":"https://...|syslog+tls://host:port|syslog+tcp://|syslog+udp://"}
+- Private registries: POST /v1/registry {"server":"ghcr.io|docker.io|<acct>.dkr.ecr.<region>.amazonaws.com|*-docker.pkg.dev|any","username","password","app"?}; GET/DELETE /v1/registry
+- Private git: POST /v1/git/credentials {"host":"github.com","kind":"ssh"} -> generated deploy key (add public_key to the repo) | {"kind":"token","token"}; then deploy git@host:o/r.git or https URL
+- Local dir deploy: POST /v1/apps/{name}/source (body: tar.gz build context) -> upload_id; POST /v1/apps/{name}/deploy {"config":<parsed aloof.toml>,"upload_id"|"image"|"git"}
+  No Dockerfile -> Nixpacks, else generated Dockerfile. POST /v1/launch/detect {"files":{name:content}} -> framework, Dockerfile, aloof.toml; POST /v1/config/validate {"config"}
+- aloof.toml: [build] [env] [processes] web/worker, [http_service] + checks, [deploy] release_command, [[mounts]], [autoscale], [[vm]], [scale], [[cron]]
+- Deploy tokens: POST /v1/tokens {"app"?, "expires_in":"90d"} -> dt_... (scoped to one app, or the whole account); GET/DELETE /v1/tokens
+- Secrets: GET/POST /v1/apps/{name}/secrets {"secrets":{},"unset":[],"stage":bool}; POST /v1/apps/{name}/secrets/deploy
+- GET /v1/apps/{name}/status (process groups, release, cron); POST /v1/apps/{name}/scale/count {"counts":{"web":2,"worker":1}}; POST /v1/apps/{name}/scale/vm {"plan","group"?}
+- GET /v1/apps/{name}/certs, GET /v1/apps/{name}/ips; WebSocket /v1/apps/{name}/proxy?port=N (aloof proxy); apps reach each other as <app>.internal
+- Previews: POST/GET /v1/apps/{name}/previews {"pr","ref"}, DELETE /v1/apps/{name}/previews/{pr}; cron: GET /v1/apps/{name}/cron, POST /v1/apps/{name}/cron/{job}/run
+- GitHub App: GET /v1/github/install -> url; GET /v1/github/repos; POST /v1/apps/{name}/github {"repo":"o/r","branch","previews"} (push-to-deploy, PR previews, check runs)
 - GET /v1/usage. OpenAPI: {{API}}/api/docs (spec: {{API}}/api/openapi.json); human docs: {{API}}/docs
 
 ## MCP
@@ -44,7 +55,8 @@
 - stdio: `python mcp_server/server.py` (env ALOOF_API_URL, ALOOF_API_KEY)
 - Tools: list_plans, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage,
   create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain, list_releases, rollback_app,
-  create_postgres, list_postgres, attach_postgres, backup_postgres, snapshot_volume, restore_volume, exec_command, add_log_drain
+  create_postgres, list_postgres, attach_postgres, backup_postgres, snapshot_volume, restore_volume, exec_command, add_log_drain, list_offsite_backups, restore_offsite_backup,
+  registry_login, add_git_credential, deploy_with_config, app_status, create_deploy_token
 
 ## App contract
 Listen on $PORT (default 8080) over HTTP. Put persistent data on a mounted volume, or use managed Postgres via $DATABASE_URL. (Once GPUs launch, GPU plans expose one NVIDIA GPU via CUDA.)

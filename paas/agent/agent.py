@@ -13,7 +13,7 @@ API (Authorization: Bearer <agent_token>):
 import json, os, sys, subprocess, socket, hmac, time, urllib.request, urllib.parse, re, threading, platform
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 CONF = os.environ.get("ALOOF_AGENT_CONF", "/etc/aloof/agent.json")
-VERSION = "0.3"
+VERSION = "0.4"
 def sh(*args, check=True, timeout=600):
     p = subprocess.run(list(args), capture_output=True, text=True, timeout=timeout)
     if check and p.returncode: raise RuntimeError((p.stderr or p.stdout).strip()[-800:])
@@ -38,8 +38,8 @@ def run_container(cfg, b):
         ra = b["registry_auth"]; subprocess.run(["docker", "login", ra["server"], "-u", ra["user"], "--password-stdin"], input=ra["password"], text=True, capture_output=True)
     sh("docker", "pull", image, check=False)
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-    args = ["docker", "run", "-d", "--name", name, "--restart", "unless-stopped", "--label", "aloof.managed=1",
-            "-p", f"{bind_ip(cfg)}::{port}", "-e", f"PORT={port}"]
+    args = ["docker", "create", "--name", name, "--restart", "unless-stopped", "--label", "aloof.managed=1",
+            "-p", f"{bind_ip(cfg)}::{port}", "-e", f"PORT={port}"] + _net_args(b)
     for k, v in (b.get("labels") or {}).items(): args += ["--label", f"{k}={v}"]
     if b.get("cpus"): args += ["--cpus", str(b["cpus"])]
     if b.get("mem_mb"): args += ["--memory", f"{int(b['mem_mb'])}m"]
@@ -57,7 +57,48 @@ def run_container(cfg, b):
     try: cid = sh(*args)[:12]
     finally:
         if env_file: os.unlink(env_file)
+    _connect_rest(cid, b); sh("docker", "start", cid)
     return {"id": cid, "host_port": host_port(cid, port), "host": bind_ip(cfg)}
+def _nets(b):
+    out = []
+    for n in b.get("networks") or []:
+        n = n if isinstance(n, dict) else {"name": n}
+        assert NAME_OK.match(n["name"]) and all(NAME_OK.match(a) for a in n.get("aliases") or []), "bad network"
+        if subprocess.run(["docker", "network", "inspect", n["name"]], capture_output=True).returncode:
+            subprocess.run(["docker", "network", "create", "--label", "aloof.net=1", n["name"]], capture_output=True)
+        out.append(n)
+    return out
+def _net_args(b):
+    ns = _nets(b); b["_nets"] = ns
+    if not ns: return []
+    return ["--network", ns[0]["name"]] + sum((["--network-alias", a] for a in ns[0].get("aliases") or []), [])
+def _connect_rest(cid, b):
+    for n in (b.get("_nets") or [])[1:]:
+        sh("docker", "network", "connect", *sum((["--alias", a] for a in n.get("aliases") or []), []), n["name"], cid, check=False)
+def run_once(cfg, b):
+    """One-off machine (release_command / cron): runs to completion, returns exit code + output, removed afterwards."""
+    image = b["image"]; name = f"aloof-run-{int(time.time()*1000)%10**10}"
+    sh("docker", "pull", image, check=False)
+    args = ["docker", "create", "--name", name, "--label", "aloof.oneoff=1", "-e", f"PORT={int(b.get('port', 8080))}"] + _net_args(b)
+    if b.get("cpus"): args += ["--cpus", str(b["cpus"])]
+    if b.get("mem_mb"): args += ["--memory", f"{int(b['mem_mb'])}m"]
+    for v in b.get("volumes") or []:
+        assert NAME_OK.match(v["name"]) and v["path"].startswith("/"), "bad volume"
+        args += ["-v", f"aloof-vol-{v['name']}:{v['path']}"]
+    import tempfile; fd, env_file = tempfile.mkstemp(prefix="aloof-env-"); os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as f:
+        for k, v in (b.get("env") or {}).items(): f.write(f"{k}={str(v).replace(chr(10), ' ')}\n")
+    cmd = b["command"]; cmd = ["sh", "-c", cmd] if isinstance(cmd, str) else list(cmd)
+    try:
+        cid = sh(*(args + ["--env-file", env_file, image] + cmd))[:12]
+    finally: os.unlink(env_file)
+    try:
+        _connect_rest(cid, b); sh("docker", "start", cid)
+        try: code = int(sh("docker", "wait", cid, timeout=int(b.get("timeout", 900))) or 1)
+        except subprocess.TimeoutExpired: subprocess.run(["docker", "kill", cid], capture_output=True); code = 124
+        p = subprocess.run(["docker", "logs", cid], capture_output=True, text=True)
+        return {"exit_code": code, "output": (p.stdout + p.stderr)[-50000:]}
+    finally: subprocess.run(["docker", "rm", "-f", cid], capture_output=True)
 def host_port(cid, port=None):
     out = sh("docker", "port", cid, check=False)
     for line in out.splitlines():
@@ -81,6 +122,9 @@ class H(BaseHTTPRequestHandler):
             if parts == ["v1", "health"]:
                 cs = sh("docker", "ps", "-q", "--filter", "label=aloof.managed=1", check=False).split()
                 return self._send(200, {"ok": True, "version": VERSION, "node_id": self.server.cfg.get("node_id"), **capacity(), "containers": len(cs)})
+            if parts == ["v1", "run"] and method == "POST":
+                n = int(self.headers.get("Content-Length") or 0); b = json.loads(self.rfile.read(n) or b"{}")
+                return self._send(200, run_once(self.server.cfg, b))
             if parts == ["v1", "containers"] and method == "POST":
                 n = int(self.headers.get("Content-Length") or 0); b = json.loads(self.rfile.read(n) or b"{}")
                 return self._send(200, run_container(self.server.cfg, b))

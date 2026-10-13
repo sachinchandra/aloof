@@ -30,22 +30,41 @@ def acct(request: Request, authorization: str = Header(None)):
     if key:
         a = engine.account_by_key(key)
         if not a: raise HTTPException(401, "invalid API key")
+        if a.get("_token"): scope_check(request.url.path, a)
         return a
     a = auth.session_account(request.cookies.get(auth.COOKIE))
     if not a: raise HTTPException(401, "not authenticated: send Authorization: Bearer pk_... or log in at /login")
     if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
     return a
+import re as _re2
+def scope_ok(name, a):
+    sc = a.get("_scope_app")
+    if not sc or name == sc: return True
+    if name.startswith(sc + "-pr-"): return True
+    return name in engine.children(sc)
+def scope_check(path, a):
+    """Deploy tokens (dt_...) never manage auth, billing, tokens or admin; app-scoped ones only touch their app (+ its previews/groups)."""
+    if _re2.match(r"^/v1/(auth|billing|tokens|admin|signup)(/|$)", path): raise HTTPException(403, "deploy tokens can't use this endpoint")
+    if not a.get("_scope_app"): return
+    m = _re2.match(r"^/v1/apps/([^/]+)", path)
+    if m and scope_ok(m.group(1), a): return
+    if path in ("/v1/apps", "/v1/config/validate", "/v1/launch/detect", "/v1/plans"): return
+    raise HTTPException(403, f"this deploy token is scoped to app {a['_scope_app']}")
 def own(name, a):
+    if not scope_ok(name, a): raise HTTPException(404, "app not found")
     ap = engine.get_app(name)
     if not ap or ap["account_id"] != a["id"] or ap["status"]=="destroyed": raise HTTPException(404, "app not found")
     return ap
 def with_url(ap): ap["url"] = f"https://{ap['name']}.{URL_DOMAIN}/"; ap["http_url"] = f"http://{ap['name']}.{URL_DOMAIN}:8080/"; ap["path_url"] = f"{PUBLIC_PROXY}/_app/{ap['name']}/"; return ap
 class Signup(BaseModel): email: str
-class Source(BaseModel): image: str|None=None; git: str|None=None; ref: str|None=None; subdir: str|None=None; path: str|None=None
+class Source(BaseModel):
+    image: str|None=None; git: str|None=None; ref: str|None=None; subdir: str|None=None; path: str|None=None
+    upload: str|None=None; dockerfile: str|None=None; build_args: dict[str,str]|None=None; github_installation: int|None=None
 class DeployReq(BaseModel):
     name: str; source: Source; plan: str="shared-1x-1gb"; port: int=8080; env: dict[str,str]={}; instances: int=1
     command: list[str]|None=None; region: str="local"; provider: str|None=None
     volumes: list[dict]=[]; autoscale: dict|None=None; health: dict|None=None
+    processes: dict[str, str|list[str]]|None=None; process_counts: dict[str,int]|None=None; cron: list[dict]|None=None; release_command: str|list[str]|None=None
 @app.post("/v1/signup")
 def signup(s: Signup):
     """API-only signup (CLI/MCP): returns an API key once. Web users register with a password or magic link."""
@@ -83,12 +102,13 @@ def providers():
 @app.post("/v1/apps")
 def deploy(r: DeployReq, a=Depends(acct)):
     if r.name.startswith("pg-"): raise HTTPException(400, "app names starting with pg- are reserved for managed Postgres")
+    if not scope_ok(r.name, a): raise HTTPException(403, f"this deploy token is scoped to app {a['_scope_app']}")
     spec = r.model_dump(exclude_unset=True) | {"name": r.name, "source": r.source.model_dump()}; spec["source"] = {k:v for k,v in spec["source"].items() if v}
     try: return with_url(engine.deploy(a["id"], spec))
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
 @app.get("/v1/apps")
-def list_apps(a=Depends(acct)): return [with_url(engine.get_app(r["name"])) for r in q("select name from apps where account_id=? and status!='destroyed' and name not like ?", (a["id"], "pg-%"))]
+def list_apps(a=Depends(acct)): return [with_url(engine.get_app(r["name"])) for r in q("select name from apps where account_id=? and status!='destroyed' and name not like ?", (a["id"], "pg-%")) if scope_ok(r["name"], a)]
 @app.get("/v1/apps/{name}")
 def get_app(name: str, a=Depends(acct)): return with_url(own(name, a))
 @app.get("/v1/apps/{name}/logs", response_class=PlainTextResponse)
@@ -631,6 +651,8 @@ def admin_backups_run(verify: bool=False):
     _need_offsite(); r = offsite.backup_all(force=True)
     if verify: r["verify"] = offsite.verify_all(force=True)
     return r
+from . import devx
+app.include_router(devx.R)
 # ---------------- edge proxy (port 8080): <app>.BASE_DOMAIN or /_app/<app>/ ----------------
 proxy = FastAPI(); _rr = {}; client = httpx.AsyncClient(timeout=60)
 EGRESS = billing.EGRESS   # app -> bytes sent to clients since last meter tick

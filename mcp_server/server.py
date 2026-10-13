@@ -162,6 +162,26 @@ def list_offsite_backups(kind: str, name: str, api_key: str = "") -> list | dict
 def restore_offsite_backup(kind: str, name: str, backup_id: str, api_key: str = "") -> dict:
     """Restore a database (kind='pg') or volume (kind='vol') from an off-site backup. Destructive: confirm with the user first."""
     return _r("POST", f"/v1/{'pg' if kind == 'pg' else 'volumes'}/{name}/offsite-restore", api_key, json={"backup_id": backup_id})
+@mcp.tool()
+def registry_login(server: str, username: str, password: str, app: str = "", api_key: str = "") -> dict:
+    """Save private registry credentials (docker.io, ghcr.io, ECR, GCR/Artifact Registry, any v2 registry) for all apps, or one app. Encrypted at rest."""
+    return _r("POST", "/v1/registry", api_key, json={"server": server, "username": username, "password": password, "app": app or None})
+@mcp.tool()
+def add_git_credential(host: str, kind: str = "ssh", token: str = "", app: str = "", api_key: str = "") -> dict:
+    """Private git access. kind='ssh' generates a deploy key and returns the public key to add to the repo; kind='token' stores an HTTPS token."""
+    return _r("POST", "/v1/git/credentials", api_key, json={"host": host, "kind": kind, "token": token or None, "app": app or None})
+@mcp.tool()
+def deploy_with_config(name: str, config: dict, image: str = "", git_url: str = "", git_ref: str = "", api_key: str = "") -> dict:
+    """Deploy using an aloof.toml (fly.toml-style) config parsed to a dict: processes, release_command, mounts, cron, checks, vm size."""
+    return _r("POST", f"/v1/apps/{name}/deploy", api_key, json={"config": config, "image": image or None, "git": git_url or None, "ref": git_ref or None})
+@mcp.tool()
+def app_status(name: str, api_key: str = "") -> dict:
+    """Detailed status: release, process groups (web/worker) and their instances, cron jobs, previews, private hostname."""
+    return _r("GET", f"/v1/apps/{name}/status", api_key)
+@mcp.tool()
+def create_deploy_token(app: str = "", expires_in: str = "90d", api_key: str = "") -> dict:
+    """Create a CI deploy token scoped to one app (or the whole account if app is empty). Shown once."""
+    return _r("POST", "/v1/tokens", api_key, json={"app": app or None, "expires_in": expires_in})
 mcp.custom_route("/oauth/login", methods=["GET","POST"])(login_page)
 if __name__ == "__main__":
     mcp.run("streamable-http" if HTTP_MODE else "stdio")

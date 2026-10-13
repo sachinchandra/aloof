@@ -13,7 +13,16 @@ def validate(spec):
     if PLANS[spec.get("plan","cpu-small")]["kind"] == "gpu" and not _plans.GPU_ENABLED:
         raise ValueError("GPU plans are coming soon (phase 2). Join the waitlist: POST /v1/waitlist {\"email\": \"...\"}")
     src = spec.get("source") or {}
-    if not (src.get("image") or src.get("git") or src.get("path")): raise ValueError("source.image or source.git required")
+    if not (src.get("image") or src.get("git") or src.get("path") or src.get("upload")): raise ValueError("source.image, source.git or an uploaded build context required")
+    pr = spec.get("processes")
+    if pr:
+        if not isinstance(pr, dict) or not all(re.match(r"^[a-z][a-z0-9]{0,15}$", k) for k in pr): raise ValueError("processes: {group: command}, group names lowercase a-z0-9")
+        spec["process_counts"] = {k: max(0, min(int((spec.get("process_counts") or {}).get(k, 1)), 10)) for k in pr}
+        if "web" in pr and pr["web"]: spec["command"] = ["sh", "-c", pr["web"]] if isinstance(pr["web"], str) else list(pr["web"])
+    for c in spec.get("cron") or []:
+        from .cron import parse
+        parse(c.get("schedule", "")); c.setdefault("name", f"job{(spec['cron'].index(c))}")
+        if not c.get("command"): raise ValueError("cron job needs a command")
     spec.setdefault("plan","cpu-small"); spec.setdefault("port",8080); spec.setdefault("env",{}); spec.setdefault("instances",1)
     spec["instances"] = max(0, min(int(spec["instances"]), 10))
     spec.setdefault("volumes", []); spec.setdefault("health", {"path": None, "interval": 10, "failures": 3})
@@ -68,7 +77,7 @@ def _start(name, drv, image, spec):
     node_id = inst.id.split(".", 1)[0] if "." in inst.id else None
     q("insert into instances(id,app,provider,host,port,status,started,node_id) values(?,?,?,?,?,?,?,?)", (inst.id, name, drv.name, inst.host, inst.port, "starting", time.time(), node_id))
     h = spec.get("health") or {}
-    ok = wait_ready(inst.host, inst.port, h.get("path"), tcp=bool(h.get("tcp")))
+    ok = True if h.get("none") else wait_ready(inst.host, inst.port, h.get("path"), tcp=bool(h.get("tcp")))
     inst.status = "running" if ok else "unready"
     q("update instances set status='running' where id=?", (inst.id,))   # only now does the edge route to it
     event(name, f"instance {inst.id} up at {inst.host}:{inst.port}" + ("" if ok else " (not ready after timeout)"))
@@ -82,25 +91,49 @@ def apply_tier_limits(account_id, spec, redeploy=False):
     and usage hard-capped at the included amount (see billing.meter_tick)."""
     k, t = account_tier(account_id)
     if t.get("max_apps") and not redeploy:
-        n = q("select count(*) n from apps where account_id=? and status!='destroyed'", (account_id,), one=True)["n"]
+        n = q("select count(*) n from apps where account_id=? and status!='destroyed' and spec not like ?", (account_id, '%"_parent": %'), one=True)["n"]
         if n >= t["max_apps"]: raise ValueError(f"{k} tier allows {t['max_apps']} apps; upgrade with PUT /v1/billing/tier")
     if t.get("plans"):
         if spec["plan"] not in t["plans"]: raise ValueError(f"{k} tier can use {', '.join(t['plans'])}; upgrade to hobby for {spec['plan']}")
-        if spec.get("kind") == "postgres": return spec   # databases never sleep (compute stays inside the hard cap)
+        if spec.get("kind") == "postgres" or spec.get("_parent"): return spec   # databases/workers never sleep (compute stays inside the hard cap)
         a = spec.get("autoscale") or {}
         spec["autoscale"] = {"min": 0, "max": min(int(a.get("max") or 1), t["max_instances"]), "target_concurrency": a.get("target_concurrency") or 10,
                              "cpu_percent": a.get("cpu_percent"), "idle_seconds": min(int(a.get("idle_seconds") or t["idle_seconds"]), t["idle_seconds"])}
         spec["instances"] = min(spec["instances"], t["max_instances"])
     return spec
+def _check_platform_image(account_id, spec):
+    """Images we built (paas/<app>:r..., <registry>/<app>:ts) may only be deployed by the account owning <app>."""
+    import os
+    img = (spec.get("source") or {}).get("image") or ""
+    regs = [r for r in (os.environ.get("PAAS_REGISTRY", "127.0.0.1:5000"), os.environ.get("PAAS_REGISTRY_NODE")) if r]
+    owner = None
+    if img.startswith("paas/"): owner = img[5:].split(":")[0]
+    for r in regs:
+        if img.startswith(r + "/"): owner = img[len(r) + 1:].split(":")[0]
+    src = spec.get("source") or {}
+    if src.get("github_installation"):
+        from . import github_app
+        if not github_app.owns_installation(account_id, src["github_installation"]): raise PermissionError("GitHub installation not linked to this account")
+    if src.get("upload"):
+        u = q("select account_id, app from uploads where id=?", (src["upload"],), one=True)
+        if not u or u["account_id"] != account_id or u["app"] != spec.get("name"): raise PermissionError("unknown upload for this app")
+    if owner is None: return
+    o = q("select account_id from apps where name=?", (owner,), one=True)
+    if not o or o["account_id"] != account_id: raise PermissionError("that image belongs to another app")
 def deploy(account_id, spec):
     ex = q("select * from apps where name=?", (spec.get("name"),), one=True)
     if ex and ex["account_id"] == account_id and ex["status"] != "destroyed":   # redeploy: keep attached state
         old = load_spec(ex["spec"])
-        for k in ("volumes", "autoscale", "health", "plan", "port", "instances", "command", "networks", "net_alias", "kind", "pg_plan", "provider"):
+        for k in ("volumes", "autoscale", "health", "plan", "port", "instances", "command", "networks", "net_alias", "kind", "pg_plan", "provider",
+                  "processes", "process_counts", "cron", "release_command", "_parent", "_preview_of"):
             if k not in spec and k in old: spec[k] = old[k]
         if not spec.pop("_replace_env", False): spec["env"] = {**old.get("env", {}), **spec.get("env", {})}
     spec = validate(spec); name = spec["name"]
     if ex and ex["account_id"] != account_id: raise PermissionError("app name taken")
+    _check_platform_image(account_id, spec)
+    acct_net = f"aloof-acct-{account_id}"   # private network: <app>.internal resolves between this account's apps only
+    spec["networks"] = sorted(set(spec.get("networks") or []) | {acct_net}, key=lambda n: (n != acct_net, n)) if spec.get("kind") != "postgres" else sorted(set(spec.get("networks") or []) | {acct_net})
+    spec["net_aliases"] = {**(spec.get("net_aliases") or {}), acct_net: [name, f"{name}.internal"]}
     apply_tier_limits(account_id, spec, redeploy=bool(ex and ex["status"] != "destroyed"))
     prov = pick_provider(spec); now = time.time()
     q("insert into apps(name,account_id,spec,status,provider,created,updated,error) values(?,?,?,?,?,?,?,null) "
@@ -166,6 +199,12 @@ def _run_deploy(name, image=None, reason=None):
                 image = drv.build(name, spec["source"], log)
             spec["_image"] = image; _set_release(name, ver, "deploying", image=image, spec=spec)
             q("update apps set spec=?, status='starting' where name=?", (dump_spec(spec), name))
+            if spec.get("release_command") and reason not in ("scale",):
+                log(f"release_command: {spec['release_command']}")
+                if not hasattr(drv, "run_once"): raise RuntimeError(f"release_command not supported on {drv.name}")
+                code, out = drv.run_once(name, image, spec, spec["release_command"])
+                for line in out.splitlines()[-30:]: log(f"[release] {line}")
+                if code != 0: raise RuntimeError(f"release_command exited {code}; new release not started")
             old = q("select * from instances where app=? and status='running'", (name,))
             single = bool(spec.get("volumes"))
             for o in old if single else []: _stop(o)   # single-writer volumes: stop old first
@@ -180,6 +219,8 @@ def _run_deploy(name, image=None, reason=None):
             q("update apps set status=?, updated=?, error=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(),
               (f"{len(bad)} instance(s) not ready" if bad else None), name))
             _set_release(name, ver, "active"); log(f"deploy complete (v{ver} live)")
+            try: _sync_groups(name, app["account_id"], spec, image)
+            except Exception as e: log(f"process groups: {e}")
             _prune_images(name, drv)
         except Exception as e:
             for n in new:
@@ -192,6 +233,24 @@ def _run_deploy(name, image=None, reason=None):
                 log(f"ERROR: v{ver} failed ({e}); v{prev['version']} still serving, no downtime")
             else:
                 q("update apps set status='failed', error=? where name=?", (str(e), name)); log(f"ERROR: {e}")
+def group_app(name, g): return f"{name}-{g}"
+def _sync_groups(name, account_id, spec, image):
+    """Process groups (fly.toml [processes]): 'web' is this app; every other group runs as a child app <app>-<group> from the same image,
+    env and networks, with its own command and count (aloof scale count worker=2). No HTTP routing or health probe for workers."""
+    groups = {g: c for g, c in (spec.get("processes") or {}).items() if g != "web"}
+    for ch in q("select name, spec from apps where status!='destroyed' and name like ?", (name + "-%",)):
+        cs = load_spec(ch["spec"])
+        if cs.get("_parent") == name and ch["name"] not in {group_app(name, g) for g in groups}: destroy(ch["name"]); event(name, f"process group {ch['name']} removed")
+    for g, cmd in groups.items():
+        cs = {"name": group_app(name, g), "source": {"image": image}, "plan": spec["plan"], "port": spec.get("port", 8080), "env": dict(spec.get("env") or {}),
+              "_replace_env": True, "instances": (spec.get("process_counts") or {}).get(g, 1), "command": ["sh", "-c", cmd] if isinstance(cmd, str) else list(cmd),
+              "health": {"none": True}, "volumes": [], "networks": [n for n in spec.get("networks") or []], "_parent": name, "provider": spec.get("provider")}
+        if spec.get("net_alias"): cs["net_alias"] = None
+        if len(cs["name"]) > 32: raise ValueError(f"process group name too long for {name}")
+        deploy(account_id, cs); event(name, f"process group {g}: {cs['instances']} x `{cmd}`")
+def children(name):
+    return [r["name"] for r in q("select name, spec from apps where status!='destroyed' and name like ?", (name + "-%",))
+            if load_spec(r["spec"]).get("_parent") == name or load_spec(r["spec"]).get("_preview_of") == name]
 def _stop(inst):
     try: get_drivers()[inst["provider"]].stop_instance(inst["id"])
     finally: q("update instances set status='stopped', stopped=? where id=?", (time.time(), inst["id"]))
@@ -257,6 +316,7 @@ def delete_volume(vol):
         except Exception: pass
     q("delete from volumes where name=?", (vol,))
 def destroy(name):
+    for ch in children(name): destroy(ch)
     q("update apps set status='destroyed' where name=?", (name,))   # first, so an in-flight deploy aborts instead of resurrecting it
     q("update volumes set app=null, mount_path=null where app=?", (name,)); q("delete from domains where app=?", (name,))
     with _lock(name):
@@ -296,7 +356,15 @@ def account_by_key(key):
     h = sha256(key); a = q("select * from accounts where api_key_hash=?", (h,), one=True)
     if a: return a
     k = q("select account_id from api_keys where key_hash=?", (h,), one=True)
-    return q("select * from accounts where id=?", (k["account_id"],), one=True) if k else None
+    if k: return q("select * from accounts where id=?", (k["account_id"],), one=True)
+    if key.startswith("dt_"):   # deploy token: scoped to one app (or the whole account = org), optional expiry
+        t = q("select * from deploy_tokens where token_hash=?", (h,), one=True)
+        if not t or (t["expires"] and t["expires"] < time.time()): return None
+        q("update deploy_tokens set last_used=? where id=?", (time.time(), t["id"]))
+        a = q("select * from accounts where id=?", (t["account_id"],), one=True)
+        if a: a["_token"] = t["id"]; a["_scope_app"] = t["app"]
+        return a
+    return None
 def create_named_key(account_id, label, replace=True):
     """Extra keys (MCP connector, CI) that don't revoke the primary CLI key. replace=True rotates the key with the same label."""
     if replace: q("delete from api_keys where account_id=? and label=?", (account_id, label))

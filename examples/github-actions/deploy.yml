@@ -1,0 +1,15 @@
+# .github/workflows/deploy.yml - deploy on push to main, preview per PR.
+# 1) aloof tokens create -a my-app --expiry 1y   2) add it as repo secret ALOOF_API_TOKEN
+name: deploy
+on:
+  push: {branches: [main]}
+  pull_request: {types: [opened, synchronize, reopened]}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sachinchandra/aloof/.github/actions/deploy@main
+        with:
+          token: ${{ secrets.ALOOF_API_TOKEN }}
+          preview: ${{ github.event_name == 'pull_request' }}

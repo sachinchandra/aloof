@@ -1,0 +1,27 @@
+name: Deploy to Aloof
+description: Build and deploy the repository (or a subdirectory) to Aloof with a deploy token.
+inputs:
+  token: {description: "Aloof deploy token (aloof tokens create -a <app>), stored as a secret", required: true}
+  app: {description: "App name (defaults to aloof.toml's app)", required: false, default: ""}
+  directory: {description: "Directory with aloof.toml / Dockerfile", required: false, default: "."}
+  api: {description: "API base URL", required: false, default: "https://api.aloof.si"}
+  image: {description: "Deploy this image instead of building the directory", required: false, default: ""}
+  preview: {description: "Deploy a per-PR preview instead (pull_request events)", required: false, default: "false"}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env: {ALOOF_API_TOKEN: "${{ inputs.token }}", ALOOF_API_URL: "${{ inputs.api }}"}
+      working-directory: ${{ inputs.directory }}
+      run: |
+        set -euo pipefail
+        curl -fsSL "$ALOOF_API_URL/cli/aloof" -o "$RUNNER_TEMP/aloof"
+        A="python3 $RUNNER_TEMP/aloof"
+        APP="${{ inputs.app }}"
+        if [ "${{ inputs.preview }}" = "true" ] && [ -n "${{ github.event.pull_request.number }}" ]; then
+          $A previews create "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}" ${APP:+-a "$APP"}
+        elif [ -n "${{ inputs.image }}" ]; then
+          $A deploy ${APP:+"$APP"} --image "${{ inputs.image }}"
+        else
+          $A deploy ${APP:+-a "$APP"}
+        fi

@@ -109,6 +109,10 @@ def place(pool, plan_id, app, spec):
         if pinned: raise ProvisionError(f"volume node {pinned.pop()} has no capacity or is offline")
         node_id = provision(pool, plan_id)
     return wait_ready(node_id)
+def _nets(spec):
+    """Private networks on the node: <app>.internal resolves between one account's apps placed on the same node."""
+    al = spec.get("net_aliases") or {}
+    return [{"name": n, "aliases": al.get(n) or ([spec["net_alias"]] if spec.get("net_alias") else [])} for n in spec.get("networks") or []]
 class RemoteDriver(Driver):
     """Driver for one node pool (provider). App.provider == pool name."""
     def __init__(self, pool):
@@ -135,10 +139,15 @@ class RemoteDriver(Driver):
         db, _ = _db(); plan = PLANS[spec["plan"]]; node = place(self.name, spec["plan"], app, spec)
         body = {"name": f"aloof-{app}-{index}", "image": image, "env": spec.get("env", {}), "port": int(spec.get("port", 8080)),
                 "cpus": plan["vcpu"], "mem_mb": plan["memory_mb"], "gpu": 1 if plan["kind"] == "gpu" else 0,
-                "volumes": spec.get("volumes") or [], "command": spec.get("command"), "labels": {"aloof.app": app}}
+                "volumes": spec.get("volumes") or [], "command": spec.get("command"), "labels": {"aloof.app": app}, "networks": _nets(spec)}
         r = agent(node, "POST", "/v1/containers", json=body, timeout=900)
         for v in spec.get("volumes") or []: db.q("update volumes set node_id=? where name=? and node_id is null", (node["id"], v["name"]))
         return Instance(id=f"{node['id']}.{r['id']}", host=r.get("host") or node["wg_ip"], port=int(r["host_port"]))
+    def run_once(self, app, image, spec, command, timeout=900):
+        plan = PLANS[spec["plan"]]; node = place(self.name, spec["plan"], app, spec)
+        r = agent(node, "POST", "/v1/run", timeout=timeout + 120, json={"image": image, "env": spec.get("env", {}), "command": command, "port": int(spec.get("port", 8080)),
+                  "cpus": plan["vcpu"], "mem_mb": plan["memory_mb"], "volumes": spec.get("volumes") or [], "networks": _nets(spec), "timeout": timeout})
+        return int(r["exit_code"]), r.get("output", "")
     def _split(self, iid):
         db, _ = _db(); nid, cid = iid.split(".", 1); return db.q("select * from nodes where id=?", (nid,), one=True), cid
     def stop_instance(self, iid):

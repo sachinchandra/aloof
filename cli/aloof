@@ -4,22 +4,152 @@ import argparse, json, os, sys, time, urllib.request, urllib.error
 CFG = os.path.expanduser("~/.aloof.json")
 if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")
 cfg = json.load(open(CFG)) if os.path.exists(CFG) else {}
-API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", cfg.get("api", "http://localhost:8000"))); KEY = os.environ.get("ALOOF_API_KEY", os.environ.get("PAAS_API_KEY", cfg.get("key")))
+API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", cfg.get("api", "http://localhost:8000"))); KEY = os.environ.get("ALOOF_API_TOKEN") or os.environ.get("ALOOF_API_KEY", os.environ.get("PAAS_API_KEY", cfg.get("key")))
 def call(m, p, body=None, raw=False):
     req = urllib.request.Request(API+p, method=m, data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Content-Type":"application/json", **({"Authorization":f"Bearer {KEY}"} if KEY else {})})
     try: d = urllib.request.urlopen(req, timeout=120).read().decode()
     except urllib.error.HTTPError as e: sys.exit(f"error {e.code}: {e.read().decode()}")
     return d if raw else json.loads(d)
+def load_toml(path):
+    if not os.path.exists(path): return {}
+    try: import tomllib
+    except ImportError: sys.exit("aloof.toml needs Python 3.11+ (tomllib)")
+    with open(path, "rb") as f:
+        try: return tomllib.load(f)
+        except Exception as e: sys.exit(f"{path}: {e}")
+def app_of(o, required=True):
+    n = getattr(o, "app_opt", None) or getattr(o, "name", None) or load_toml(getattr(o, "config", None) or "aloof.toml").get("app")
+    if not n and required: sys.exit("which app? pass -a <app> or run in a directory with aloof.toml")
+    return n
+def _ignore_rx(pat):
+    import re as _re
+    pat = pat.strip().lstrip("/").rstrip("/"); out = ""; i = 0
+    while i < len(pat):
+        c = pat[i]
+        if pat[i:i+3] == "**/": out += "(?:.*/)?"; i += 3; continue
+        if pat[i:i+2] == "**": out += ".*"; i += 2; continue
+        out += "[^/]*" if c == "*" else "[^/]" if c == "?" else _re.escape(c); i += 1
+    return _re.compile("^" + out + "(?:/.*)?$")
+def dockerignore(root):
+    """Docker semantics: patterns in order, last match wins, `!` re-includes. Without a .dockerignore, .git is skipped."""
+    pats = []; f = os.path.join(root, ".dockerignore")
+    if os.path.exists(f):
+        for line in open(f):
+            line = line.strip()
+            if not line or line.startswith("#"): continue
+            neg = line.startswith("!"); pats.append((neg, _ignore_rx(line[1:] if neg else line)))
+    else: pats = [(False, _ignore_rx(".git"))]
+    def ignored(rel):
+        r = False
+        for neg, rx in pats:
+            if rx.match(rel): r = not neg
+        return r
+    ignored.has_neg = any(n for n, _ in pats)
+    return ignored
+def tar_context(root):
+    import tarfile, io
+    root = os.path.abspath(root); ign = dockerignore(root); buf = io.BytesIO(); n = 0
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        for d, dirs, files in os.walk(root):
+            rd = os.path.relpath(d, root); rd = "" if rd == "." else rd
+            if not ign.has_neg: dirs[:] = [x for x in dirs if not ign(f"{rd}/{x}" if rd else x)]
+            for x in files:
+                rel = f"{rd}/{x}" if rd else x
+                if not ign(rel): t.add(os.path.join(d, x), arcname=rel, recursive=False); n += 1
+    return buf.getvalue(), n
+def upload(name, data):
+    req = urllib.request.Request(f"{API}/v1/apps/{name}/source", method="POST", data=data, headers={"Content-Type": "application/gzip", "Authorization": f"Bearer {KEY}"})
+    try: return json.loads(urllib.request.urlopen(req, timeout=600).read())
+    except urllib.error.HTTPError as e: sys.exit(f"upload failed {e.code}: {e.read().decode()}")
+def wait_deploy(name, t0):
+    seen = set()
+    while True:
+        time.sleep(2)
+        ev = call("GET", f"/v1/apps/{name}/logs?tail=0", raw=True).split("== instance")[0].splitlines()[1:]
+        for e in ev:
+            if e not in seen: seen.add(e); print("  " + e, flush=True)
+        rel = (call("GET", f"/v1/apps/{name}/releases") or [{}])[0]
+        if rel.get("created", 0) >= t0 - 2 and rel.get("status") in ("active", "failed"): break
+    return call("GET", f"/v1/apps/{name}")
+def cmd_deploy(o):
+    cfg = load_toml(os.path.join(o.dir, o.config) if not os.path.isabs(o.config) else o.config)
+    name = o.app_opt or o.name or cfg.get("app")
+    if not name: sys.exit("app name? `aloof deploy <name>` or set app = \"...\" in aloof.toml (aloof launch creates one)")
+    env = dict(e.split("=", 1) for e in o.env)
+    if cfg or not (o.image or o.git):
+        if o.plan: cfg.setdefault("vm", [{}]); cfg["vm"] = [{"size": o.plan}]
+        if o.port: cfg.setdefault("http_service", {})["internal_port"] = o.port
+        if o.instances is not None: cfg.setdefault("scale", {})["count"] = o.instances
+        body = {"config": cfg, "env": env}
+        b = cfg.get("build") or {}
+        if o.image: body["image"] = o.image
+        elif o.git: body["git"] = o.git; body["ref"] = o.ref
+        elif not (b.get("image") or b.get("git")):
+            data, n = tar_context(o.dir); print(f"uploading build context: {n} files, {len(data)/1e6:.1f} MB (.dockerignore respected)")
+            body["upload_id"] = upload(name, data)["upload_id"]
+        v = call("POST", "/v1/config/validate", {"config": cfg | {"app": name}})
+        if not v["ok"]: sys.exit("aloof.toml: " + v["error"])
+        for w in v["warnings"]: print("warning:", w)
+        t0 = time.time(); r = call("POST", f"/v1/apps/{name}/deploy", body)
+    else:
+        src = {"image": o.image} if o.image else {"git": o.git, **({"ref": o.ref} if o.ref else {})}
+        t0 = time.time(); r = call("POST", "/v1/apps", {"name": name, "source": src, "plan": o.plan or "shared-1x-1gb", "port": o.port or 8080, "instances": 1 if o.instances is None else o.instances, "env": env})
+    print("deploying", r["name"], "on", r["provider"])
+    if o.no_wait: return
+    r = wait_deploy(name, t0)
+    print(r.get("error") or f"live: {r['url']}")
+    if r["status"] == "failed": sys.exit(1)
+def cmd_status(o):
+    st = call("GET", f"/v1/apps/{app_of(o)}/status")
+    rel = st.get("release") or {}
+    print(f"{st['name']}  {st['status']}  {st['url']}  plan={st['plan']}  on {st['provider']}")
+    if rel: print(f"release v{rel['version']} {rel['status']}  {rel.get('image') or ''}")
+    if st.get("error"): print("error:", st["error"])
+    for g in st["process_groups"]:
+        print(f"  [{g['group']}] {g['count']} running" + (f" ({g['status']})" if g['group'] != 'web' else ""))
+        for i in g["instances"]: print(f"     {i['id']:<20} {i['status']:<8} since {time.strftime('%H:%M:%S', time.localtime(i['started']))}")
+    for c in st.get("cron") or []: print(f"  cron {c['name']}: {c['schedule']}  {c['command']}")
+    if st.get("release_command"): print(f"  release_command: {st['release_command']}")
+    print(f"  private: {st['internal_host']}" + (f"   domains: {', '.join(st['domains'])}" if st['domains'] else "") + (f"   previews: {', '.join(st['previews'])}" if st['previews'] else ""))
+def cmd_logs(o):
+    name = app_of(o)
+    if not o.follow: print(call("GET", f"/v1/apps/{name}/logs?tail={o.lines}", raw=True)); return
+    since = time.time() - 300
+    try:
+        while True:
+            r = call("GET", f"/v1/apps/{name}/logs/history?since={since}&limit=1000")
+            for l in r["lines"]:
+                print(time.strftime("%H:%M:%S", time.localtime(l["ts"])), l["instance"][:12], l["message"], flush=True); since = max(since, l["ts"] + 1e-6)
+            time.sleep(2)
+    except KeyboardInterrupt: pass
+def cmd_scale(o):
+    a = o.args
+    if a[0] == "count":
+        name = app_of(o); counts = {}
+        for x in a[1:]:
+            if "=" in x: k, v = x.split("=", 1); counts[k] = int(v)
+            else: counts["web"] = int(x)
+        pj(call("POST", f"/v1/apps/{name}/scale/count", {"counts": counts}))
+    elif a[0] == "vm":
+        if len(a) < 2: sys.exit("aloof scale vm <plan> [-a app] [--group worker]")
+        r = call("POST", f"/v1/apps/{app_of(o)}/scale/vm", {"plan": a[1], "group": o.group}); print("redeploying on", a[1])
+    elif len(a) == 2: pj(call("POST", f"/v1/apps/{a[0]}/scale", {"instances": int(a[1])}))
+    elif len(a) == 1 and a[0].isdigit(): pj(call("POST", f"/v1/apps/{app_of(o)}/scale", {"instances": int(a[0])}))
+    else: sys.exit("usage: aloof scale count [web=]N [worker=N] | aloof scale vm <plan> | aloof scale <app> <n>")
 p = argparse.ArgumentParser(prog="aloof"); s = p.add_subparsers(dest="cmd", required=True)
 a = s.add_parser("signup"); a.add_argument("email")
 s.add_parser("plans"); s.add_parser("apps"); s.add_parser("usage")
-a = s.add_parser("deploy"); a.add_argument("name"); g = a.add_mutually_exclusive_group(required=True)
-g.add_argument("--image"); g.add_argument("--git"); a.add_argument("--ref"); a.add_argument("--plan", default="cpu-small")
-a.add_argument("--port", type=int, default=8080); a.add_argument("-e","--env", action="append", default=[]); a.add_argument("-n","--instances", type=int, default=1)
-a.add_argument("--no-wait", action="store_true")
-for c in ("status","logs","destroy"): s.add_parser(c).add_argument("name")
-a = s.add_parser("scale"); a.add_argument("name"); a.add_argument("instances", type=int)
+a = s.add_parser("deploy", help="deploy the current directory (aloof.toml + Dockerfile/auto-detect), an image, or a git repo")
+a.add_argument("name", nargs="?"); g = a.add_mutually_exclusive_group()
+g.add_argument("--image"); g.add_argument("--git"); a.add_argument("--ref"); a.add_argument("--plan")
+a.add_argument("--port", type=int); a.add_argument("-e","--env", action="append", default=[]); a.add_argument("-n","--instances", type=int)
+a.add_argument("--no-wait", action="store_true"); a.add_argument("-c", "--config", default="aloof.toml"); a.add_argument("--dir", default=".")
+a.add_argument("-a", "--app", dest="app_opt")
+for c in ("status","logs","destroy"):
+    x = s.add_parser(c); x.add_argument("name", nargs="?"); x.add_argument("-a", "--app", dest="app_opt")
+    if c == "logs": x.add_argument("-f", "--follow", action="store_true"); x.add_argument("-n", "--lines", type=int, default=200)
+a = s.add_parser("scale", help="scale <app> <n> | scale count web=2 worker=1 | scale vm <plan>"); a.add_argument("args", nargs="+"); a.add_argument("-a", "--app", dest="app_opt"); a.add_argument("--group")
 a = s.add_parser("env"); a.add_argument("name"); a.add_argument("pairs", nargs="+", help="K=V or K= to unset")
 a = s.add_parser("volumes"); vs = a.add_subparsers(dest="vcmd", required=True)
 x = vs.add_parser("create"); x.add_argument("name"); x.add_argument("--size", type=int, default=1)
@@ -52,6 +182,37 @@ a = s.add_parser("exec", help="run one command"); a.add_argument("name"); a.add_
 a = s.add_parser("drains", help="log forwarding"); a.add_argument("name"); a.add_argument("action", choices=["add", "list", "remove"]); a.add_argument("target", nargs="?")
 a = s.add_parser("history", help="retained logs"); a.add_argument("name"); a.add_argument("--since", type=float, default=0, help="hours ago"); a.add_argument("--grep")
 a = s.add_parser("audit"); a.add_argument("--app")
+a = s.add_parser("launch", help="detect the framework, write Dockerfile + aloof.toml"); a.add_argument("--name"); a.add_argument("--dir", default="."); a.add_argument("--force", action="store_true"); a.add_argument("--deploy", action="store_true")
+a = s.add_parser("config", help="aloof.toml"); cs = a.add_subparsers(dest="ccmd", required=True)
+for c in ("validate", "show"): x = cs.add_parser(c); x.add_argument("-c", "--config", default="aloof.toml")
+a = s.add_parser("tokens", help="deploy tokens for CI"); ts = a.add_subparsers(dest="tcmd", required=True)
+x = ts.add_parser("create"); x.add_argument("-a", "--app", dest="app_opt", help="scope to one app (default: whole account/org)"); x.add_argument("--expiry", default="90d"); x.add_argument("--label", default="ci"); x.add_argument("--org", action="store_true")
+ts.add_parser("list"); ts.add_parser("revoke").add_argument("id")
+a = s.add_parser("secrets"); ss2 = a.add_subparsers(dest="scmd2", required=True)
+for c in ("set", "unset"):
+    x = ss2.add_parser(c); x.add_argument("items", nargs="+"); x.add_argument("-a", "--app", dest="app_opt"); x.add_argument("--stage", action="store_true")
+for c in ("list", "deploy"): x = ss2.add_parser(c); x.add_argument("-a", "--app", dest="app_opt")
+for c in ("certs", "ips"): x = s.add_parser(c); x.add_argument("name", nargs="?"); x.add_argument("-a", "--app", dest="app_opt")
+a = s.add_parser("proxy", help="forward localhost:LOCAL to a private port of an instance"); a.add_argument("ports", help="LOCAL[:REMOTE]"); a.add_argument("-a", "--app", dest="app_opt"); a.add_argument("--instance")
+a = s.add_parser("registry", help="private registry logins"); rs = a.add_subparsers(dest="rcmd", required=True)
+x = rs.add_parser("login"); x.add_argument("server", nargs="?", default="docker.io"); x.add_argument("-u", "--username", required=True); x.add_argument("-p", "--password"); x.add_argument("--password-stdin", action="store_true"); x.add_argument("-a", "--app", dest="app_opt")
+x = rs.add_parser("list"); x.add_argument("-a", "--app", dest="app_opt")
+x = rs.add_parser("logout"); x.add_argument("server"); x.add_argument("-a", "--app", dest="app_opt")
+a = s.add_parser("git", help="private git access"); gs = a.add_subparsers(dest="gcmd", required=True)
+x = gs.add_parser("deploy-key", help="generate an SSH deploy key (or import with --private-key-file)"); x.add_argument("host"); x.add_argument("-a", "--app", dest="app_opt"); x.add_argument("--private-key-file")
+x = gs.add_parser("token", help="HTTPS token (read from stdin or --token)"); x.add_argument("host"); x.add_argument("-a", "--app", dest="app_opt"); x.add_argument("--username"); x.add_argument("--token")
+gs.add_parser("list"); gs.add_parser("remove").add_argument("id")
+a = s.add_parser("github", help="GitHub App: install, repos, link (push-to-deploy + PR previews)"); hs = a.add_subparsers(dest="hcmd", required=True)
+hs.add_parser("install"); hs.add_parser("repos"); hs.add_parser("status")
+x = hs.add_parser("link"); x.add_argument("app"); x.add_argument("repo"); x.add_argument("--branch"); x.add_argument("--no-previews", action="store_true"); x.add_argument("--no-deploy", action="store_true")
+hs.add_parser("unlink").add_argument("app")
+a = s.add_parser("previews"); vs2 = a.add_subparsers(dest="pvcmd", required=True)
+x = vs2.add_parser("list"); x.add_argument("-a", "--app", dest="app_opt")
+x = vs2.add_parser("create"); x.add_argument("pr"); x.add_argument("ref"); x.add_argument("-a", "--app", dest="app_opt"); x.add_argument("--git")
+x = vs2.add_parser("destroy"); x.add_argument("pr"); x.add_argument("-a", "--app", dest="app_opt")
+a = s.add_parser("cron"); cr = a.add_subparsers(dest="crcmd", required=True)
+x = cr.add_parser("list"); x.add_argument("-a", "--app", dest="app_opt")
+x = cr.add_parser("run"); x.add_argument("job"); x.add_argument("-a", "--app", dest="app_opt")
 o = p.parse_args()
 pj = lambda x: print(json.dumps(x, indent=2))
 if o.cmd == "signup":
@@ -60,19 +221,12 @@ elif o.cmd == "plans":
     for pl in call("GET","/v1/plans")["plans"]: print(f"{pl['id']:<11} {pl['kind']} {pl['vcpu']:>5} vCPU {pl['memory_mb']:>7}MB {pl['gpu'] or '':<18} ${pl['price_usd_hr']:.4f}/hr  via {pl['provider']}")
 elif o.cmd == "apps":
     for x in call("GET","/v1/apps"): print(f"{x['name']:<20} {x['status']:<9} {len(x['instances'])} inst  {x['url']}")
-elif o.cmd == "deploy":
-    src = {"image": o.image} if o.image else {"git": o.git, **({"ref": o.ref} if o.ref else {})}
-    r = call("POST","/v1/apps",{"name":o.name,"source":src,"plan":o.plan,"port":o.port,"instances":o.instances,"env":dict(e.split("=",1) for e in o.env)})
-    print("deploying", r["name"], "on", r["provider"])
-    while not o.no_wait:
-        time.sleep(2); r = call("GET", f"/v1/apps/{o.name}"); print(" ", r["status"])
-        if r["status"] in ("running","failed"): break
-    print(r.get("error") or f"live: {r['url']}  (or {r['path_url']})")
-elif o.cmd == "status": pj(call("GET", f"/v1/apps/{o.name}"))
-elif o.cmd == "logs": print(call("GET", f"/v1/apps/{o.name}/logs", raw=True))
-elif o.cmd == "scale": pj(call("POST", f"/v1/apps/{o.name}/scale", {"instances": o.instances}))
+elif o.cmd == "deploy": cmd_deploy(o)
+elif o.cmd == "status": cmd_status(o)
+elif o.cmd == "logs": cmd_logs(o)
+elif o.cmd == "scale": cmd_scale(o)
 elif o.cmd == "env": pj(call("POST", f"/v1/apps/{o.name}/env", {"env": {k:(v or None) for k,v in (x.split("=",1) for x in o.pairs)}}))
-elif o.cmd == "destroy": pj(call("DELETE", f"/v1/apps/{o.name}"))
+elif o.cmd == "destroy": pj(call("DELETE", f"/v1/apps/{app_of(o)}"))
 elif o.cmd == "usage": pj(call("GET","/v1/usage"))
 elif o.cmd == "volumes":
     if o.vcmd == "create": pj(call("POST","/v1/volumes",{"name":o.name,"size_gb":o.size}))
@@ -202,3 +356,150 @@ elif o.cmd == "ssh":
     finally:
         if old: termios.tcsetattr(fd, termios.TCSADRAIN, old)
         print("\r\nconnection closed")
+
+elif o.cmd == "launch":
+    d = o.dir; names = os.listdir(d); KEYF = ["package.json", "requirements.txt", "pyproject.toml", "Pipfile", "manage.py", "go.mod", "Cargo.toml", "Gemfile", "composer.json",
+        "pom.xml", "build.gradle", "build.gradle.kts", "mix.exs", "index.html", "main.py", "app.py", "Dockerfile", "artisan", "config.ru"]
+    files = {n: (open(os.path.join(d, n), errors="replace").read(200000) if n in KEYF and os.path.isfile(os.path.join(d, n)) else None) for n in names}
+    name = o.name or load_toml(os.path.join(d, "aloof.toml")).get("app") or os.path.basename(os.path.abspath(d)).lower().replace("_", "-")[:32]
+    r = call("POST", "/v1/launch/detect", {"files": files, "name": name})
+    print(f"detected: {r['framework'] or 'unknown'}")
+    if r.get("dockerfile") and (o.force or "Dockerfile" not in names): open(os.path.join(d, "Dockerfile"), "w").write(r["dockerfile"]); print("wrote Dockerfile")
+    elif not r.get("dockerfile") and "Dockerfile" not in names: print("no Dockerfile generated; the build server will try Nixpacks/buildpacks")
+    if o.force or not os.path.exists(os.path.join(d, "aloof.toml")): open(os.path.join(d, "aloof.toml"), "w").write(r["toml"]); print("wrote aloof.toml")
+    for n in r.get("notes") or []: print("note:", n)
+    if not os.path.exists(os.path.join(d, ".dockerignore")): open(os.path.join(d, ".dockerignore"), "w").write(".git\nnode_modules\n__pycache__\n.venv\n*.log\n.env\n"); print("wrote .dockerignore")
+    print(f"next: aloof deploy" if not o.deploy else "deploying...")
+    if o.deploy: o.app_opt = None; o.config = "aloof.toml"; o.image = o.git = o.ref = o.plan = o.port = o.instances = None; o.env = []; o.no_wait = False; cmd_deploy(o)
+elif o.cmd == "config":
+    cfg = load_toml(o.config)
+    if not cfg: sys.exit(f"{o.config} not found")
+    v = call("POST", "/v1/config/validate", {"config": cfg})
+    if o.ccmd == "show": pj(v.get("spec") or v)
+    else:
+        for w in v.get("warnings", []): print("warning:", w)
+        print("valid" if v["ok"] else "invalid: " + v["error"]); sys.exit(0 if v["ok"] else 1)
+elif o.cmd == "tokens":
+    if o.tcmd == "create":
+        r = call("POST", "/v1/tokens", {"app": None if o.org else app_of(o, required=False), "label": o.label, "expires_in": o.expiry})
+        print(f"token ({r['scope']}, expires {time.strftime('%Y-%m-%d', time.localtime(r['expires'])) if r['expires'] else 'never'}) - shown once:\n{r['token']}")
+    elif o.tcmd == "list":
+        for t in call("GET", "/v1/tokens"): print(f"{t['id']:<16} {t['prefix']}...  {('app:' + t['app']) if t['app'] else 'org':<24} {t['label']:<12} " + ("EXPIRED" if t["expired"] else (time.strftime('expires %Y-%m-%d', time.localtime(t['expires'])) if t['expires'] else "no expiry")))
+    else: pj(call("DELETE", f"/v1/tokens/{o.id}"))
+elif o.cmd == "secrets":
+    name = app_of(o)
+    if o.scmd2 == "list":
+        for x in call("GET", f"/v1/apps/{name}/secrets"): print(f"{x['name']:<32} {x['digest']}  {x['status']}")
+    elif o.scmd2 == "deploy": r = call("POST", f"/v1/apps/{name}/secrets/deploy"); print("deploying staged secrets to", name)
+    elif o.scmd2 == "set":
+        kv = {}
+        for it in o.items:
+            if "=" not in it: sys.exit(f"{it}: use NAME=VALUE (NAME=- reads the value from stdin)")
+            k, v = it.split("=", 1); kv[k] = sys.stdin.read() if v == "-" else v
+        r = call("POST", f"/v1/apps/{name}/secrets", {"secrets": kv, "stage": o.stage}); print(r.get("detail") or f"set {', '.join(kv)}; redeploying {name}")
+    else: r = call("POST", f"/v1/apps/{name}/secrets", {"unset": o.items, "stage": o.stage}); print(r.get("detail") or f"unset {', '.join(o.items)}; redeploying {name}")
+elif o.cmd == "certs":
+    for c in call("GET", f"/v1/apps/{app_of(o)}/certs"):
+        print(f"{c['hostname']:<40} {c['kind']:<9} {c['status']}" + (f"  {c.get('issuer')}, expires {c['expires'][:10]} ({c['days_left']}d)" if c.get("expires") else "") + (f"  ({c['error']})" if c.get("error") and c["status"] == "invalid" else ""))
+elif o.cmd == "ips":
+    r = call("GET", f"/v1/apps/{app_of(o)}/ips")
+    for x in r["public"]: print(f"public  {x['type']}  {x['address']}  (shared edge)")
+    print(f"private {r['private']['hostname']}  network {r['private']['network']}")
+    for x in r["private"]["instances"]: print(f"        {x['address']}  ({x['instance']})")
+    print(r["note"])
+elif o.cmd == "proxy":
+    import socket, ssl, base64, struct, threading, urllib.parse as up
+    name = app_of(o); lp, _, rp = o.ports.partition(":"); lp = int(lp); rp = int(rp or lp)
+    def ws_open():
+        u = up.urlsplit(API); host = u.hostname; port = u.port or (443 if u.scheme == "https" else 80)
+        s0 = socket.create_connection((host, port)); s0 = ssl.create_default_context().wrap_socket(s0, server_hostname=host) if u.scheme == "https" else s0
+        k = base64.b64encode(os.urandom(16)).decode(); path = f"/v1/apps/{name}/proxy?port={rp}" + (f"&instance={o.instance}" if o.instance else "")
+        s0.sendall((f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {k}\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer {KEY}\r\n\r\n").encode())
+        hdr = b""
+        while b"\r\n\r\n" not in hdr:
+            c = s0.recv(1)
+            if not c: raise OSError("closed")
+            hdr += c
+        if b" 101 " not in hdr.split(b"\r\n")[0]: raise OSError(hdr.split(b"\r\n")[0].decode())
+        return s0
+    def ws_send(s0, data, op=2):
+        m = os.urandom(4); n = len(data)
+        h = bytes([0x80 | op]) + (bytes([0x80 | n]) if n < 126 else (bytes([0xFE]) + struct.pack(">H", n) if n < 65536 else bytes([0xFF]) + struct.pack(">Q", n)))
+        s0.sendall(h + m + bytes(b ^ m[i % 4] for i, b in enumerate(data)))
+    def ws_reader(s0, out):
+        buf = b""
+        while True:
+            d = s0.recv(65536)
+            if not d: break
+            buf += d
+            while len(buf) >= 2:
+                op = buf[0] & 15; n = buf[1] & 127; i = 2
+                if n == 126:
+                    if len(buf) < 4: break
+                    n = struct.unpack(">H", buf[2:4])[0]; i = 4
+                elif n == 127:
+                    if len(buf) < 10: break
+                    n = struct.unpack(">Q", buf[2:10])[0]; i = 10
+                if len(buf) < i + n: break
+                data = buf[i:i+n]; buf = buf[i+n:]
+                if op == 8: out.close(); return
+                if op in (1, 2): out.sendall(data)
+        out.close()
+    def serve(c):
+        try: s0 = ws_open()
+        except OSError as e: print("proxy refused:", e); c.close(); return
+        threading.Thread(target=ws_reader, args=(s0, c), daemon=True).start()
+        try:
+            while True:
+                d = c.recv(65536)
+                if not d: break
+                ws_send(s0, d)
+        except OSError: pass
+        finally:
+            try: ws_send(s0, b"", 8); s0.close()
+            except OSError: pass
+    ls = socket.socket(); ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); ls.bind(("127.0.0.1", lp)); ls.listen(16)
+    print(f"proxying 127.0.0.1:{lp} -> {name}:{rp} (Ctrl-C to stop)", flush=True)
+    try:
+        while True: c, _ = ls.accept(); threading.Thread(target=serve, args=(c,), daemon=True).start()
+    except KeyboardInterrupt: pass
+elif o.cmd == "registry":
+    if o.rcmd == "login":
+        pw = sys.stdin.read().strip() if o.password_stdin else (o.password or __import__("getpass").getpass(f"password/token for {o.username}@{o.server}: "))
+        r = call("POST", "/v1/registry", {"server": o.server, "username": o.username, "password": pw, "app": o.app_opt}); print(f"saved {r['kind']} credentials for {r['server']}" + (f" (app {r['app']})" if r["app"] else " (all your apps)"))
+    elif o.rcmd == "list":
+        for r in call("GET", "/v1/registry" + (f"?app={o.app_opt}" if o.app_opt else "")): print(f"{r['server']:<45} {r['kind']:<10} {r['username']:<24} {r['app'] or '(account)'}")
+    else: pj(call("DELETE", f"/v1/registry/{o.server}" + (f"?app={o.app_opt}" if o.app_opt else "")))
+elif o.cmd == "git":
+    if o.gcmd == "deploy-key":
+        body = {"host": o.host, "kind": "ssh", "app": o.app_opt}
+        if o.private_key_file: body["private_key"] = open(o.private_key_file).read()
+        r = call("POST", "/v1/git/credentials", body); print(r["public_key"]); print(r["next"], file=sys.stderr)
+    elif o.gcmd == "token":
+        tok = o.token or (sys.stdin.read().strip() if not sys.stdin.isatty() else __import__("getpass").getpass(f"token for {o.host}: "))
+        r = call("POST", "/v1/git/credentials", {"host": o.host, "kind": "token", "token": tok, "username": o.username, "app": o.app_opt}); print(f"saved HTTPS token for {r['host']} (user {r['username']})")
+    elif o.gcmd == "list":
+        for r in call("GET", "/v1/git/credentials"): print(f"{r['id']:<16} {r['host']:<24} {r['kind']:<6} {r['app'] or '(account)':<20} {(r['public_key'] or '')[:60]}")
+    else: pj(call("DELETE", f"/v1/git/credentials/{o.id}"))
+elif o.cmd == "github":
+    if o.hcmd == "install": print("open this URL to install the Aloof GitHub App and pick repos:\n" + call("GET", "/v1/github/install")["url"])
+    elif o.hcmd == "repos":
+        for r in call("GET", "/v1/github/repos"): print(f"{r['repo']:<50} {'private' if r['private'] else 'public':<8} {r['default_branch']}")
+    elif o.hcmd == "status": pj(call("GET", "/v1/github/status"))
+    elif o.hcmd == "link":
+        r = call("POST", f"/v1/apps/{o.app}/github", {"repo": o.repo, "branch": o.branch, "previews": not o.no_previews, "deploy": not o.no_deploy})
+        print(f"linked {o.app} <- {r['linked']['repo']}@{r['linked']['branch']}: pushes deploy, PRs get preview apps" + ("" if o.no_previews else "") + ("; first deploy started" if r.get("app") else ""))
+    else: pj(call("DELETE", f"/v1/apps/{o.app}/github"))
+elif o.cmd == "previews":
+    name = app_of(o)
+    if o.pvcmd == "list":
+        for x in call("GET", f"/v1/apps/{name}/previews"): print(f"{x['name']:<32} {x['status']:<9} {x['url']}")
+    elif o.pvcmd == "create": r = call("POST", f"/v1/apps/{name}/previews", {"pr": o.pr, "ref": o.ref, "git": o.git}); print(f"deploying preview {r['name']}: {r['url']}")
+    else: pj(call("DELETE", f"/v1/apps/{name}/previews/{o.pr}"))
+elif o.cmd == "cron":
+    name = app_of(o)
+    if o.crcmd == "list":
+        r = call("GET", f"/v1/apps/{name}/cron")
+        for j in r["jobs"]: print(f"{j['name']:<16} {j['schedule']:<16} {j['command']}")
+        for x in r["runs"][:10]: print(f"  {time.strftime('%Y-%m-%d %H:%M', time.localtime(x['ts']))} {x['job']:<16} exit {x['exit_code']}")
+    else: r = call("POST", f"/v1/apps/{name}/cron/{o.job}/run"); sys.stdout.write(r["output"]); print(f"exit {r['exit_code']}")

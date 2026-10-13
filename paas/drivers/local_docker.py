@@ -18,20 +18,62 @@ class LocalDockerDriver(Driver):
         try: self.c.ping(); return True, "ok"
         except Exception as e: self._c = None; return False, str(e)
     def build(self, app, source, log):
+        """image: pull with the owner's registry credentials. git/upload/path: fetch into a private temp dir, then docker build
+        (base images from private registries use the same credentials); no Dockerfile -> Nixpacks / buildpacks / generated."""
+        from .. import creds, launch
+        import tempfile
         if source.get("image"):
-            img = source["image"]; log(f"pulling {img}")
-            try: self.c.images.get(img)
-            except docker.errors.ImageNotFound: self.c.images.pull(img)
-            return img
-        tag = f"paas/{app}:r{int(time.time()*1000)}"; ctx   # unique per build so releases can roll back = source["git"]
-        if source.get("ref"): ctx += f"#{source['ref']}"
-        if source.get("subdir"): ctx += (":" if source.get("ref") else "#:") + source["subdir"]
-        if source.get("path"): ctx = source["path"]   # local dir (dev)
-        log(f"docker build {ctx}")
-        p = subprocess.run(["docker","build","-t",tag,ctx], capture_output=True, text=True)
-        for line in (p.stdout+p.stderr).splitlines()[-40:]: log(line)
-        if p.returncode: raise RuntimeError("build failed")
-        return tag
+            img = source["image"]
+            if img.startswith("paas/"):   # built here (owner checked in engine._check_platform_image); never on a registry
+                try: self.c.images.get(img); return img
+                except docker.errors.ImageNotFound: raise RuntimeError(f"No such image {img} (built image was pruned; redeploy from source)")
+            creds.pull(app, img, log); return img
+        tag = f"paas/{app}:r{int(time.time()*1000)}"   # unique per build so releases can roll back
+        work = tempfile.mkdtemp(prefix="aloof-build-")
+        try:
+            if source.get("git"): creds.clone(app, source, work, log)
+            elif source.get("upload"): creds.extract_upload(app, source["upload"], work); log("extracted uploaded build context")
+            elif source.get("path"):
+                if os.environ.get("PAAS_ALLOW_PATH_SOURCE") != "1": raise RuntimeError("source.path is disabled on this server; use `aloof deploy` (upload) or git")
+                shutil.rmtree(work); shutil.copytree(source["path"], work, symlinks=True)
+            ctx = os.path.realpath(os.path.join(work, source.get("subdir") or "."))
+            if not ctx.startswith(os.path.realpath(work)) or not os.path.isdir(ctx): raise RuntimeError("subdir not found in source")
+            with creds.docker_config(app) as (env, _):
+                df = source.get("dockerfile")
+                if df:
+                    dfp = os.path.realpath(os.path.join(ctx, df))
+                    if not dfp.startswith(os.path.realpath(work)) or not os.path.isfile(dfp): raise RuntimeError(f"dockerfile {df} not found")
+                    args = ["docker", "build", "-t", tag, "-f", dfp, ctx]
+                else:
+                    if launch.prepare_context(ctx, log, tag, env): return tag
+                    args = ["docker", "build", "-t", tag, ctx]
+                for k, v in (source.get("build_args") or {}).items(): args[2:2] = ["--build-arg", f"{k}={v}"]
+                log("docker build")
+                p = subprocess.run(args, capture_output=True, text=True, env=env, timeout=3600)
+            for line in (p.stdout+p.stderr).splitlines()[-40:]: log(line)
+            if p.returncode: raise RuntimeError("build failed")
+            return tag
+        finally: subprocess.run(["rm", "-rf", work]) if os.path.exists(work) else None
+    def run_once(self, app, image, spec, command, timeout=900):
+        """One-off machine (release_command, cron): same image/env/networks/volumes as the app, removed afterwards."""
+        plan = PLANS[spec["plan"]]; nets = list(spec.get("networks") or [])
+        for n in nets: self._ensure_network(n)
+        kw = dict(name=f"paas-{app}-run-{int(time.time()*1000)%10**8}", environment={**spec.get("env", {}), "PORT": str(spec.get("port", 8080))},
+                  labels={"paas.app": app, "paas.oneoff": "1"}, nano_cpus=int(plan["vcpu"]*1e9), mem_limit=f"{plan['memory_mb']}m",
+                  command=command if isinstance(command, list) else ["sh", "-c", command])
+        if nets: kw["network"] = nets[0]
+        if spec.get("volumes"): kw["volumes"] = {self.volume_ref(v["name"]): {"bind": v["path"], "mode": "rw"} for v in spec["volumes"]}
+        ct = self.c.containers.create(image, **kw)
+        try:
+            for n in nets[1:]: self.c.networks.get(n).connect(ct)
+            ct.start()
+            try: code = ct.wait(timeout=timeout)["StatusCode"]
+            except Exception: ct.kill(); code = 124
+            out = ct.logs().decode(errors="replace")
+            return code, out
+        finally:
+            try: ct.remove(force=True)
+            except Exception: pass
     def start_instance(self, app, image, spec, index):
         plan = PLANS[spec["plan"]]; port = int(spec.get("port", 8080))
         kw = dict(detach=True, name=f"paas-{app}-{index}", environment={**spec.get("env",{}), "PORT":str(port)},
@@ -49,7 +91,7 @@ class LocalDockerDriver(Driver):
         try: self.c.containers.get(kw["name"]).remove(force=True)
         except docker.errors.NotFound: pass
         ct = self.c.containers.run(image, **kw)
-        for n in nets: self._join(ct, n, spec.get("net_alias"), first=(n == nets[0]))
+        for n in nets: self._join(ct, n, (spec.get("net_aliases") or {}).get(n) or spec.get("net_alias"), first=(n == nets[0]))
         try:
             ct.reload(); hp = int(ct.attrs["NetworkSettings"]["Ports"][f"{port}/tcp"][0]["HostPort"])
         except Exception:   # exited immediately (no port mapping): don't leave it restarting forever
@@ -70,7 +112,7 @@ class LocalDockerDriver(Driver):
             if not alias: return
             try: net.disconnect(ct)
             except Exception: pass
-        try: net.connect(ct, aliases=[alias] if alias else None)
+        try: net.connect(ct, aliases=(alias if isinstance(alias, list) else [alias]) if alias else None)
         except docker.errors.APIError as e:
             if "already exists" not in str(e): raise
     def remove_network(self, n):
