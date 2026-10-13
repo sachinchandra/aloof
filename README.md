@@ -1,419 +1,118 @@
-# Gitleaks
+# Aloof
 
-```
-┌─○───┐
-│ │╲  │
-│ │ ○ │
-│ ○ ░ │
-└─░───┘
-```
+**Cheap backends, billed per second in US dollars.** Deploy a Docker image or a git repo with a Dockerfile and get HTTPS at
+`https://<app>.aloof.si`, autoscaling down to zero, persistent volumes, custom domains and simple USD billing through Stripe.
+It stays cheap because phase 1 runs on Hetzner Cloud in the EU (shared-vCPU CX servers). GPUs (Hyperstack VMs, Runpod pods) come in phase 2.
+AI assistants can deploy for you over MCP.
 
-<p align="left">
-  <p align="left">
-	  <a href="https://github.com/gitleaks/gitleaks/actions/workflows/test.yml">
-		  <img alt="Github Test" src="https://github.com/gitleaks/gitleaks/actions/workflows/test.yml/badge.svg">
-	  </a>
-	  <a href="https://hub.docker.com/r/zricethezav/gitleaks">
-		  <img src="https://img.shields.io/docker/pulls/zricethezav/gitleaks.svg" />
-	  </a>
-	  <a href="https://github.com/gitleaks/gitleaks-action">
-        	<img alt="gitleaks badge" src="https://img.shields.io/badge/protected%20by-gitleaks-blue">
-    	 </a>
-	  <a href="https://twitter.com/intent/follow?screen_name=zricethezav">
-		  <img src="https://img.shields.io/twitter/follow/zricethezav?label=Follow%20zricethezav&style=social&color=blue" alt="Follow @zricethezav" />
-	  </a>
-  </p>
-</p>
+> Status: working prototype. Everything below runs end to end on a single box. Going live needs real provider keys, Stripe, SMTP and DNS (see [Go live](#go-live)).
 
-### Join our Discord! [![Discord](https://img.shields.io/discord/1102689410522284044.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/8Hzbrnkr7E)
+## Regions
+Phase 1: all compute and the control plane/edge run in the **EU** on Hetzner Cloud: Nuremberg, Germany (`nbg1`); encrypted off-site backups go to Helsinki, Finland. Other regions are listed as coming soon on /regions. Expect ~10–40 ms within Europe, ~90–110 ms from US East and ~150–200 ms from India or US West. E2E Networks
+(Delhi) stays available as an optional CPU overflow pool and is only listed when its keys are set. Other regions will only be listed once they exist.
 
-Gitleaks is a SAST tool for **detecting** and **preventing** hardcoded secrets like passwords, API keys, and tokens in git repos. Gitleaks is an **easy-to-use, all-in-one solution** for detecting secrets, past or present, in your code.
+**GPUs are coming soon.** Phase 2 adds L4 / RTX 4090 (Runpod pods) and L40 / A100 80GB / H100 (Hyperstack VMs) once there are 10 paying
+customers (`GET /v1/admin/metrics`). Until then `PAAS_GPU_ENABLED=0`: GPU plans are hidden from the API, MCP and `/llms.txt`, deploys
+on them are refused, and the pricing page shows a waitlist (`POST /v1/waitlist`).
 
-```
-➜  ~/code(master) gitleaks git -v
+## Features
+- **Deploy** from an image or git (`aloof deploy`, REST, dashboard or MCP), with rolling redeploys, env vars (encrypted at rest) and health checks with auto-replace.
+- **Autoscaling and scale to zero**: concurrency- and CPU-based. Idle apps sleep and the first request wakes them (≈1 s on CPU) while it's held at the edge.
+- **Volumes** that survive redeploys and restarts, pinned to the node they live on.
+- **Custom domains**: TXT ownership check plus CNAME/A routing, with automatic TLS through Caddy (Let's Encrypt in production).
+- **Multi-cloud scheduler**: bin-packs CPU apps, gives each GPU app a dedicated node, and refuses any pool where a plan would fall under the margin floor. Nodes join over WireGuard and run `paas/agent/agent.py`.
+- **Accounts**: email + password, magic links, session cookies with a CSRF header, and API keys stored only as SHA-256 hashes.
+- **Billing in USD (cents)**: a prepaid wallet with Stripe Checkout top-ups, Stripe subscriptions for the Hobby and Pro tiers, the Stripe customer portal, webhook signature verification,
+  idempotent crediting, and Stripe Tax for VAT/GST/sales tax on invoices. Compute, volumes (GB-month) and egress are metered per second. Razorpay INR/UPI is optional and off by default.
+- **MCP server** (stdio and streamable HTTP with OAuth 2.1: DCR, PKCE, RFC 9728), plus `/llms.txt` and an OpenAPI spec.
 
-    ○
-    │╲
-    │ ○
-    ○ ░
-    ░    gitleaks
+## Pricing (USD, excluding tax)
+| | Price | Fly.io / Render / Railway |
+|---|---|---|
+| Free | $0: 3 apps, shared-1x-256mb/512mb, sleeps after 5 min idle, hard-capped at $1 of usage a month | Fly none · Render $0 · Railway $0 + $1 |
+| Hobby / Pro | $5 / $20 per workspace a month, with the fee returned as included usage | Railway $5 / $20 (same model) · Render Pro $25 |
+| Shared CPU | $1.99 (256 MB) · $3.49 · $5.99 · $11.99 · $44 (4 vCPU / 8 GB) a month | Fly $2.19 · $3.69 · $6.70 · $13.39 |
+| Performance CPU | $24 (1 vCPU / 2 GB) · $59 · $119 · $239 (8 vCPU / 16 GB) a month | Fly $33–264 · Render $25–300 |
+| GPU per hour (phase 2, coming soon) | RTX 4090 $0.79 · L4 $1.10 · L40 $1.89 · A100 80GB $3.99 · H100 $5.49 | Render/Railway none; Fly retired GPUs |
+| Volumes / egress | $0.22 per GB-month / $0.06 per GB | Fly $0.15 / $0.02–0.12 · Render $0.25 / $0.15 · Railway $0.15 / $0.05 |
 
+The full table is at `/pricing`. `paas/plans.py` enforces a 30% minimum margin after payment fees, against worst-case costs converted at a
+pessimistic ₹83/$ (`PAAS_COST_USD_INR`); Hetzner/Hyperstack/Runpod USD list prices get a 10% buffer. On a Hetzner CX43
+(8 vCPU / 16 GB, $18.49 + IPv4) every CPU plan clears 62–79%; the CPX42 fallback is refused for all shared plans. A test fails if any plan or rate falls under it, and the scheduler refuses pools that would.
 
-Finding:     "export BUNDLE_ENTERPRISE__CONTRIBSYS__COM=cafebabe:deadbeef",
-Secret:      cafebabe:deadbeef
-RuleID:      sidekiq-secret
-Entropy:     2.609850
-File:        cmd/generate/config/rules/sidekiq.go
-Line:        23
-Commit:      cd5226711335c68be1e720b318b7bc3135a30eb2
-Author:      John
-Email:       john@users.noreply.github.com
-Date:        2022-08-03T12:31:40Z
-Fingerprint: cd5226711335c68be1e720b318b7bc3135a30eb2:cmd/generate/config/rules/sidekiq.go:sidekiq-secret:23
-```
-
-## Getting Started
-
-Gitleaks can be installed using Homebrew, Docker, or Go. Gitleaks is also available in binary form for many popular platforms and OS types on the [releases page](https://github.com/gitleaks/gitleaks/releases). In addition, Gitleaks can be implemented as a pre-commit hook directly in your repo or as a GitHub action using [Gitleaks-Action](https://github.com/gitleaks/gitleaks-action).
-
-### Installing
-
+## Quick start (local)
+Requires Linux with Docker, Python 3.11+ and sudo.
 ```bash
-# MacOS
-brew install gitleaks
+bash deploy/setup-box.sh      # installs packages, venv, Postgres 16 + registry in Docker, WireGuard hub, example images
+./run.sh                      # supervisord: dockerd, paas (API :8000, edge :8080), mcp (:8001), caddy (:80/:443)
+./run.sh status | restart <prog> | stop      # logs in data/*.log
+```
+| URL | What |
+|---|---|
+| http://localhost:8000/ | landing, `/pricing`, `/docs`, `/dashboard`, `/api/docs` (OpenAPI), `/llms.txt` |
+| https://\<app\>.localhost/ | apps through Caddy (or `http://localhost:8080/_app/<app>/`) |
+| http://localhost:8001/mcp | MCP (OAuth 2.1, or `Authorization: Bearer pk_...`) |
 
-# Docker (DockerHub)
-docker pull zricethezav/gitleaks:latest
-docker run -v ${path_to_host_folder_to_scan}:/path zricethezav/gitleaks:latest [COMMAND] [OPTIONS] [SOURCE_PATH]
+Caddy's local CA is at `data/caddy/caddy/pki/authorities/local/root.crt` (`curl --cacert <it> https://<app>.localhost/`).
 
-# Docker (ghcr.io)
-docker pull ghcr.io/gitleaks/gitleaks:latest
-docker run -v ${path_to_host_folder_to_scan}:/path ghcr.io/gitleaks/gitleaks:latest [COMMAND] [OPTIONS] [SOURCE_PATH]
+## CLI (`cli/aloof`)
+```
+aloof signup you@example.com ; aloof plans
+aloof deploy web --image nginx:alpine --port 80 | --git https://github.com/u/r.git [--ref main] [--plan shared-1x-1gb] [-e K=V] [-n 2]
+aloof status|logs|destroy <app> ; aloof scale <app> 3 ; aloof env <app> K=V K2=
+aloof volumes create data --size 2 ; aloof volumes attach <app> data --path /data ; aloof volumes list|detach|delete
+aloof autoscale <app> --min 0 --max 4 --concurrency 10 [--cpu 70] --idle 300      # min 0 = scale to zero
+aloof health <app> --path /healthz --failures 3
+aloof domains <app> add api.example.in | verify <domain> | list | remove <domain>
+```
+The CLI stores your API URL and key in `~/.paas.json`.
 
-# From Source (make sure `go` is installed)
-git clone https://github.com/gitleaks/gitleaks.git
-cd gitleaks
-make build
+## MCP
+Add `https://mcp.aloof.si/mcp` as a connector in Claude, ChatGPT or Cursor (OAuth), or run it locally:
+```json
+{"mcpServers": {"aloof": {"command": "python3", "args": ["mcp_server/server.py"],
+  "env": {"ALOOF_API_URL": "http://localhost:8000", "ALOOF_API_KEY": "pk_..."}}}}
+```
+Tools: `list_plans, join_gpu_waitlist, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain`.
+
+## Layout
+```
+paas/api.py           REST API, dashboard/site routes, edge proxy
+paas/engine.py        deploy/scale/volumes, scheduling (pick_provider), accounts
+paas/controller.py    autoscaler + health loops
+paas/plans.py         plans (USD), tiers, rates, cost model, fees, 30% margin floor
+paas/billing.py       USD wallet (cents), metering, free-tier cap
+paas/stripe_billing.py  Stripe Checkout, subscriptions, portal, webhooks, Stripe Tax
+paas/razorpay_legacy.py optional INR/UPI top-ups + GST invoices (off by default)
+paas/drivers/         local_docker, remote (node agent + registry), providers (Hetzner, Hyperstack, E2E/Jarvislabs/Krutrim/AWS, self-hosted), runpod (pod driver), wg
+paas/agent/agent.py   node agent (Docker + NVIDIA runtime) on remote VMs
+mcp_server/           MCP server + OAuth 2.1 authorization server
+dashboard/, cli/, deploy/, scripts/, tests/
 ```
 
-### GitHub Action
+## Configuration and secrets
+Nothing secret is committed. At first start the box creates `data/secret.key` (Fernet key for encryption at rest), `data/admin_token` and
+`data/database_url`; `data/` is git-ignored. In production, `deploy/golive.sh` points `PAAS_ENV_FILE` at `deploy/golive.env` (also git-ignored), which holds the Stripe/SMTP/provider secrets. The environment variables `PAAS_SECRET_KEY` (comma list `new,old` for rotation, then run
+`scripts/rotate_secret_key.py`), `PAAS_ADMIN_TOKEN` and `PAAS_DB_URL` override those files. Stripe (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HOBBY`, `STRIPE_PRICE_PRO`, `STRIPE_TAX`), provider and SMTP settings are documented in
+[`deploy/golive.env.example`](deploy/golive.env.example). A provider pool activates once its keys are set (`GET /v1/providers`).
 
-Check out the official [Gitleaks GitHub Action](https://github.com/gitleaks/gitleaks-action)
-
-```
-name: gitleaks
-on: [pull_request, push, workflow_dispatch]
-jobs:
-  scan:
-    name: gitleaks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE}} # Only required for Organizations, not personal accounts.
+## Tests
+```bash
+pip install -r requirements-dev.txt                        # test dependencies (pytest, respx, dnslib, ruff, pip-audit)
+sg docker -c '.venv/bin/python -m pytest -q tests/'        # unit + mocked-cloud node lifecycle (real Docker)
+.venv/bin/python tests/oauth_e2e.py ; .venv/bin/python tests/oauth_password.py
+.venv/bin/python tests/mcp_e2e.py ; .venv/bin/python tests/mcp_volumes.py ; .venv/bin/python tests/ui_smoke.py
+.venv/bin/python tests/loadtest.py <app> <concurrency> <seconds>
 ```
 
-### Pre-Commit
-
-1. Install pre-commit from https://pre-commit.com/#install
-2. Create a `.pre-commit-config.yaml` file at the root of your repository with the following content:
-
-   ```
-   repos:
-     - repo: https://github.com/gitleaks/gitleaks
-       rev: v8.19.0
-       hooks:
-         - id: gitleaks
-   ```
-
-   for a [native execution of GitLeaks](https://github.com/gitleaks/gitleaks/releases) or use the [`gitleaks-docker` pre-commit ID](https://github.com/gitleaks/gitleaks/blob/master/.pre-commit-hooks.yaml) for executing GitLeaks using the [official Docker images](#docker)
-
-3. Auto-update the config to the latest repos' versions by executing `pre-commit autoupdate`
-4. Install with `pre-commit install`
-5. Now you're all set!
-
-```
-➜ git commit -m "this commit contains a secret"
-Detect hardcoded secrets.................................................Failed
-```
-
-Note: to disable the gitleaks pre-commit hook you can prepend `SKIP=gitleaks` to the commit command
-and it will skip running gitleaks
-
-```
-➜ SKIP=gitleaks git commit -m "skip gitleaks check"
-Detect hardcoded secrets................................................Skipped
-```
-
-## Usage
-
-```
-Usage:
-  gitleaks [command]
-
-Available Commands:
-  completion  generate the autocompletion script for the specified shell
-  dir         scan directories or files for secrets
-  git         scan git repositories for secrets
-  help        Help about any command
-  stdin       detect secrets from stdin
-  version     display gitleaks version
-
-Flags:
-  -b, --baseline-path string          path to baseline with issues that can be ignored
-  -c, --config string                 config file path
-                                      order of precedence:
-                                      1. --config/-c
-                                      2. env var GITLEAKS_CONFIG
-                                      3. (target path)/.gitleaks.toml
-                                      If none of the three options are used, then gitleaks will use the default config
-      --enable-rule strings           only enable specific rules by id
-      --exit-code int                 exit code when leaks have been encountered (default 1)
-  -i, --gitleaks-ignore-path string   path to .gitleaksignore file or folder containing one (default ".")
-  -h, --help                          help for gitleaks
-      --ignore-gitleaks-allow         ignore gitleaks:allow comments
-  -l, --log-level string              log level (trace, debug, info, warn, error, fatal) (default "info")
-      --max-decode-depth int          allow recursive decoding up to this depth (default "0", no decoding is done)
-      --max-target-megabytes int      files larger than this will be skipped
-      --no-banner                     suppress banner
-      --no-color                      turn off color for verbose output
-      --redact uint[=100]             redact secrets from logs and stdout. To redact only parts of the secret just apply a percent value from 0..100. For example --redact=20 (default 100%)
-  -f, --report-format string          output format (json, csv, junit, sarif) (default "json")
-  -r, --report-path string            report file
-  -v, --verbose                       show verbose output from scan
-      --version                       version for gitleaks
-
-Use "gitleaks [command] --help" for more information about a command.
-```
-
-### Commands
-
-⚠️ v8.19.0 introduced a change that deprecated `detect` and `protect`. Those commands are still available but
-are hidden in the `--help` menu. Take a look at this [gist](https://gist.github.com/zricethezav/b325bb93ebf41b9c0b0507acf12810d2) for easy command translations.
-If you find v8.19.0 broke an existing command (`detect`/`protect`), please open an issue.
-
-There are three scanning modes: `git`, `dir`, and `stdin`.
-
-#### Git
-The `git` command lets you scan local git repos. Under the hood, gitleaks uses the `git log -p` command to scan patches.
-You can configure the behavior of `git log -p` with the `log-opts` option.
-For example, if you wanted to run gitleaks on a range of commits you could use the following
-command: `gitleaks git -v --log-opts="--all commitA..commitB" path_to_repo`. See the [git log](https://git-scm.com/docs/git-log) documentation for more information.
-If there is no target specified as a positional argument, then gitleaks will attempt to scan the current working directory as a git repo.
-
-#### Dir
-The `dir` (aliases include `files`, `directory`) command lets you scan directories and files. Example: `gitleaks dir -v path_to_directory_or_file`.
-If there is no target specified as a positional argument, then gitleaks will scan the current working directory.
-
-#### Stdin
-You can also stream data to gitleaks with the `stdin` command. Example: `cat some_file | gitleaks -v stdin`
-
-### Creating a baseline
-
-When scanning large repositories or repositories with a long history, it can be convenient to use a baseline. When using a baseline,
-gitleaks will ignore any old findings that are present in the baseline. A baseline can be any gitleaks report. To create a gitleaks report, run gitleaks with the `--report-path` parameter.
-
-```
-gitleaks git --report-path gitleaks-report.json # This will save the report in a file called gitleaks-report.json
-```
-
-Once as baseline is created it can be applied when running the detect command again:
-
-```
-gitleaks git --baseline-path gitleaks-report.json --report-path findings.json
-```
-
-After running the detect command with the --baseline-path parameter, report output (findings.json) will only contain new issues.
-
-## Pre-Commit hook
-
-You can run Gitleaks as a pre-commit hook by copying the example `pre-commit.py` script into
-your `.git/hooks/` directory.
-
-## Configuration
-
-Gitleaks offers a configuration format you can follow to write your own secret detection rules:
-
-```toml
-# Title for the gitleaks configuration file.
-title = "Gitleaks title"
-
-# Extend the base (this) configuration. When you extend a configuration
-# the base rules take precedence over the extended rules. I.e., if there are
-# duplicate rules in both the base configuration and the extended configuration
-# the base rules will override the extended rules.
-# Another thing to know with extending configurations is you can chain together
-# multiple configuration files to a depth of 2. Allowlist arrays are appended
-# and can contain duplicates.
-# useDefault and path can NOT be used at the same time. Choose one.
-[extend]
-# useDefault will extend the base configuration with the default gitleaks config:
-# https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
-useDefault = true
-# or you can supply a path to a configuration. Path is relative to where gitleaks
-# was invoked, not the location of the base config.
-path = "common_config.toml"
-
-# An array of tables that contain information that define instructions
-# on how to detect secrets
-[[rules]]
-
-# Unique identifier for this rule
-id = "awesome-rule-1"
-
-# Short human readable description of the rule.
-description = "awesome rule 1"
-
-# Golang regular expression used to detect secrets. Note Golang's regex engine
-# does not support lookaheads.
-regex = '''one-go-style-regex-for-this-rule'''
-
-# Int used to extract secret from regex match and used as the group that will have
-# its entropy checked if `entropy` is set.
-secretGroup = 3
-
-# Float representing the minimum shannon entropy a regex group must have to be considered a secret.
-entropy = 3.5
-
-# Golang regular expression used to match paths. This can be used as a standalone rule or it can be used
-# in conjunction with a valid `regex` entry.
-path = '''a-file-path-regex'''
-
-# Keywords are used for pre-regex check filtering. Rules that contain
-# keywords will perform a quick string compare check to make sure the
-# keyword(s) are in the content being scanned. Ideally these values should
-# either be part of the identiifer or unique strings specific to the rule's regex
-# (introduced in v8.6.0)
-keywords = [
-  "auth",
-  "password",
-  "token",
-]
-
-# Array of strings used for metadata and reporting purposes.
-tags = ["tag","another tag"]
-
-    # ⚠️ In v8.21.0 `[rules.allowlist]` was replaced with `[[rules.allowlists]]`.
-    # This change was backwards-compatible: instances of `[rules.allowlist]` still  work.  
-    #
-    # You can define multiple allowlists for a rule to reduce false positives.
-    # A finding will be ignored if _ANY_ `[[rules.allowlists]]` matches.
-    [[rules.allowlists]]
-    description = "ignore commit A"
-    # When multiple criteria are defined the default condition is "OR".
-    # e.g., this can match on |commits| OR |paths| OR |stopwords|.
-    condition = "OR"
-    commits = [ "commit-A", "commit-B"]
-    paths = [
-      '''go\.mod''',
-      '''go\.sum'''
-    ]
-    # note: stopwords targets the extracted secret, not the entire regex match
-    # like 'regexes' does. (stopwords introduced in 8.8.0)
-    stopwords = [
-      '''client''',
-      '''endpoint''',
-    ]
-
-    [[rules.allowlists]]
-    # The "AND" condition can be used to make sure all criteria match.
-    # e.g., this matches if |regexes| AND |paths| are satisfied.
-    condition = "AND"
-    # note: |regexes| defaults to check the _Secret_ in the finding.
-    # Acceptable values for |regexTarget| are "secret" (default), "match", and "line".
-    regexTarget = "match"
-    regexes = [ '''(?i)parseur[il]''' ]
-    paths = [ '''package-lock\.json''' ]
-
-# You can extend a particular rule from the default config. e.g., gitlab-pat
-# if you have defined a custom token prefix on your GitLab instance
-[[rules]]
-id = "gitlab-pat"
-# all the other attributes from the default rule are inherited
-
-    [[rules.allowlists]]
-    regexTarget = "line"
-    regexes = [ '''MY-glpat-''' ]
-
-# This is a global allowlist which has a higher order of precedence than rule-specific allowlists.
-# If a commit listed in the `commits` field below is encountered then that commit will be skipped and no
-# secrets will be detected for said commit. The same logic applies for regexes and paths.
-[allowlist]
-description = "global allow list"
-commits = [ "commit-A", "commit-B", "commit-C"]
-paths = [
-  '''gitleaks\.toml''',
-  '''(.*?)(jpg|gif|doc)'''
-]
-
-# note: (global) regexTarget defaults to check the _Secret_ in the finding.
-# if regexTarget is not specified then _Secret_ will be used.
-# Acceptable values for regexTarget are "match" and "line"
-regexTarget = "match"
-regexes = [
-  '''219-09-9999''',
-  '''078-05-1120''',
-  '''(9[0-9]{2}|666)-\d{2}-\d{4}''',
-]
-# note: stopwords targets the extracted secret, not the entire regex match
-# like 'regexes' does. (stopwords introduced in 8.8.0)
-stopwords = [
-  '''client''',
-  '''endpoint''',
-]
-```
-
-Refer to the default [gitleaks config](https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml) for examples or follow the [contributing guidelines](https://github.com/gitleaks/gitleaks/blob/master/CONTRIBUTING.md) if you would like to contribute to the default configuration. Additionally, you can check out [this gitleaks blog post](https://blog.gitleaks.io/stop-leaking-secrets-configuration-2-3-aeed293b1fbf) which covers advanced configuration setups.
-
-### Additional Configuration
-
-#### gitleaks:allow
-
-If you are knowingly committing a test secret that gitleaks will catch you can add a `gitleaks:allow` comment to that line which will instruct gitleaks
-to ignore that secret. Ex:
-
-```
-class CustomClass:
-    discord_client_secret = '8dyfuiRyq=vVc3RRr_edRk-fK__JItpZ'  #gitleaks:allow
-
-```
-
-#### .gitleaksignore
-
-You can ignore specific findings by creating a `.gitleaksignore` file at the root of your repo. In release v8.10.0 Gitleaks added a `Fingerprint` value to the Gitleaks report. Each leak, or finding, has a Fingerprint that uniquely identifies a secret. Add this fingerprint to the `.gitleaksignore` file to ignore that specific secret. See Gitleaks' [.gitleaksignore](https://github.com/gitleaks/gitleaks/blob/master/.gitleaksignore) for an example. Note: this feature is experimental and is subject to change in the future.
-
-#### Decoding
-
-Sometimes secrets are encoded in a way that can make them difficult to find
-with just regex. Now you can tell gitleaks to automatically find and decode
-encoded text. The flag `--max-decode-depth` enables this feature (the default
-value "0" means the feature is disabled by default).
-
-Recursive decoding is supported since decoded text can also contain encoded
-text.  The flag `--max-decode-depth` sets the recursion limit. Recursion stops
-when there are no new segments of encoded text to decode, so setting a really
-high max depth doesn't mean it will make that many passes. It will only make as
-many as it needs to decode the text. Overall, decoding only minimally increases
-scan times.
-
-The findings for encoded text differ from normal findings in the following
-ways:
-
-- The location points the bounds of the encoded text
-  - If the rule matches outside the encoded text, the bounds are adjusted to
-    include that as well
-- The match and secret contain the decoded value
-- Two tags are added `decoded:<encoding>` and `decode-depth:<depth>`
-
-Currently supported encodings:
-
-- `base64` (both standard and base64url)
-
-## Sponsorships
-
-<p align="left">
-	<h3><a href="https://coderabbit.ai/?utm_source=oss&utm_medium=sponsorship&utm_campaign=gitleaks">coderabbit.ai</h3>
-	  <a href="https://coderabbit.ai/?utm_source=oss&utm_medium=sponsorship&utm_campaign=gitleaks">
-		  <img alt="CodeRabbit.ai Sponsorship" src="https://github.com/gitleaks/gitleaks/assets/15034943/76c30a85-887b-47ca-9956-17a8e55c6c41" width=200>
-	  </a>
-</p>
-<p align="left">
-	  <a href="https://www.tines.com/?utm_source=oss&utm_medium=sponsorship&utm_campaign=gitleaks">
-		  <img alt="Tines Sponsorship" src="https://user-images.githubusercontent.com/15034943/146411864-4878f936-b4f7-49a0-b625-f9f40c704bfa.png" width=200>
-	  </a>
-  </p>
-
-
-## Exit Codes
-
-You can always set the exit code when leaks are encountered with the --exit-code flag. Default exit codes below:
-
-```
-0 - no leaks present
-1 - leaks or error encountered
-126 - unknown flag
-```
+## Go live (Hetzner)
+1. `cp deploy/golive.env.example deploy/golive.env` and fill it in: `HCLOUD_TOKEN`, `ACME_EMAIL`, Stripe keys and price IDs, SMTP, seller details.
+2. `python3 deploy/hetzner_golive.py` (needs `~/.ssh/id_ed25519.pub`). It creates the firewall and a CX33 `aloof-edge` in `fsn1`, waits for
+   cloud-init to run `deploy/setup-box.sh`, copies `golive.env` over SSH with the server IP filled in, runs `deploy/golive.sh` (Caddy with
+   Let's Encrypt), and prints the DNS records.
+3. Create the DNS records it prints: `A`/`AAAA` for `aloof.si`, `www`, `api`, `mcp` and `*` pointing at the server.
+4. Point the Stripe webhook at `https://api.aloof.si/v1/billing/stripe/webhook`.
+CPU nodes (CX43) are then created and deleted on demand by the scheduler with the same `HCLOUD_TOKEN`.
+
+## License
+[MIT](LICENSE)
