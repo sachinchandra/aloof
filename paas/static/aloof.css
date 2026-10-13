@@ -206,3 +206,6 @@ input,select{transition:border-color .15s,box-shadow .15s}input:focus,select:foc
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .faq{border-bottom:1px solid var(--line);padding:16px 0}.faq summary{cursor:pointer;font-weight:650;font-size:16px;list-style:none;display:flex;justify-content:space-between}.faq summary:after{content:"+";color:var(--fg3);font-size:20px;line-height:1}.faq[open] summary:after{content:"−"}.faq p{margin:10px 0 0;color:var(--fg2)}
 #how .ico{font-weight:750;font-size:16px;color:var(--acc)}
+/* ---- logo v2: Apex mark (alt concepts in /static/icons/alt) ---- */
+.logo{text-transform:lowercase;font-weight:650;letter-spacing:-.035em;gap:10px}
+.logo i{width:22px;height:22px;border-radius:0;box-shadow:none;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3.5 28.5 27.5h-6.2L16 15.2 9.7 27.5H3.5Z'/%3E%3Ccircle cx='16' cy='24.2' r='3'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3.5 28.5 27.5h-6.2L16 15.2 9.7 27.5H3.5Z'/%3E%3Ccircle cx='16' cy='24.2' r='3'/%3E%3C/svg%3E") center/contain no-repeat}
