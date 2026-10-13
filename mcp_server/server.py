@@ -113,6 +113,47 @@ def join_gpu_waitlist(email: str, gpu: str = "", note: str = "") -> dict:
     """GPUs (L4, RTX 4090, L40, A100 80GB, H100) are coming soon. Add an email to the waitlist; optional `gpu` plan id
     (e.g. 'gpu-h100') and a short note on the workload."""
     return _r("POST", "/v1/waitlist", json={"email": email, **({"gpu": gpu} if gpu else {}), **({"note": note} if note else {})})
+@mcp.tool()
+def list_releases(name: str, api_key: str = "") -> list | dict:
+    """Release history of an app (every deploy, config change and rollback is a numbered release; status active/superseded/failed)."""
+    return _r("GET", f"/v1/apps/{name}/releases", api_key)
+@mcp.tool()
+def rollback_app(name: str, version: int | None = None, api_key: str = "") -> dict:
+    """Roll back to an earlier release (default: the previous one). Zero downtime, no rebuild. Poll get_status."""
+    return _r("POST", f"/v1/apps/{name}/rollback", api_key, json={"version": version})
+@mcp.tool()
+def create_postgres(name: str, plan: str = "pg-dev", api_key: str = "") -> dict:
+    """Create a managed Postgres 16 database (plans: pg-dev $2.99/mo, pg-basic $9.99, pg-standard $28.99, pg-perf $60.99; daily
+    backups, 7 kept). Then attach_postgres to inject DATABASE_URL into an app."""
+    return _r("POST", "/v1/pg", api_key, json={"name": name, "plan": plan})
+@mcp.tool()
+def list_postgres(api_key: str = "") -> list | dict:
+    """List managed Postgres databases, status, attached apps and backups."""
+    return _r("GET", "/v1/pg", api_key)
+@mcp.tool()
+def attach_postgres(name: str, app: str, var: str = "DATABASE_URL", api_key: str = "") -> dict:
+    """Connect an app to a database over a private network and inject its connection URL as env `var` (rolling redeploy)."""
+    return _r("POST", f"/v1/pg/{name}/attach", api_key, json={"app": app, "var": var})
+@mcp.tool()
+def backup_postgres(name: str, api_key: str = "") -> dict:
+    """Take an on-demand pg_dump backup now (daily backups happen automatically)."""
+    return _r("POST", f"/v1/pg/{name}/backups", api_key)
+@mcp.tool()
+def snapshot_volume(volume: str, api_key: str = "") -> dict:
+    """Snapshot a volume (tar.gz, 10 kept). Restore with restore_volume."""
+    return _r("POST", f"/v1/volumes/{volume}/snapshots", api_key)
+@mcp.tool()
+def restore_volume(volume: str, snapshot_id: str, api_key: str = "") -> dict:
+    """Restore a volume from a snapshot. The attached app is stopped during the restore and restarted after. Destructive: confirm with the user first."""
+    return _r("POST", f"/v1/volumes/{volume}/restore", api_key, json={"snapshot_id": snapshot_id})
+@mcp.tool()
+def exec_command(name: str, command: str, api_key: str = "") -> dict:
+    """Run a shell command in a running instance of the app (like `fly ssh console -C`). Audited. Returns exit_code and output."""
+    return _r("POST", f"/v1/apps/{name}/exec", api_key, json={"command": command})
+@mcp.tool()
+def add_log_drain(name: str, url: str, api_key: str = "") -> dict:
+    """Forward the app's logs to https:// (JSON array POST) or syslog+tls://host:port / syslog+tcp:// / syslog+udp:// (RFC 5424)."""
+    return _r("POST", f"/v1/apps/{name}/drains", api_key, json={"url": url})
 mcp.custom_route("/oauth/login", methods=["GET","POST"])(login_page)
 if __name__ == "__main__":
     mcp.run("streamable-http" if HTTP_MODE else "stdio")

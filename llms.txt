@@ -27,13 +27,22 @@
   POST /v1/billing/subscribe {"tier":"pro"} -> Stripe subscription; POST /v1/billing/portal -> Stripe customer portal
 - Humans sign up at /login (email+password or magic link); API keys at /dashboard -> Account
 - POST /v1/waitlist {"email","gpu"}: join the GPU waitlist
+- Releases: GET /v1/apps/{name}/releases; POST /v1/apps/{name}/rollback {"version":N} (omit = previous). Deploys are zero-downtime: a release that fails readiness never takes traffic
+- Managed Postgres 16: GET /v1/pg/plans (pg-dev $2.99/mo, pg-basic $9.99, pg-standard $28.99, pg-perf $60.99); POST /v1/pg {"name","plan"};
+  POST /v1/pg/{name}/attach {"app","var":"DATABASE_URL"} (injects the URL, private network); POST/GET /v1/pg/{name}/backups (daily, 7 kept, $0.22/GB-month);
+  POST /v1/pg/{name}/restore {"backup_id"}; GET /v1/pg/{name}?reveal=true -> database_url; DELETE /v1/pg/{name}
+- Volume snapshots: POST/GET /v1/volumes/{vol}/snapshots; POST /v1/volumes/{vol}/restore {"snapshot_id"} (app restarts); DELETE /v1/volumes/{vol}/snapshots/{id}
+- Exec/console (audited): POST /v1/apps/{name}/exec {"command":"ls /"}; WebSocket /v1/apps/{name}/console (Bearer key; CLI `aloof ssh <app>`); GET /v1/audit
+- Logs: GET /v1/apps/{name}/logs/history?since=&contains= (retention 1/7/30 days on free/hobby/pro);
+  POST/GET/DELETE /v1/apps/{name}/drains {"url":"https://...|syslog+tls://host:port|syslog+tcp://|syslog+udp://"}
 - GET /v1/usage. OpenAPI: {{API}}/api/docs (spec: {{API}}/api/openapi.json); human docs: {{API}}/docs
 
 ## MCP
 - Streamable HTTP: {{MCP}} (OAuth 2.1 + PKCE with dynamic client registration; an API key as Bearer also works)
 - stdio: `python mcp_server/server.py` (env ALOOF_API_URL, ALOOF_API_KEY)
 - Tools: list_plans, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage,
-  create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain
+  create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain, list_releases, rollback_app,
+  create_postgres, list_postgres, attach_postgres, backup_postgres, snapshot_volume, restore_volume, exec_command, add_log_drain
 
 ## App contract
-Listen on $PORT (default 8080) over HTTP. Put persistent data on a mounted volume. (Once GPUs launch, GPU plans expose one NVIDIA GPU via CUDA.)
+Listen on $PORT (default 8080) over HTTP. Put persistent data on a mounted volume, or use managed Postgres via $DATABASE_URL. (Once GPUs launch, GPU plans expose one NVIDIA GPU via CUDA.)

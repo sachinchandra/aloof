@@ -30,6 +30,24 @@ a = s.add_parser("autoscale"); a.add_argument("name"); a.add_argument("--min", t
 a.add_argument("--concurrency", type=int, default=10); a.add_argument("--cpu", type=float); a.add_argument("--idle", type=int, default=60); a.add_argument("--off", action="store_true")
 a = s.add_parser("domains"); a.add_argument("name"); a.add_argument("action", choices=["add","list","verify","remove"]); a.add_argument("domain", nargs="?")
 a = s.add_parser("health"); a.add_argument("name"); a.add_argument("--path", default="/"); a.add_argument("--failures", type=int, default=3)
+a = s.add_parser("releases"); a.add_argument("name")
+a = s.add_parser("rollback"); a.add_argument("name"); a.add_argument("version", nargs="?", type=int, help="default: previous release")
+a = s.add_parser("pg", help="managed Postgres"); ps = a.add_subparsers(dest="pcmd", required=True)
+x = ps.add_parser("create"); x.add_argument("name"); x.add_argument("--plan", default="pg-dev")
+ps.add_parser("list"); ps.add_parser("plans")
+for c in ("status", "destroy", "backup", "backups", "url"): ps.add_parser(c).add_argument("name")
+x = ps.add_parser("attach"); x.add_argument("name"); x.add_argument("app"); x.add_argument("--var", default="DATABASE_URL")
+x = ps.add_parser("detach"); x.add_argument("name"); x.add_argument("app")
+x = ps.add_parser("restore"); x.add_argument("name"); x.add_argument("backup_id")
+a = s.add_parser("snapshots", help="volume snapshots"); ss = a.add_subparsers(dest="scmd", required=True)
+for c in ("create", "list"): ss.add_parser(c).add_argument("volume")
+x = ss.add_parser("restore"); x.add_argument("volume"); x.add_argument("snapshot_id")
+x = ss.add_parser("delete"); x.add_argument("volume"); x.add_argument("snapshot_id")
+a = s.add_parser("ssh", help="interactive shell in a running instance"); a.add_argument("name"); a.add_argument("--instance")
+a = s.add_parser("exec", help="run one command"); a.add_argument("name"); a.add_argument("command", nargs=argparse.REMAINDER)
+a = s.add_parser("drains", help="log forwarding"); a.add_argument("name"); a.add_argument("action", choices=["add", "list", "remove"]); a.add_argument("target", nargs="?")
+a = s.add_parser("history", help="retained logs"); a.add_argument("name"); a.add_argument("--since", type=float, default=0, help="hours ago"); a.add_argument("--grep")
+a = s.add_parser("audit"); a.add_argument("--app")
 o = p.parse_args()
 pj = lambda x: print(json.dumps(x, indent=2))
 if o.cmd == "signup":
@@ -77,3 +95,100 @@ elif o.cmd == "domains":
     elif o.action == "verify": show(call("POST", f"/v1/apps/{o.name}/domains/{o.domain}/verify"))
     else: pj(call("DELETE", f"/v1/apps/{o.name}/domains/{o.domain}"))
 elif o.cmd == "health": pj(call("PUT", f"/v1/apps/{o.name}/health", {"path": o.path, "failures": o.failures})["spec"]["health"])
+
+elif o.cmd == "releases":
+    for r in call("GET", f"/v1/apps/{o.name}/releases"):
+        print(f"v{r['version']:<4} {r['status']:<11} {time.strftime('%Y-%m-%d %H:%M', time.localtime(r['created']))}  {r['reason'] or '':<22} {r['image'] or ''}")
+elif o.cmd == "rollback":
+    r = call("POST", f"/v1/apps/{o.name}/rollback", {"version": o.version}); print("rolling back", r["name"])
+    while True:
+        time.sleep(2); r = call("GET", f"/v1/apps/{o.name}"); print(" ", r["status"])
+        if r["status"] in ("running", "failed"): break
+    print(r.get("error") or "rolled back; live: " + r["url"])
+elif o.cmd == "pg":
+    if o.pcmd == "create": r = call("POST", "/v1/pg", {"name": o.name, "plan": o.plan}); print(f"creating {r['name']} ({r['plan']}, ${r['price_usd_month']}/mo). Attach: aloof pg attach {r['name']} <app>")
+    elif o.pcmd == "list":
+        for d in call("GET", "/v1/pg"): print(f"{d['name']:<20} {d['plan']:<12} {str(d['status']):<9} attached: {', '.join(x['app'] for x in d['attached']) or '-'}")
+    elif o.pcmd == "plans":
+        for pl in call("GET", "/v1/pg/plans")["plans"]: print(f"{pl['id']:<12} {pl['vcpu']} vCPU {pl['memory_mb']:>6}MB {pl['disk_gb']:>4}GB  ${pl['price_usd_month']}/mo  {pl['note']}")
+    elif o.pcmd == "status": pj(call("GET", f"/v1/pg/{o.name}"))
+    elif o.pcmd == "url": print(call("GET", f"/v1/pg/{o.name}?reveal=true")["database_url"])
+    elif o.pcmd == "attach": r = call("POST", f"/v1/pg/{o.name}/attach", {"app": o.app, "var": o.var}); print(f"attached; ${o.var} injected, redeploying {r['name']}")
+    elif o.pcmd == "detach": call("DELETE", f"/v1/pg/{o.name}/attach/{o.app}"); print("detached; redeploying", o.app)
+    elif o.pcmd == "backup": pj(call("POST", f"/v1/pg/{o.name}/backups"))
+    elif o.pcmd == "backups":
+        for b in call("GET", f"/v1/pg/{o.name}/backups"): print(f"{b['id']}  {b['size_bytes']:>10} B  {time.strftime('%Y-%m-%d %H:%M', time.localtime(b['created']))}  {b['note']}")
+    elif o.pcmd == "restore": pj(call("POST", f"/v1/pg/{o.name}/restore", {"backup_id": o.backup_id}))
+    elif o.pcmd == "destroy": pj(call("DELETE", f"/v1/pg/{o.name}"))
+elif o.cmd == "snapshots":
+    if o.scmd == "create": pj(call("POST", f"/v1/volumes/{o.volume}/snapshots"))
+    elif o.scmd == "list":
+        for b in call("GET", f"/v1/volumes/{o.volume}/snapshots"): print(f"{b['id']}  {b['size_bytes']:>10} B  {time.strftime('%Y-%m-%d %H:%M', time.localtime(b['created']))}")
+    elif o.scmd == "restore": pj(call("POST", f"/v1/volumes/{o.volume}/restore", {"snapshot_id": o.snapshot_id}))
+    else: pj(call("DELETE", f"/v1/volumes/{o.volume}/snapshots/{o.snapshot_id}"))
+elif o.cmd == "exec":
+    r = call("POST", f"/v1/apps/{o.name}/exec", {"command": o.command}); sys.stdout.write(r["output"]); sys.exit(r["exit_code"])
+elif o.cmd == "drains":
+    if o.action == "add": pj(call("POST", f"/v1/apps/{o.name}/drains", {"url": o.target}))
+    elif o.action == "list": pj(call("GET", f"/v1/apps/{o.name}/drains"))
+    else: pj(call("DELETE", f"/v1/apps/{o.name}/drains/{o.target}"))
+elif o.cmd == "history":
+    import urllib.parse as up
+    qs = up.urlencode({"since": time.time() - o.since * 3600 if o.since else 0, **({"contains": o.grep} if o.grep else {})})
+    r = call("GET", f"/v1/apps/{o.name}/logs/history?{qs}")
+    for l in r["lines"]: print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(l["ts"])), l["instance"][:12], l["message"])
+elif o.cmd == "audit":
+    for e in call("GET", "/v1/audit" + (f"?app_name={o.app}" if o.app else "")): print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(e["ts"])), e["app"] or "-", e["action"], e["detail"], e["ip"] or "")
+elif o.cmd == "ssh":
+    # minimal RFC 6455 client (stdlib only): raw TTY <-> WebSocket
+    import socket, ssl, base64, struct, select, termios, tty, shutil, urllib.parse as up
+    u = up.urlsplit(API); host = u.hostname; port = u.port or (443 if u.scheme == "https" else 80)
+    s0 = socket.create_connection((host, port)); s0 = ssl.create_default_context().wrap_socket(s0, server_hostname=host) if u.scheme == "https" else s0
+    k = base64.b64encode(os.urandom(16)).decode(); path = f"/v1/apps/{o.name}/console" + (f"?instance={o.instance}" if o.instance else "")
+    s0.sendall((f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {k}\r\n"
+                f"Sec-WebSocket-Version: 13\r\nAuthorization: Bearer {KEY}\r\n\r\n").encode())
+    hdr = b""
+    while b"\r\n\r\n" not in hdr:
+        c = s0.recv(1)
+        if not c: sys.exit("connection closed")
+        hdr += c
+    if b" 101 " not in hdr.split(b"\r\n")[0]: sys.exit("console refused: " + hdr.split(b"\r\n")[0].decode())
+    def send(op, data):
+        m = os.urandom(4); n = len(data)
+        h = bytes([0x80 | op]) + (bytes([0x80 | n]) if n < 126 else (bytes([0xFE]) + struct.pack(">H", n) if n < 65536 else bytes([0xFF]) + struct.pack(">Q", n)))
+        s0.sendall(h + m + bytes(b ^ m[i % 4] for i, b in enumerate(data)))
+    buf = b""
+    def frames():
+        global buf
+        out = []
+        while True:
+            if len(buf) < 2: return out
+            op = buf[0] & 15; n = buf[1] & 127; i = 2
+            if n == 126:
+                if len(buf) < 4: return out
+                n = struct.unpack(">H", buf[2:4])[0]; i = 4
+            elif n == 127:
+                if len(buf) < 10: return out
+                n = struct.unpack(">Q", buf[2:10])[0]; i = 10
+            if len(buf) < i + n: return out
+            out.append((op, buf[i:i+n])); buf = buf[i+n:]
+    sz = shutil.get_terminal_size(); send(1, json.dumps({"resize": [sz.lines, sz.columns]}).encode())
+    fd = sys.stdin.fileno(); old = termios.tcgetattr(fd) if os.isatty(fd) else None
+    try:
+        if old: tty.setraw(fd)
+        while True:
+            r, _, _ = select.select([s0, fd], [], [])
+            if fd in r:
+                d = os.read(fd, 4096)
+                if not d: break
+                send(2, d)
+            if s0 in r:
+                d = s0.recv(65536)
+                if not d: break
+                buf += d
+                for op, data in frames():
+                    if op == 8: raise SystemExit(0)
+                    if op in (1, 2): os.write(sys.stdout.fileno(), data)
+    finally:
+        if old: termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        print("\r\nconnection closed")

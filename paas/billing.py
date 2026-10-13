@@ -29,19 +29,27 @@ def _debit(acct, amount, kind, ref, now):
 def meter_tick(now=None):
     """Meter compute (per second), volumes (GB-month, provisioned size) and egress (per GB beyond the tier allowance).
     All amounts in US cents. Tier fee is charged at the start of each month unless a Stripe subscription pays it."""
-    from .plans import TIERS, RATES, HOURS_MONTH
+    from .plans import TIERS, RATES, HOURS_MONTH, PG_PLANS
     now = now or time.time(); mk = month_key(now); charges = {}   # acct -> {kind: (qty, cost)}
     add = lambda a, k, qty, cost: charges.setdefault(a, {}).__setitem__(k, tuple(x + y for x, y in zip(charges.get(a, {}).get(k, (0, 0)), (qty, cost))))
     for i in q("select i.id, i.started, a.account_id, a.spec from instances i join apps a on a.name=i.app where i.status='running'"):
         m = q("select last_billed from meter where instance_id=?", (i["id"],), one=True); last = m["last_billed"] if m else i["started"]
         hrs = max(0, now - last) / 3600
         q("insert into meter(instance_id,last_billed) values(?,?) on conflict(instance_id) do update set last_billed=excluded.last_billed", (i["id"], now))
-        add(i["account_id"], "compute", hrs, hrs * PLANS[load_spec(i["spec"])["plan"]]["price_usd_hr"] * 100)
+        sp = load_spec(i["spec"]); rate = PLANS[sp["plan"]]["price_usd_hr"]
+        if sp.get("kind") == "postgres" and sp.get("pg_plan") in PG_PLANS:   # pg plan price minus its disk (metered as a volume)
+            pp = PG_PLANS[sp["pg_plan"]]; rate = (pp["price_usd_month"] - pp["disk_gb"] * RATES["volume_usd_gb_month"]) / HOURS_MONTH
+        add(i["account_id"], "postgres" if sp.get("kind") == "postgres" else "compute", hrs, hrs * rate * 100)
     for v in q("select name, account_id, size_gb, created from volumes"):
         key = "vol:" + v["name"]; m = q("select last_billed from meter where instance_id=?", (key,), one=True); last = m["last_billed"] if m else v["created"]
         gbm = v["size_gb"] * max(0, now - last) / (HOURS_MONTH * 3600)
         q("insert into meter(instance_id,last_billed) values(?,?) on conflict(instance_id) do update set last_billed=excluded.last_billed", (key, now))
         add(v["account_id"], "volume", gbm, gbm * RATES["volume_usd_gb_month"] * 100)
+    for r in q("select id, account_id, size_bytes, created from archives"):   # Postgres backups + volume snapshots, per GB-month
+        key = "arc:" + r["id"]; m = q("select last_billed from meter where instance_id=?", (key,), one=True); last = m["last_billed"] if m else r["created"]
+        gbm = (r["size_bytes"] or 0) / 1e9 * max(0, now - last) / (HOURS_MONTH * 3600)
+        q("insert into meter(instance_id,last_billed) values(?,?) on conflict(instance_id) do update set last_billed=excluded.last_billed", (key, now))
+        add(r["account_id"], "backup", gbm, gbm * RATES["backup_usd_gb_month"] * 100)
     drained = {k: EGRESS.pop(k) for k in list(EGRESS)}
     for app, nbytes in drained.items():
         a = q("select account_id from apps where name=?", (app,), one=True)
@@ -56,7 +64,7 @@ def meter_tick(now=None):
         if tier["fee_usd"] and not a.get("stripe_subscription"): _debit(a["id"], tier["fee_usd"] * 100, "plan", f"{a['tier']} plan {mk}", now)
     for acct, kinds in charges.items():
         tier = TIERS.get((q("select tier from accounts where id=?", (acct,), one=True) or {}).get("tier") or "free", TIERS["free"])
-        before = sum(_month(acct, mk, k)[1] for k in ("compute", "volume", "egress"))
+        before = sum(_month(acct, mk, k)[1] for k in ("compute", "volume", "egress", "postgres", "backup"))
         for k, (qty, cost) in kinds.items(): _bump(acct, mk, k, qty, cost)
         total = sum(c for _, c in kinds.values()); after = before + total
         billable = max(0, after - tier["included_usage_usd"] * 100) - max(0, before - tier["included_usage_usd"] * 100)

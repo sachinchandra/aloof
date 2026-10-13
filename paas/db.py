@@ -53,6 +53,17 @@ update usage_month set cost_cents = cost_inr * 100.0 / 88.0;
 create table if not exists stripe_sessions(id TEXT primary key, account_id bigint, kind TEXT, credit_cents REAL, amount_cents bigint, tier TEXT,
   status TEXT, payment_intent TEXT, invoice_id TEXT, invoice_url TEXT, created REAL, updated REAL);
 create table if not exists stripe_events(id TEXT primary key, type TEXT, received REAL);
+"""),
+    # v5: Fly-parity: releases/rollback, managed Postgres, archives (pg backups + volume snapshots), audit log, log drains
+    (5, """
+create table if not exists releases(id AUTOPK, app TEXT, version int, image TEXT, spec TEXT, status TEXT, reason TEXT, created REAL);
+create index if not exists releases_app on releases(app, version);
+create table if not exists pg_dbs(name TEXT primary key, account_id bigint, app TEXT, password_enc TEXT, plan TEXT, disk_gb int, created REAL, attached TEXT);
+create table if not exists archives(id TEXT primary key, kind TEXT, owner TEXT, account_id bigint, path TEXT, size_bytes bigint, created REAL, note TEXT);
+create index if not exists archives_owner on archives(kind, owner);
+create table if not exists audit(id AUTOPK, ts REAL, account_id bigint, app TEXT, action TEXT, detail TEXT, ip TEXT);
+create index if not exists audit_acct on audit(account_id, id);
+create table if not exists drains(id TEXT primary key, app TEXT, account_id bigint, kind TEXT, url TEXT, created REAL, last_ok REAL, last_error TEXT, sent bigint default 0);
 """)
 ]
 def _dialect(sql):
@@ -89,6 +100,7 @@ def migrate():
         if v in done: continue
         executescript(_dialect(sql)); q("insert into schema_migrations values(?,?)", (v, time.time()))
 migrate()
+def audit(account_id, app, action, detail="", ip=None): q("insert into audit(ts,account_id,app,action,detail,ip) values(?,?,?,?,?,?)", (time.time(), account_id, app, action, (detail or "")[:2000], ip))
 def event(app, msg): q("insert into events(app,ts,msg) values(?,?,?)", (app, time.time(), msg))
 def kv_put(kind, k, v, ttl=None):
     q("insert into kv(kind,k,v,exp) values(?,?,?,?) on conflict(kind,k) do update set v=excluded.v, exp=excluded.exp", (kind, k, v, time.time()+ttl if ttl else None))

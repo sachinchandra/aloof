@@ -1,5 +1,5 @@
-import os, json, itertools, httpx, time, asyncio
-from fastapi import FastAPI, Header, HTTPException, Request, Depends, Cookie
+import os, json, itertools, httpx, time, asyncio, socket
+from fastapi import FastAPI, Header, HTTPException, Request, Depends, Cookie, WebSocket
 from fastapi.responses import PlainTextResponse, HTMLResponse, FileResponse, StreamingResponse, Response, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from . import engine
@@ -82,12 +82,13 @@ def providers():
     return out
 @app.post("/v1/apps")
 def deploy(r: DeployReq, a=Depends(acct)):
+    if r.name.startswith("pg-"): raise HTTPException(400, "app names starting with pg- are reserved for managed Postgres")
     spec = r.model_dump(exclude_unset=True) | {"name": r.name, "source": r.source.model_dump()}; spec["source"] = {k:v for k,v in spec["source"].items() if v}
     try: return with_url(engine.deploy(a["id"], spec))
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
 @app.get("/v1/apps")
-def list_apps(a=Depends(acct)): return [with_url(engine.get_app(r["name"])) for r in q("select name from apps where account_id=? and status!='destroyed'", (a["id"],))]
+def list_apps(a=Depends(acct)): return [with_url(engine.get_app(r["name"])) for r in q("select name from apps where account_id=? and status!='destroyed' and name not like ?", (a["id"], "pg-%"))]
 @app.get("/v1/apps/{name}")
 def get_app(name: str, a=Depends(acct)): return with_url(own(name, a))
 @app.get("/v1/apps/{name}/logs", response_class=PlainTextResponse)
@@ -181,7 +182,7 @@ def del_domain(name: str, domain: str, a=Depends(acct)): own(name, a); q("delete
 SYSTEM_HOSTS = {API_HOST, MCP_HOST} | {h for d in APP_DOMAINS for h in (d, f"www.{d}", f"api.{d}", f"mcp.{d}")}
 def _app_of(host):
     for d in APP_DOMAINS:
-        if host.endswith("." + d) and host not in SYSTEM_HOSTS and "." not in host[:-len(d)-1]: return host[:-len(d)-1]
+        if host.endswith("." + d) and host not in SYSTEM_HOSTS and "." not in host[:-len(d)-1] and not host.startswith("pg-"): return host[:-len(d)-1]
 @app.get("/v1/tls/ask")
 def tls_ask(domain: str):
     """Caddy on_demand_tls gate: only issue certs for our hosts, live app subdomains and verified custom domains."""
@@ -433,6 +434,173 @@ def legal_page(request: Request): return site.legal(request.url.path.strip("/"),
 @app.get("/dashboard", response_class=HTMLResponse)
 def dash(): return open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND)
 
+
+# ---------------- Fly parity: releases/rollback, managed Postgres, snapshots, exec/console, log drains/history, audit ----------------
+from . import parity
+from .db import audit as _audit
+def _ip(request): return request.client.host if request.client else None
+@app.get("/v1/apps/{name}/releases")
+def app_releases(name: str, a=Depends(acct)): own(name, a); return engine.releases(name)
+class RollbackReq(BaseModel): version: int|None=None
+@app.post("/v1/apps/{name}/rollback")
+def app_rollback(name: str, request: Request, b: RollbackReq|None=None, a=Depends(acct)):
+    """Redeploy an earlier release (default: the previous one) with zero downtime. No rebuild."""
+    own(name, a)
+    try: r = engine.rollback(name, b.version if b else None)
+    except ValueError as e: raise HTTPException(400, str(e))
+    _audit(a["id"], name, "rollback", f"to v{b.version}" if b and b.version else "previous", _ip(request)); return with_url(r)
+# managed Postgres
+class PgReq(BaseModel): name: str; plan: str="pg-dev"
+def own_pg(n, a):
+    d = q("select * from pg_dbs where name=?", (n,), one=True)
+    if not d or d["account_id"] != a["id"]: raise HTTPException(404, "database not found")
+    return d
+@app.get("/v1/pg/plans")
+def pg_plans(): return {"plans": [{"id": k} | {x: y for x, y in v.items() if x != "margin"} for k, v in _plans.PG_PLANS.items()],
+                        "backups": {"schedule": "daily", "keep": parity.PG_KEEP, "usd_gb_month": RATES["backup_usd_gb_month"]}}
+@app.post("/v1/pg")
+def pg_create(b: PgReq, request: Request, a=Depends(acct)):
+    try: r = parity.pg_create(a["id"], b.name, b.plan)
+    except PermissionError as e: raise HTTPException(409, str(e))
+    except ValueError as e: raise HTTPException(400, str(e))
+    _audit(a["id"], f"pg-{b.name}", "pg.create", b.plan, _ip(request)); return r
+@app.get("/v1/pg")
+def pg_list(a=Depends(acct)): return [parity.pg_view(d) for d in q("select * from pg_dbs where account_id=?", (a["id"],))]
+@app.get("/v1/pg/{name}")
+def pg_get(name: str, reveal: bool=False, request: Request=None, a=Depends(acct)):
+    d = own_pg(name, a)
+    if reveal: _audit(a["id"], d["app"], "pg.reveal_url", "", _ip(request))
+    return parity.pg_view(d, reveal)
+class PgAttach(BaseModel): app: str; var: str="DATABASE_URL"
+@app.post("/v1/pg/{name}/attach")
+def pg_attach(name: str, b: PgAttach, request: Request, a=Depends(acct)):
+    own_pg(name, a); own(b.app, a)
+    try: r = parity.pg_attach(name, b.app, b.var)
+    except ValueError as e: raise HTTPException(400, str(e))
+    _audit(a["id"], b.app, "pg.attach", f"{name} as ${b.var}", _ip(request)); return with_url(r)
+@app.delete("/v1/pg/{name}/attach/{app_name}")
+def pg_detach(name: str, app_name: str, a=Depends(acct)): own_pg(name, a); own(app_name, a); return with_url(parity.pg_detach(name, app_name))
+@app.post("/v1/pg/{name}/backups")
+def pg_backup(name: str, request: Request, a=Depends(acct)):
+    own_pg(name, a)
+    try: r = parity.pg_backup(name)
+    except (ValueError, RuntimeError) as e: raise HTTPException(409, str(e))
+    _audit(a["id"], f"pg-{name}", "pg.backup", r["id"], _ip(request)); return r
+@app.get("/v1/pg/{name}/backups")
+def pg_backups(name: str, a=Depends(acct)): own_pg(name, a); return parity.pg_view(own_pg(name, a))["backups"]
+class RestoreReq(BaseModel): backup_id: str
+@app.post("/v1/pg/{name}/restore")
+def pg_restore(name: str, b: RestoreReq, request: Request, a=Depends(acct)):
+    own_pg(name, a)
+    try: r = parity.pg_restore(name, b.backup_id)
+    except (ValueError, RuntimeError) as e: raise HTTPException(409, str(e))
+    _audit(a["id"], f"pg-{name}", "pg.restore", b.backup_id, _ip(request)); return r
+@app.delete("/v1/pg/{name}")
+def pg_delete(name: str, request: Request, keep_backups: bool=False, a=Depends(acct)):
+    own_pg(name, a); parity.pg_destroy(name, keep_backups); _audit(a["id"], f"pg-{name}", "pg.destroy", "", _ip(request)); return {"ok": True}
+# volume snapshots
+@app.post("/v1/volumes/{vol}/snapshots")
+def snap_create(vol: str, request: Request, a=Depends(acct)):
+    own_vol(vol, a)
+    try: r = parity.snapshot_create(vol)
+    except NotImplementedError as e: raise HTTPException(501, str(e))
+    _audit(a["id"], None, "snapshot.create", f"{vol} {r['id']}", _ip(request)); return r
+@app.get("/v1/volumes/{vol}/snapshots")
+def snap_list(vol: str, a=Depends(acct)):
+    own_vol(vol, a); return [parity._arc_view(r) for r in q("select * from archives where kind='snap' and owner=? order by created desc", (vol,))]
+class SnapRestore(BaseModel): snapshot_id: str
+@app.post("/v1/volumes/{vol}/restore")
+def snap_restore(vol: str, b: SnapRestore, request: Request, a=Depends(acct)):
+    own_vol(vol, a)
+    try: r = parity.snapshot_restore(vol, b.snapshot_id)
+    except ValueError as e: raise HTTPException(404, str(e))
+    _audit(a["id"], None, "snapshot.restore", f"{vol} {b.snapshot_id}", _ip(request)); return r
+@app.delete("/v1/volumes/{vol}/snapshots/{sid}")
+def snap_delete(vol: str, sid: str, a=Depends(acct)):
+    own_vol(vol, a); r = q("select * from archives where id=? and kind='snap' and owner=?", (sid, vol), one=True)
+    if not r: raise HTTPException(404, "snapshot not found")
+    parity.delete_archive(r); return {"ok": True}
+# exec + interactive console (WebSocket), audited
+class ExecReq(BaseModel): command: list[str]|str; instance: str|None=None
+@app.post("/v1/apps/{name}/exec")
+def app_exec(name: str, b: ExecReq, request: Request, a=Depends(acct)):
+    own(name, a)
+    try: return parity.exec_cmd(a["id"], name, b.command, _ip(request), b.instance)
+    except NotImplementedError as e: raise HTTPException(501, str(e))
+    except ValueError as e: raise HTTPException(409, str(e))
+_SITE_ORIGINS = None
+def _ws_account(ws: WebSocket):
+    """Bearer API key (CLI), or the session cookie + an Origin on one of our own hosts (blocks cross-site WebSocket hijacking)."""
+    key = (ws.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+    if key: return engine.account_by_key(key)
+    origin = (ws.headers.get("origin") or "").lower(); host = origin.split("://", 1)[-1].split(":")[0]
+    ok_hosts = SYSTEM_HOSTS | {"localhost", "127.0.0.1"} | {h.split("://", 1)[-1].split("/")[0] for h in (PUBLIC_API_URL, PUBLIC_PROXY, os.environ.get("PAAS_SITE_URL", ""))}
+    if host not in ok_hosts: return None
+    return auth.session_account(ws.cookies.get(auth.COOKIE))
+@app.websocket("/v1/apps/{name}/console")
+async def app_console(ws: WebSocket, name: str, instance: str|None=None):
+    """Interactive shell in a running instance. Binary frames carry terminal bytes both ways; a text frame {"resize":[rows,cols]} resizes.
+    Session open/close and each entered line are written to the audit log."""
+    a = _ws_account(ws); ap = engine.get_app(name)
+    if not a or not ap or ap["account_id"] != a["id"] or ap["status"] == "destroyed": await ws.close(code=4401); return
+    i = q("select * from instances where app=? and status='running'" + (" and id=?" if instance else "") + " order by started", (name, *([instance] if instance else [])), one=True)
+    drv = get_drivers().get(i["provider"]) if i else None
+    if not i or not hasattr(drv, "exec_socket"): await ws.close(code=4409, reason="no running instance (or console unsupported on this node)"); return
+    await ws.accept(); ip = ws.client.host if ws.client else None; t0 = time.time()
+    eid, sock = await asyncio.to_thread(drv.exec_socket, i["id"])
+    _audit(a["id"], name, "console.open", f"instance {i['id']}", ip)
+    async def pump():
+        while True:
+            data = await asyncio.to_thread(sock.recv, 65536)
+            if not data: break
+            await ws.send_bytes(data)
+        await ws.close()
+    task = asyncio.create_task(pump()); line = bytearray(); n = 0
+    try:
+        while True:
+            m = await ws.receive()
+            if m["type"] == "websocket.disconnect": break
+            if m.get("text"):
+                try: c = json.loads(m["text"])
+                except Exception: c = {"data": m["text"]}
+                if "resize" in c: drv.exec_resize(eid, *c["resize"][:2]); continue
+                data = str(c.get("data", "")).encode()
+            else: data = m.get("bytes") or b""
+            await asyncio.to_thread(sock.sendall, data); n += len(data)
+            for ch in data:
+                if ch in (10, 13):
+                    if line.strip(): _audit(a["id"], name, "console.input", line.decode(errors="replace")[:500], ip)
+                    line.clear()
+                elif ch in (8, 127): line[-1:] = b""
+                elif ch >= 32: line.append(ch)
+    except Exception: pass
+    finally:
+        task.cancel()
+        try: sock.shutdown(socket.SHUT_RDWR)   # wakes the reader thread blocked in recv()
+        except Exception: pass
+        try: sock.close()
+        except Exception: pass
+        _audit(a["id"], name, "console.close", f"{time.time()-t0:.0f}s, {n} bytes in", ip)
+@app.get("/v1/audit")
+def audit_log(limit: int=100, app_name: str|None=None, a=Depends(acct)):
+    return q("select ts, app, action, detail, ip from audit where account_id=?" + (" and app=?" if app_name else "") + " order by id desc limit ?",
+             (a["id"], *([app_name] if app_name else []), min(limit, 1000)))
+# logs: retention + drains
+@app.get("/v1/apps/{name}/logs/history")
+def logs_history(name: str, since: float=0, limit: int=1000, contains: str|None=None, a=Depends(acct)):
+    own(name, a); t = TIERS.get(a.get("tier") or "free", TIERS["free"])
+    return {"retention_days": t["log_retention_days"], "lines": parity.history(name, max(since, time.time() - t["log_retention_days"] * 86400), min(limit, 10000), contains)}
+class DrainReq(BaseModel): url: str
+@app.post("/v1/apps/{name}/drains")
+def drain_add(name: str, b: DrainReq, request: Request, a=Depends(acct)):
+    own(name, a)
+    try: r = parity.drain_add(a["id"], name, b.url)
+    except ValueError as e: raise HTTPException(400, str(e))
+    _audit(a["id"], name, "drain.add", r["url"], _ip(request)); return r
+@app.get("/v1/apps/{name}/drains")
+def drain_list(name: str, a=Depends(acct)): own(name, a); return [parity.drain_view(d) for d in q("select * from drains where app=?", (name,))]
+@app.delete("/v1/apps/{name}/drains/{did}")
+def drain_del(name: str, did: str, a=Depends(acct)): own(name, a); q("delete from drains where id=? and app=?", (did, name)); return {"ok": True}
 # ---------------- edge proxy (port 8080): <app>.BASE_DOMAIN or /_app/<app>/ ----------------
 proxy = FastAPI(); _rr = {}; client = httpx.AsyncClient(timeout=60)
 EGRESS = billing.EGRESS   # app -> bytes sent to clients since last meter tick
@@ -442,7 +610,9 @@ def resolve_app(host, path):
     d = q("select app from domains where domain=? and verified=1", (host,), one=True)
     if d: return d["app"], path
     if path.startswith("_app/"):
-        _, name, *rest = path.split("/", 2); return name, (rest[0] if rest else "")
+        _, name, *rest = path.split("/", 2)
+        if name.startswith("pg-"): return None, path
+        return name, (rest[0] if rest else "")
     return None, path
 @proxy.api_route("/{path:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS","HEAD"])
 async def edge(path: str, request: Request):

@@ -19,7 +19,10 @@ with sync_playwright() as p:
     print("apps rows:", pg.locator("#apps tr").count() - 1, "| who:", pg.inner_text("#who"))
     pg.click("text=Manage >> nth=0"); pg.wait_for_selector("#detail h3"); pg.wait_for_timeout(1500)
     print("detail:", pg.inner_text("#detail h3")[:40].replace("\n", " ")); pg.screenshot(path="/workspace/paas/data/ui-app.png", full_page=True)
-    for t in ("volumes", "billing", "account"):
+    for dt in ("releases", "console", "logs"):
+        pg.click(f"#detail .dtabs button:has-text('{dt.capitalize()}')"); pg.wait_for_timeout(1500)
+    print("releases/console/logs tabs ok; console:", pg.inner_text("#con_st") if pg.locator("#con_st").count() else "-")
+    for t in ("volumes", "pg", "audit", "billing", "account"):
         pg.click(f"a.nav[data-t={t}]"); pg.wait_for_timeout(1200); pg.screenshot(path=f"/workspace/paas/data/ui-{t}.png", full_page=True)
     print("balance:", pg.inner_text("#bal"), "|", pg.inner_text("#paynote"))
     bal = pg.text_content("#bal"); print("balance shown:", bal); assert bal.startswith("$") or bal.startswith("−$"), bal

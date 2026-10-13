@@ -137,6 +137,9 @@ list_plans → deploy_app → set_autoscale → get_status
 <div class="grid">{pcards}</div><p style="margin-top:20px"><a href="/pricing">Performance CPUs, volumes, egress and tiers →</a></p></div></section>
 <section class=ctaband><h2>Deploy in the next five minutes.</h2><p class=sub style="margin:0 0 26px">$5 of starting credit. No card needed for the free tier.</p><div class=cta style="justify-content:center"><a class="btn pri" href="/login#register">Start free</a><a class="btn ghost" href="/docs/quickstart">Quickstart</a></div></section>"""
     return page(f"{brand}: cheap backends, billed per second", body, brand)
+def _pg_rows():
+    from .plans import PG_PLANS
+    return "".join(f"<tr><td><code>{k}</code> <span class=muted>{p['note']}</span></td><td>{p['vcpu']:g} vCPU / {p['memory_mb'] if p['memory_mb'] < 1024 else p['memory_mb'] // 1024}{' MB' if p['memory_mb'] < 1024 else ' GB'}</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items())
 def pricing(brand):
     T = TIERS
     def tier(k, name, blurb, hl=False):
@@ -159,16 +162,19 @@ def pricing(brand):
 <h2 class=t style="margin-top:48px">Storage &amp; network</h2><div class=scroll><table class=tbl><tr><th>Resource</th><th>{brand}</th><th>Fly.io</th><th>Render</th><th>Railway</th></tr>
 <tr><td>Volumes (provisioned GB-month)</td><td><b>${R['volume_usd_gb_month']:.2f}</b></td><td>$0.15</td><td>$0.25</td><td>$0.15</td></tr>
 <tr><td>Egress per GB (counts toward included usage)</td><td><b>${R['egress_usd_gb']:.2f}</b></td><td>$0.02 (NA/EU)</td><td>$0.15 beyond allowance</td><td>$0.05</td></tr>
+<tr><td>Backups &amp; volume snapshots (GB-month of archive)</td><td><b>${R['backup_usd_gb_month']:.2f}</b></td><td>snapshots $0.08</td><td>included</td><td>—</td></tr>
 <tr><td>Extra RAM (GB-month)</td><td>${R['extra_ram_usd_gb_month']:.2f}</td><td>$5–6</td><td>—</td><td>$10</td></tr>
 <tr><td>Free tier limits</td><td colspan=4>3 apps · shared-1x-256mb / 512mb · 1 instance · sleeps after 5 min idle · 1 GB volumes · hard cap at $1 usage per month (never charged)</td></tr>
 <tr><td>Inbound data, custom domains, TLS</td><td>Free</td><td>Free (10 certs)</td><td>2–25 domains</td><td>2–20 domains</td></tr></table></div>
+<h2 class=t style="margin-top:48px" id=postgres>Managed Postgres</h2><p class=t>Postgres 16 on a private network next to your apps, with daily backups (7 kept) and on-demand backup and restore. The price covers compute and the data disk; backup storage is billed as above.</p>
+<div class=scroll><table class=tbl><tr><th>Plan</th><th>CPU / RAM</th><th>Disk</th><th>{brand}</th></tr>{_pg_rows()}</table></div>
 <h2 class=t style="margin-top:48px">Regions</h2>{_regions()}
 <div class="grid g3" style="margin-top:40px"><div class=card><h3>Top-ups</h3><p>$10 to $5,000 via Stripe Checkout (cards, Apple Pay, Google Pay). Every payment gets an invoice; VAT/GST IDs supported.</p></div>
 <div class=card><h3>Included usage</h3><p>Like Railway, each plan's fee comes back as usage credit, and you pay extra only beyond it.</p></div>
 <div class=card><h3>No idle charges</h3><p>Stopped and scaled-to-zero apps cost nothing; volumes are still billed.</p></div></div></div></section>""", brand)
-DOCS = ["quickstart", "cli", "deploy", "gpu", "volumes", "autoscaling", "domains", "billing", "mcp", "api", "nodes"]
+DOCS = ["quickstart", "cli", "deploy", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "mcp", "api", "nodes"]
 TITLES = {"quickstart": "Quickstart", "cli": "CLI", "deploy": "Deploying apps", "gpu": "GPU workloads", "volumes": "Volumes", "autoscaling": "Autoscaling & scale to zero",
-          "domains": "Custom domains", "billing": "Billing, invoices & tax", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes"}
+          "domains": "Custom domains", "releases": "Releases & rollback", "postgres": "Managed Postgres", "console": "SSH & exec console", "logs": "Logs, retention & drains", "billing": "Billing, invoices & tax", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes"}
 def docs(pg, brand, base, api, mcp):
     if pg not in DOCS: return None
     c = {
@@ -186,11 +192,16 @@ aloof env &lt;app&gt; K=V K2=          # K2= removes; values are encrypted at re
 aloof volumes create data --size 5 ; aloof volumes attach &lt;app&gt; data --path /data
 aloof autoscale &lt;app&gt; --min 0 --max 4 --concurrency 10 [--cpu 70] --idle 300
 aloof health &lt;app&gt; --path /healthz --failures 3
-aloof domains &lt;app&gt; add api.example.in | verify &lt;domain&gt; | list | remove &lt;domain&gt;</pre>
+aloof domains &lt;app&gt; add api.example.in | verify &lt;domain&gt; | list | remove &lt;domain&gt;
+aloof releases &lt;app&gt; ; aloof rollback &lt;app&gt; [version]
+aloof pg create db --plan pg-basic ; aloof pg attach db &lt;app&gt; ; aloof pg backup|backups|restore|url|destroy db
+aloof snapshots create|list &lt;volume&gt; ; aloof snapshots restore &lt;volume&gt; &lt;snapshot-id&gt;
+aloof ssh &lt;app&gt; ; aloof exec &lt;app&gt; -- ls /data
+aloof drains &lt;app&gt; add https://logs.example.com/ingest ; aloof history &lt;app&gt; --since 24 --grep error ; aloof audit</pre>
 <p>Config is read from <code>~/.aloof.json</code> (<code>{"api": "...", "key": "pk_..."}</code>) or the <code>ALOOF_API_URL</code> / <code>ALOOF_API_KEY</code> env vars.</p>""",
 "deploy": f"""<h1>Deploying apps</h1><p><b>From an image</b>: any public image or private registry image (<code>--image ghcr.io/me/api:1.4</code>).</p>
 <p><b>From git</b>: we build the repo's <code>Dockerfile</code> (<code>--git URL --ref main</code>, optional <code>subdir</code>) and push it to the {brand} registry, where your nodes pull it.</p>
-<p>Redeploys are rolling: new instances must pass a readiness check before old ones stop. Env vars, volumes, autoscale and health settings carry over between deploys.</p>
+<p>Redeploys are rolling: new instances must pass a readiness check before old ones stop, and a release that fails it never takes traffic (see <a href="/docs/releases">releases &amp; rollback</a>). Env vars, volumes, autoscale and health settings carry over between deploys.</p>
 <p>Health checks: set an HTTP path with <code>aloof health app --path /healthz</code>. After N consecutive failures the instance is replaced.</p>""",
 "gpu": f"""<h1>GPU workloads</h1><p><b>Coming soon.</b> GPUs aren't deployable yet; join the waitlist on the <a href='/pricing#gpus'>pricing page</a> or with <code>POST /v1/waitlist</code>. When they launch:</p><p>Pick a GPU plan: <code>gpu-l4</code>, <code>gpu-rtx4090</code>, <code>gpu-l40</code>, <code>gpu-a100</code> or <code>gpu-h100</code> (billed per second; see <a href='/pricing'>pricing</a>). Each GPU instance gets a dedicated node with the NVIDIA container runtime, and your container sees the GPU via CUDA (<code>--gpus</code>).</p>
 <pre>aloof deploy llm --image vllm/vllm-openai:latest --plan gpu-l4 --port 8000 -e MODEL=Qwen/Qwen2.5-7B-Instruct
@@ -199,7 +210,40 @@ aloof autoscale llm --min 0 --max 2 --idle 600</pre>
 "volumes": """<h1>Volumes</h1><pre>aloof volumes create pgdata --size 10
 aloof volumes attach db pgdata --path /var/lib/postgresql/data
 aloof volumes detach db pgdata      # data is kept
-aloof volumes delete pgdata         # must be detached first</pre><p>A volume lives on one node, so apps with volumes always run there. Volumes are single-writer: on redeploy the old instance stops before the new one starts.</p>""",
+aloof volumes delete pgdata         # must be detached first</pre><p>A volume lives on one node, so apps with volumes always run there. Volumes are single-writer: on redeploy the old instance stops before the new one starts.</p>
+<h2>Snapshots</h2><pre>aloof snapshots create pgdata
+aloof snapshots list pgdata
+aloof snapshots restore pgdata snap_20261013080000_ab12cd   # stops the attached app, restores, starts it again</pre>
+<p>A snapshot is a compressed archive of the whole volume, kept on the edge host's disk (10 per volume, oldest pruned first) and billed at $0.22 per GB-month of archive size. Snapshots of volumes on remote nodes aren't supported yet. They aren't off-site backups yet: keep a copy elsewhere for disaster recovery.</p>""",
+"releases": """<h1>Releases &amp; rollback</h1><p>Every deploy, env change, volume or database attach, and rollback creates a numbered release with the exact image and config it ran.</p>
+<pre>aloof releases api
+v4   failed      2026-10-13 09:12  deploy         ghcr.io/me/api:1.5
+v3   active      2026-10-13 09:02  config change  ghcr.io/me/api:1.4
+aloof rollback api        # previous release
+aloof rollback api 2      # a specific one</pre>
+<p><b>Zero-downtime deploys</b>: new instances start next to the old ones and must pass readiness (your HTTP health path, or any HTTP response) before traffic moves and the old ones stop. If a new instance fails readiness, it's removed, the release is marked <code>failed</code>, and the previous release keeps serving. Apps with a volume are single-writer, so their old instance stops first and there is a short gap.</p>
+<p><b>Rollback</b> redeploys an earlier release's image, env, plan, port, command, scale and health settings, without a rebuild (git builds are tagged per release; the last 20 images are kept). Volumes, database attachments and domains stay as they are now. Also available as <code>POST /v1/apps/{name}/rollback</code>, the <code>rollback_app</code> MCP tool, and Dashboard → app → Releases.</p>""",
+"postgres": """<h1>Managed Postgres</h1><pre>aloof pg plans
+aloof pg create shop-db --plan pg-basic
+aloof pg attach shop-db api            # injects DATABASE_URL into api and redeploys it
+aloof pg backup shop-db ; aloof pg backups shop-db ; aloof pg restore shop-db pgb_…
+aloof pg url shop-db                   # prints the connection URL (audited)</pre>
+<p>Postgres 16 runs next to your apps in the EU and is reachable only over a private network that its attached apps join (hostname <code>pg-&lt;name&gt;</code>). It's never exposed on the public edge. Data lives on a volume.</p>
+<p><b>Backups</b>: a <code>pg_dump</code> runs daily; the last 7 are kept on the edge host's disk, with on-demand backups and restore whenever you need them. Backup storage costs $0.22 per GB-month. These are logical backups on the same host, not point-in-time recovery or off-site copies, so export important data elsewhere too.</p>
+<table><tr><th>Plan</th><th>CPU / RAM</th><th>Disk</th><th>Price</th></tr>{PGROWS}</table>
+<p>Not yet: high availability/replicas, point-in-time recovery, extensions beyond the official image, or attaching to apps on remote nodes.</p>""",
+"console": """<h1>SSH &amp; exec console</h1><pre>aloof ssh api                 # interactive shell (bash or sh) in a running instance
+aloof ssh api --instance 3f2a…
+aloof exec api -- ls -la /data   # one command, prints output, exits with its code</pre>
+<p>The console is a WebSocket at <code>/v1/apps/{name}/console</code>, authenticated with your API key (CLI) or your dashboard session, and only on our own origin, which blocks cross-site use. Dashboard → app → Console gives you the same shell in the browser.</p>
+<p><b>Audited</b>: opening and closing a session, each line you enter, and every exec command and its exit code are written to the audit log with your IP (<code>aloof audit</code>, Dashboard → Audit log). Don't type secrets on the command line; they would be recorded.</p>""",
+"logs": """<h1>Logs, retention &amp; drains</h1><pre>aloof logs api                         # live: platform events + recent output of each instance
+aloof history api --since 24 --grep error
+aloof drains api add https://logs.example.com/ingest
+aloof drains api add syslog+tls://logs.example.com:6514
+aloof drains api list | remove drn_…</pre>
+<p><b>Retention</b>: stdout/stderr and platform events are collected every few seconds and kept for 1 day (Free), 7 days (Hobby) or 30 days (Pro). Query them with <code>GET /v1/apps/{name}/logs/history?since=&amp;contains=</code>.</p>
+<p><b>Drains</b> forward every line as it's collected. HTTPS drains receive a JSON array of <code>{ts, app, instance, stream, message}</code> per POST, and credentials in the URL (<code>https://user:token@host/path</code>) are sent as Basic auth. Syslog drains (<code>syslog+tls</code>, <code>syslog+tcp</code>, <code>syslog+udp</code>) receive RFC 5424 lines with octet-counting framing on TCP/TLS. Drain URLs are encrypted at rest and shown redacted, and private or loopback targets are refused.</p>""",
 "autoscaling": """<h1>Autoscaling &amp; scale to zero</h1><p>Every 3s {brand} looks at in-flight requests per instance (and optionally CPU %), and scales between <code>min</code> and <code>max</code>. Scale-down waits 15s.</p>
 <pre>aloof autoscale api --min 1 --max 6 --concurrency 20 --cpu 70
 aloof autoscale preview --min 0 --max 2 --idle 120    # scale to zero after 2 idle minutes</pre>
@@ -223,7 +267,7 @@ Usage up to your tier's included amount (Free $1, Hobby $5, Pro $20) isn't deduc
 <p><b>Remote (OAuth 2.1)</b>: add <code>{mcp}</code> as a connector in Claude, ChatGPT or Cursor. The assistant registers itself (dynamic client registration), sends you to {brand} to approve, and gets a scoped token (PKCE).</p>
 <p><b>Local (stdio)</b>:</p><pre>{{"mcpServers": {{"aloof": {{"command": "python3", "args": ["mcp_server/server.py"],
   "env": {{"ALOOF_API_URL": "{api}", "ALOOF_API_KEY": "pk_..."}}}}}}}}</pre>
-<p>Tools: list_plans, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain.</p>
+<p>Tools: list_plans, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain, list_releases, rollback_app, create_postgres, list_postgres, attach_postgres, backup_postgres, snapshot_volume, restore_volume, exec_command, add_log_drain.</p>
 <p>Discovery: <a href="/llms.txt">/llms.txt</a>, <a href="/.well-known/mcp.json">/.well-known/mcp.json</a>.</p>""",
 "api": f"""<h1>REST API</h1><p>Base URL <code>{api}</code>. Authenticate with <code>Authorization: Bearer pk_...</code>. The full interactive reference is at <a href="/api/docs">/api/docs</a>.</p>
 <pre>curl -X POST {api}/v1/apps -H "Authorization: Bearer $ALOOF_API_KEY" -H "Content-Type: application/json" \\
@@ -233,7 +277,10 @@ Usage up to your tier's included amount (Free $1, Hobby $5, Pro $20) isn't deduc
 # run the returned one-liner on the server:
 curl -fsSL '{api}/v1/nodes/bootstrap.sh?node=n-…&token=jt_…' | sudo bash</pre>
 <p>The bootstrap installs Docker, the NVIDIA container toolkit (on GPU nodes) and WireGuard, registers the node and starts <code>aloof-agent</code> under systemd.</p>"""}[pg]
-    groups = [("Getting started", ["quickstart", "cli", "deploy"]), ("Platform", ["autoscaling", "volumes", "domains", "gpu"]), ("Account", ["billing"]), ("Integrations", ["mcp", "api", "nodes"])]
+    if pg == "postgres":
+        from .plans import PG_PLANS
+        c = c.replace("{PGROWS}", "".join(f"<tr><td><code>{k}</code></td><td>{p['vcpu']:g} shared vCPU / {p['memory_mb']} MB</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items()))
+    groups = [("Getting started", ["quickstart", "cli", "deploy", "releases"]), ("Platform", ["autoscaling", "volumes", "postgres", "domains", "gpu"]), ("Operate", ["console", "logs"]), ("Account", ["billing"]), ("Integrations", ["mcp", "api", "nodes"])]
     navh = "".join(f"<h4>{g}</h4>" + "".join(f'<a href="/docs/{d}" class="{"on" if d == pg else ""}"{" aria-current=page" if d == pg else ""}>{TITLES[d]}</a>' for d in ds) for g, ds in groups)
     c = c.replace("<table>", "<div class=scroll><table class=tbl>").replace("</table>", "</table></div>")
     return page(f"{TITLES[pg]} · {brand} docs", f"<div class='wrap docs'><aside aria-label='Docs navigation'>{navh}</aside><article class=docmain style='min-width:0;max-width:780px'>{c}</article></div>", brand)

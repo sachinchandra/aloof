@@ -1,5 +1,5 @@
 import json, time, threading, re, secrets
-from .db import q, event
+from .db import q, event, PG as PGDB
 from .crypto import load_spec, dump_spec, sha256
 from .drivers import get_drivers
 from .plans import PLANS
@@ -43,9 +43,12 @@ def pick_provider(spec):
     if plan["kind"] == "gpu" and d["local-docker"].supports_gpu and _plans.pool_allowed(spec["plan"], "local-docker"): return "local-docker"
     raise NoCapacity(f"no {'GPU ' if plan['kind'] == 'gpu' else ''}capacity for {spec['plan']} (" + "; ".join(tried or [f"local-docker: refused, under {_plans.MIN_MARGIN:.0%} margin floor"]) + ")")
 import socket, urllib.request, urllib.error
-def wait_ready(host, port, path=None, timeout=30):
-    end = time.time() + timeout
+def wait_ready(host, port, path=None, timeout=None, tcp=False):
+    end = time.time() + (timeout or float(__import__("os").environ.get("PAAS_READY_TIMEOUT", "30")))
     while time.time() < end:
+        if tcp:
+            try: socket.create_connection((host, port), timeout=2).close(); return True
+            except OSError: time.sleep(0.3); continue
         try: urllib.request.urlopen(f"http://{host}:{port}{path or '/'}", timeout=2); return True
         except urllib.error.HTTPError as e:
             if path is None or e.code < 500: return True
@@ -64,9 +67,11 @@ def _start(name, drv, image, spec):
         inst = drv.start_instance(name, image, spec, idx)
     node_id = inst.id.split(".", 1)[0] if "." in inst.id else None
     q("insert into instances(id,app,provider,host,port,status,started,node_id) values(?,?,?,?,?,?,?,?)", (inst.id, name, drv.name, inst.host, inst.port, "starting", time.time(), node_id))
-    ok = wait_ready(inst.host, inst.port, (spec.get("health") or {}).get("path"))
+    h = spec.get("health") or {}
+    ok = wait_ready(inst.host, inst.port, h.get("path"), tcp=bool(h.get("tcp")))
+    inst.status = "running" if ok else "unready"
     q("update instances set status='running' where id=?", (inst.id,))   # only now does the edge route to it
-    event(name, f"instance {inst.id} up at {inst.host}:{inst.port}" + ("" if ok else " (not ready after 30s)"))
+    event(name, f"instance {inst.id} up at {inst.host}:{inst.port}" + ("" if ok else " (not ready after timeout)"))
     return inst
 def account_tier(account_id):
     from .plans import TIERS
@@ -81,6 +86,7 @@ def apply_tier_limits(account_id, spec, redeploy=False):
         if n >= t["max_apps"]: raise ValueError(f"{k} tier allows {t['max_apps']} apps; upgrade with PUT /v1/billing/tier")
     if t.get("plans"):
         if spec["plan"] not in t["plans"]: raise ValueError(f"{k} tier can use {', '.join(t['plans'])}; upgrade to hobby for {spec['plan']}")
+        if spec.get("kind") == "postgres": return spec   # databases never sleep (compute stays inside the hard cap)
         a = spec.get("autoscale") or {}
         spec["autoscale"] = {"min": 0, "max": min(int(a.get("max") or 1), t["max_instances"]), "target_concurrency": a.get("target_concurrency") or 10,
                              "cpu_percent": a.get("cpu_percent"), "idle_seconds": min(int(a.get("idle_seconds") or t["idle_seconds"]), t["idle_seconds"])}
@@ -90,9 +96,9 @@ def deploy(account_id, spec):
     ex = q("select * from apps where name=?", (spec.get("name"),), one=True)
     if ex and ex["account_id"] == account_id and ex["status"] != "destroyed":   # redeploy: keep attached state
         old = load_spec(ex["spec"])
-        for k in ("volumes", "autoscale", "health", "plan", "port", "instances", "command"):
+        for k in ("volumes", "autoscale", "health", "plan", "port", "instances", "command", "networks", "net_alias", "kind", "pg_plan", "provider"):
             if k not in spec and k in old: spec[k] = old[k]
-        spec["env"] = {**old.get("env", {}), **spec.get("env", {})}
+        if not spec.pop("_replace_env", False): spec["env"] = {**old.get("env", {}), **spec.get("env", {})}
     spec = validate(spec); name = spec["name"]
     if ex and ex["account_id"] != account_id: raise PermissionError("app name taken")
     apply_tier_limits(account_id, spec, redeploy=bool(ex and ex["status"] != "destroyed"))
@@ -103,23 +109,86 @@ def deploy(account_id, spec):
     event(name, f"deploy queued on {prov} plan={spec['plan']} instances={spec['instances']}")
     threading.Thread(target=_run_deploy, args=(name,), daemon=True).start()
     return get_app(name)
-def _run_deploy(name):
+# ---- releases: every deploy/config change is a numbered release; rollback redeploys an earlier one ----
+RELEASE_KEEP = 20
+def _new_release(name, spec, reason):
+    v = (q("select max(version) v from releases where app=?", (name,), one=True) or {}).get("v") or 0
+    q("insert into releases(app,version,image,spec,status,reason,created) values(?,?,?,?,?,?,?)",
+      (name, v + 1, spec.get("_image"), dump_spec(spec), "deploying", reason, time.time()))
+    return v + 1
+def _set_release(name, version, status, image=None, spec=None):
+    if status == "active": q("update releases set status='superseded' where app=? and status='active'", (name,))
+    q("update releases set status=?" + (", image=?" if image else "") + (", spec=?" if spec else "") + " where app=? and version=?",
+      (status, *([image] if image else []), *([dump_spec(spec)] if spec else []), name, version))
+def releases(name):
+    return [{k: r[k] for k in ("version", "image", "status", "reason", "created")} | {"plan": load_spec(r["spec"]).get("plan"), "env_keys": sorted(load_spec(r["spec"]).get("env", {}))}
+            for r in q("select * from releases where app=? order by version desc limit 50", (name,))]
+def rollback(name, version=None):
+    """Redeploy an earlier release's image + config (env, plan, port, command, scale, health). Volumes, Postgres attachments and
+    domains stay as they are now. No rebuild, so it's fast; zero-downtime like any deploy."""
+    cur = q("select version from releases where app=? and status='active' order by version desc", (name,), one=True)
+    if version is None:
+        r = q("select * from releases where app=? and status='superseded' and image is not null" + (" and version<?" if cur else "") + " order by version desc",
+              (name, *([cur["version"]] if cur else [])), one=True)
+    else: r = q("select * from releases where app=? and version=?", (name, int(version)), one=True)
+    if not r or not r["image"]: raise ValueError("no earlier release to roll back to" if version is None else f"release v{version} not found or never built")
+    app = q("select * from apps where name=?", (name,), one=True); now_spec = load_spec(app["spec"]); spec = load_spec(r["spec"])
+    for k in ("volumes", "networks"): spec[k] = now_spec.get(k, [])
+    for db in q("select attached from pg_dbs"):   # keep live database attachments (their URLs) as they are now
+        for x in json.loads(db["attached"] or "[]"):
+            if x["app"] == name and x["var"] in now_spec.get("env", {}): spec["env"][x["var"]] = now_spec["env"][x["var"]]
+    spec["_image"] = r["image"]
+    q("update apps set spec=?, status='queued', updated=?, error=null where name=?", (dump_spec(spec), time.time(), name))
+    event(name, f"rollback to v{r['version']} queued")
+    threading.Thread(target=_run_deploy, args=(name, r["image"], f"rollback to v{r['version']}"), daemon=True).start()
+    return get_app(name)
+def _prune_images(name, drv):
+    keep = {r["image"] for r in q("select image from releases where app=? order by version desc limit ?", (name, RELEASE_KEEP))}
+    for r in q("select image from releases where app=? order by version desc limit -1 offset ?" if not PGDB else
+               "select image from releases where app=? order by version desc offset ?", (name, RELEASE_KEEP)):
+        if r["image"] and r["image"] not in keep and hasattr(drv, "remove_image"):
+            try: drv.remove_image(r["image"])
+            except Exception: pass
+def _run_deploy(name, image=None, reason=None):
+    """Zero-downtime: new instances start and must pass readiness (HTTP health path, or TCP for databases) before the old ones
+    stop. If any new instance fails, the new ones are removed and the previous release keeps serving. Apps with a volume are
+    single-writer, so the old instance stops first (a brief gap) and a failed start is reported."""
     with _lock(name):
         app = q("select * from apps where name=?", (name,), one=True); spec = load_spec(app["spec"])
         drv = get_drivers()[app["provider"]]; log = lambda m: event(name, m)
+        prev = q("select * from releases where app=? and status='active' order by version desc", (name,), one=True)
+        ver = _new_release(name, spec, reason or ("config change" if (spec.get("source") or {}).get("image") == spec.get("_image") else "deploy"))
+        log(f"release v{ver}: {reason or 'deploy'}")
+        new = []
         try:
-            q("update apps set status='building' where name=?", (name,))
-            image = drv.build(name, spec["source"], log); spec["_image"] = image
+            if not image:
+                q("update apps set status='building' where name=?", (name,))
+                image = drv.build(name, spec["source"], log)
+            spec["_image"] = image; _set_release(name, ver, "deploying", image=image, spec=spec)
             q("update apps set spec=?, status='starting' where name=?", (dump_spec(spec), name))
             old = q("select * from instances where app=? and status='running'", (name,))
-            new = []
-            for o in old if spec.get("volumes") else []: _stop(o)   # single-writer volumes: stop old first
+            single = bool(spec.get("volumes"))
+            for o in old if single else []: _stop(o)   # single-writer volumes: stop old first
             for i in range(spec["instances"]): new.append(_start(name, drv, image, spec))
-            for o in old if not spec.get("volumes") else []: _stop(o)   # roll: new up before old down
-            q("update apps set status=?, updated=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(), name))
-            log("deploy complete")
+            bad = [n for n in new if n.status != "running"]
+            if bad and old and not single:
+                raise RuntimeError(f"{len(bad)} new instance(s) failed readiness")
+            for o in old if not single else []: _stop(o)   # roll: new up before old down
+            q("update apps set status=?, updated=?, error=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(),
+              (f"{len(bad)} instance(s) not ready" if bad else None), name))
+            _set_release(name, ver, "active"); log(f"deploy complete (v{ver} live)")
+            _prune_images(name, drv)
         except Exception as e:
-            q("update apps set status='failed', error=? where name=?", (str(e), name)); log(f"ERROR: {e}")
+            for n in new:
+                try: _stop({"id": n.id, "provider": drv.name})
+                except Exception: pass
+            _set_release(name, ver, "failed")
+            alive = q("select 1 from instances where app=? and status='running'", (name,), one=True)
+            if prev and alive:   # previous release still serving: keep it, report the failure
+                q("update apps set spec=?, status='running', error=? where name=?", (prev["spec"], f"v{ver} failed: {e}; still serving v{prev['version']}", name))
+                log(f"ERROR: v{ver} failed ({e}); v{prev['version']} still serving, no downtime")
+            else:
+                q("update apps set status='failed', error=? where name=?", (str(e), name)); log(f"ERROR: {e}")
 def _stop(inst):
     try: get_drivers()[inst["provider"]].stop_instance(inst["id"])
     finally: q("update instances set status='stopped', stopped=? where id=?", (time.time(), inst["id"]))
@@ -145,7 +214,7 @@ def replace_instance(name, inst, why):
 def update_spec(name, fn):
     """Mutate spec and roll a redeploy from the already-built image."""
     app = q("select * from apps where name=?", (name,), one=True); spec = load_spec(app["spec"]); fn(spec)
-    spec["source"] = {"image": spec["_image"]} if spec.get("_image") else spec["source"]
+    spec["source"] = {"image": spec["_image"]} if spec.get("_image") else spec["source"]; spec["_replace_env"] = True   # full env (unsets stick)
     spec["instances"] = max(spec["instances"], 1) if not spec.get("autoscale") else max(spec["autoscale"]["min"], min(max(spec["instances"],1), spec["autoscale"]["max"]))
     return deploy(app["account_id"], spec)
 def set_env(name, env):

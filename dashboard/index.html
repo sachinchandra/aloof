@@ -4,6 +4,8 @@
 <div class=app><aside class=side aria-label="Dashboard navigation"><a class=logo href="/"><i></i>{{BRAND}}</a>
 <a class="nav on" data-t=apps href="#" aria-current=page><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><rect x=3 y=3 width=7 height=7 rx=1.5 /><rect x=14 y=3 width=7 height=7 rx=1.5 /><rect x=3 y=14 width=7 height=7 rx=1.5 /><rect x=14 y=14 width=7 height=7 rx=1.5 /></svg>Apps</a>
 <a class=nav data-t=volumes href="#"><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><ellipse cx=12 cy=6 rx=8 ry=3 /><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/></svg>Volumes</a>
+<a class=nav data-t=pg href="#"><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><path d="M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Z"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Postgres</a>
+<a class=nav data-t=audit href="#"><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>Audit log</a>
 <a class=nav data-t=billing href="#"><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><rect x=2 y=5 width=20 height=14 rx=2 /><path d="M2 10h20"/></svg>Billing &amp; usage</a>
 <a class=nav data-t=account href="#"><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><circle cx=12 cy=8 r=4 /><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Account</a>
 <a class=nav href="/docs" target=_blank><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><path d="M4 4h10a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4V4Z"/></svg>Docs ↗</a>
@@ -21,7 +23,12 @@
  <div id=detail style="display:none"></div>
 </section>
 <section id=t-volumes style="display:none"><div class=pnl><h3>Volumes</h3><div class=inline><input id=v_name placeholder="volume-name" aria-label="Volume name"> <input id=v_size value=1 type=number aria-label="Size GB" style="max-width:110px"> GB <button class="btn pri sm" onclick="mkvol()">Create</button></div>
- <div class=scroll style="margin-top:14px"><table class=tbl id=vols></table></div></div></section>
+ <div class=scroll style="margin-top:14px"><table class=tbl id=vols></table></div></div><div id=snapbox></div></section>
+<section id=t-pg style="display:none"><div class=pnl><h3>Managed Postgres</h3><p class=muted style="font-size:13px;margin-top:-4px">Postgres 16 on a private network next to your apps. Daily backups (7 kept), on-demand backups and restore. Attach injects <code>DATABASE_URL</code>.</p>
+ <div class=inline><input id=pg_name placeholder="db-name" aria-label="Database name"> <select id=pg_plan aria-label="Postgres plan"></select> <button class="btn pri sm" onclick="mkpg()">Create database</button></div>
+ <div class=scroll style="margin-top:14px"><table class=tbl id=pgs></table></div><div class=empty id=pg_empty style="display:none"><b>No databases yet</b>Create one above, or run <code>aloof pg create mydb</code>.</div></div>
+ <div id=pgdetail></div></section>
+<section id=t-audit style="display:none"><div class=pnl><h3>Audit log</h3><p class=muted style="font-size:13px;margin-top:-4px">Console sessions (and each line typed), exec commands, rollbacks, database and snapshot actions, with source IP.</p><div class=scroll><table class=tbl id=auditt></table></div></div></section>
 <section id=t-billing style="display:none"><div class="grid g3">
  <div class=pnl><h3>Balance</h3><div style="font-weight:750;letter-spacing:-.02em" id=bal></div><p class=muted style="font-size:13px">Prepaid USD credit, billed per second. Tax is added at checkout where it applies.</p>
   <div class=inline><span>$</span><input id=amt value=25 aria-label="Top-up amount" style="max-width:110px"> <button class="btn pri sm" onclick="topup()">Top up</button> <button class="btn ghost sm" onclick="portal()">Billing portal</button></div><p id=paynote class=muted style="font-size:13px"></p></div>
@@ -44,10 +51,10 @@ async function api(m,p,b){const r=await fetch(p,{method:m,credentials:'same-orig
  if(r.status==401){location='/login';return new Promise(()=>{})} const t=await r.text(); let j; try{j=JSON.parse(t)}catch{j=t}
  if(!r.ok){toast(typeof j=='object'?(typeof j.detail=='string'?j.detail:JSON.stringify(j.detail)):t);throw j} return j}
 let tab='apps', open=null;
-const TITLE={apps:'Apps',volumes:'Volumes',billing:'Billing & usage',account:'Account'};
+const TITLE={apps:'Apps',volumes:'Volumes',pg:'Postgres',audit:'Audit log',billing:'Billing & usage',account:'Account'};
 document.querySelectorAll('a.nav[data-t]').forEach(a=>a.onclick=e=>{e.preventDefault();tab=a.dataset.t;document.querySelectorAll('a.nav[data-t]').forEach(x=>{x.classList.toggle('on',x==a);x.toggleAttribute('aria-current',x==a)});
  document.querySelectorAll('.content>section').forEach(s=>s.style.display=s.id=='t-'+tab?'':'none');$('ptitle').textContent=TITLE[tab];refresh()});
-async function refresh(){if(tab=='apps')await apps();if(tab=='volumes')await vols();if(tab=='billing')await bill();if(tab=='account')await account()}
+async function refresh(){if(tab=='apps')await apps();if(tab=='volumes')await vols();if(tab=='billing')await bill();if(tab=='pg')await pgs();if(tab=='audit')await auditlog();if(tab=='account')await account()}
 async function apps(){const a=await api('GET','/v1/apps');
  $('stat_apps').textContent=a.length;$('stat_run').textContent=a.filter(x=>x.status=='running').length;$('stat_inst').textContent=a.reduce((n,x)=>n+x.instances.length,0);
  $('apps_empty').style.display=a.length?'none':'';
@@ -57,7 +64,7 @@ async function apps(){const a=await api('GET','/v1/apps');
  if(open)show(open,true)}
 let dtab='overview', MS=[];
 async function show(n,quiet){if(open!=n)MS=[];open=n;const a=await api('GET','/v1/apps/'+n), d=await api('GET','/v1/apps/'+n+'/domains'), v=await api('GET','/v1/volumes'), s=a.spec.autoscale||{}, h=a.spec.health||{};
- const D=$('detail');D.style.display='';if(quiet&&D.dataset.app==n&&D.contains(document.activeElement))return;D.dataset.app=n;
+ const D=$('detail');D.style.display='';if(quiet&&D.dataset.app==n&&(D.contains(document.activeElement)||dtab=='console'))return;D.dataset.app=n;
  const T=(k,l)=>`<button class="${dtab==k?'on':''}" onclick="dtab='${k}';show('${n}')">${l}</button>`;
  const pane={
  overview:`<div class=stats><div class=stat><span>Status</span><b><span class="status s-${a.status}">${esc(a.status)}</span></b></div><div class=stat><span>Instances</span><b id=m_inst>${a.instances.length}</b></div>
@@ -65,7 +72,13 @@ async function show(n,quiet){if(open!=n)MS=[];open=n;const a=await api('GET','/v
   <div class="grid g2"><div class=pnl><h3>Requests / 5 s</h3><svg class=spark id=sp_req viewBox="0 0 300 56" preserveAspectRatio=none></svg></div><div class=pnl><h3>CPU % (avg per instance)</h3><svg class=spark id=sp_cpu viewBox="0 0 300 56" preserveAspectRatio=none></svg></div></div>
   <div class=pnl><h3>Details</h3><table class=tbl><tr><td>URL</td><td><a href="${a.url}" target=_blank rel=noopener>${esc(a.url)}</a></td></tr><tr><td>Plan</td><td><code>${a.plan.id}</code> · ${a.plan.vcpu} vCPU · ${a.plan.memory_mb} MB</td></tr>
   <tr><td>Runs on</td><td>${esc(a.provider)}</td></tr><tr><td>Source</td><td><code>${esc(a.spec.source.image||a.spec.source.git||'')}</code></td></tr><tr><td>Port</td><td>${a.spec.port}</td></tr></table></div>`,
- logs:`<div class=pnl><h3>Logs <span class=sp></span><button class="btn ghost sm" onclick="logs()">Refresh</button></h3><pre id=lg class=logs>…</pre></div>`,
+ logs:`<div class=pnl><h3>Logs <span class=sp></span><button class="btn ghost sm" onclick="logs()">Refresh</button></h3><pre id=lg class=logs>…</pre></div>
+  <div class=pnl><h3>Log drains</h3><p class=muted style="font-size:13px;margin-top:-4px">Forward every line as it happens to <code>https://</code> (JSON batches) or <code>syslog+tls://host:port</code> (RFC 5424). Retained history: <span id=ret>…</span> days on your plan.</p>
+  <div class=scroll><table class=tbl id=drn></table></div><div class=inline style="margin-top:10px"><input id=dr_url placeholder="https://logs.example.com/ingest or syslog+tls://host:6514" aria-label="Drain URL"> <button class="btn pri sm" onclick="adddrain()">Add drain</button></div></div>`,
+ releases:`<div class=pnl><h3>Releases</h3><p class=muted style="font-size:13px;margin-top:-4px">Every deploy and config change is a release. New instances must pass readiness before old ones stop; a failed release never takes traffic. Rollback reuses the old image (no rebuild).</p><div class=scroll><table class=tbl id=rels></table></div></div>`,
+ console:`<div class=pnl><h3>Console <span class=sp></span><span class=muted id=con_st style="font-size:13px">connecting…</span> <button class="btn ghost sm" onclick="conOpen()">Reconnect</button></h3>
+  <p class=muted style="font-size:13px;margin-top:-4px">A shell inside a running instance. Sessions and every line you enter are recorded in the audit log.</p>
+  <pre id=con class=logs style="min-height:260px" aria-live=polite></pre><div class=inline style="margin-top:8px"><input id=con_in placeholder="type a command and press Enter" aria-label="Console input" autocomplete=off spellcheck=false style="font-family:var(--mono)"> <button class="btn ghost sm" onclick="conSend('\u0003')">Ctrl-C</button></div></div>`,
  env:`<div class=pnl><h3>Environment <span class=muted style="font-weight:400;font-size:13px">values are encrypted at rest and never shown</span></h3><div class=chips>${a.env_keys.map(k=>`<code>${esc(k)} <a href="#" aria-label="remove ${esc(k)}" onclick="unset('${esc(k)}');return false">×</a></code>`).join('')||'<span class=muted>none</span>'}</div>
   <div class=inline style="margin-top:12px"><input id=e_k placeholder=KEY aria-label=Key> <input id=e_v placeholder=value aria-label=Value> <button class="btn pri sm" onclick="setenv()">Set</button></div></div>`,
  scale:`<div class="grid g2"><div class=pnl><h3>Instances</h3><div class=inline><input id=sc value=${a.instances.length} type=number min=0 max=10 aria-label=Instances> <button class="btn pri sm" onclick="scale()">Apply</button></div>
@@ -80,8 +93,8 @@ async function show(n,quiet){if(open!=n)MS=[];open=n;const a=await api('GET','/v
  volumes:`<div class=pnl><h3>Volumes</h3>${(a.spec.volumes||[]).map(x=>`<p><code>${esc(x.name)}</code> → <code>${esc(x.path)}</code> <button class="btn ghost sm" onclick="detach('${x.name}')">Detach</button></p>`).join('')||'<p class=muted>No volumes attached.</p>'}
   <div class=inline><select id=va aria-label=Volume>${v.filter(x=>!x.app).map(x=>`<option>${esc(x.name)}</option>`).join('')}</select> <input id=vp value=/data aria-label="Mount path"> <button class="btn pri sm" onclick="attach()">Attach</button></div></div>`};
  D.innerHTML=`<div class=pnl style="padding-bottom:0"><h3 style="font-size:20px">${esc(n)} <span class="status s-${a.status}">${a.status}</span><span class=sp></span><a class="btn ghost sm" href="${a.url}" target=_blank rel=noopener>Open ↗</a> <button class="btn danger sm" onclick="destroy('${n}')">Destroy</button></h3>
- <div class=dtabs role=tablist>${T('overview','Overview')}${T('logs','Logs')}${T('env','Environment')}${T('scale','Scale & health')}${T('domains','Domains')}${T('volumes','Volumes')}</div></div>${pane[dtab]}`;
- if(!quiet)D.scrollIntoView({behavior:'smooth',block:'start'}); if(dtab=='logs')logs(); if(dtab=='overview')metrics()}
+ <div class=dtabs role=tablist>${T('overview','Overview')}${T('logs','Logs')}${T('env','Environment')}${T('scale','Scale & health')}${T('domains','Domains')}${T('volumes','Volumes')}${T('releases','Releases')}${T('console','Console')}</div></div>${pane[dtab]}`;
+ if(!quiet)D.scrollIntoView({behavior:'smooth',block:'start'}); if(dtab=='logs'){logs();drains()} if(dtab=='overview')metrics(); if(dtab=='releases')rels(); if(dtab=='console')conOpen(); else conClose()}
 function spark(id,vals){const el=$(id);if(!el)return;const mx=Math.max(1,...vals),w=300/Math.max(1,vals.length-1);const pts=vals.map((v,i)=>`${(i*w).toFixed(1)},${(54-v/mx*50).toFixed(1)}`).join(' ');
  el.innerHTML=vals.length<2?'<text x=4 y=30 fill="currentColor" font-size=11 opacity=.5>collecting…</text>':`<polyline fill=none stroke="var(--acc)" stroke-width=2 points="${pts}"/><polyline fill="color-mix(in srgb,var(--acc) 15%,transparent)" stroke=none points="0,56 ${pts} 300,56"/>`}
 async function metrics(){if(!open||dtab!='overview')return;const m=await api('GET','/v1/apps/'+open+'/metrics');const prev=MS[MS.length-1];
@@ -105,7 +118,7 @@ async function rmdom(d){await api('DELETE','/v1/apps/'+A()+'/domains/'+d);show(A
 async function destroy(n){if(!confirm('Destroy '+n+'? This cannot be undone.'))return;await api('DELETE','/v1/apps/'+n);open=null;$('detail').style.display='none';apps()}
 async function deploy(){const src=$('d_image').value?{image:$('d_image').value}:{git:$('d_git').value};const env=Object.fromEntries($('d_env').value?$('d_env').value.split(',').map(x=>x.split('=')):[]);
  await api('POST','/v1/apps',{name:$('d_name').value,source:src,plan:$('d_plan').value,port:+$('d_port').value,env});toast('deploying '+$('d_name').value);apps()}
-async function vols(){const v=await api('GET','/v1/volumes');$('vols').innerHTML='<tr><th>Name</th><th>Size</th><th>Attached to</th><th>Node</th><th></th></tr>'+v.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.size_gb} GB</td><td>${x.app?esc(x.app)+':'+esc(x.mount_path):'<span class=muted>—</span>'}</td><td>${esc(x.node_id||'local')}</td><td>${x.app?'':`<button onclick="rmvol('${x.name}')">Delete</button>`}</td></tr>`).join('')}
+async function vols(){const v=await api('GET','/v1/volumes');$('vols').innerHTML='<tr><th>Name</th><th>Size</th><th>Attached to</th><th>Node</th><th></th></tr>'+v.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.size_gb} GB</td><td>${x.app?esc(x.app)+':'+esc(x.mount_path):'<span class=muted>—</span>'}</td><td>${esc(x.node_id||'local')}</td><td><button class="btn ghost sm" onclick="snap('${x.name}')">Snapshot</button> <button class="btn ghost sm" onclick="snaps('${x.name}')">Snapshots</button> ${x.app?'':`<button onclick="rmvol('${x.name}')">Delete</button>`}</td></tr>`).join('')}
 async function mkvol(){await api('POST','/v1/volumes',{name:$('v_name').value,size_gb:+$('v_size').value});vols()}
 async function rmvol(n){if(confirm('Delete volume '+n+' and its data?')){await api('DELETE','/v1/volumes/'+n);vols()}}
 const usd=x=>(+x<0?'−':'')+'$'+Math.abs(+x).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}), c2u=c=>usd((+c||0)/100), dt=t=>new Date(t*1000).toLocaleString();
@@ -121,12 +134,60 @@ async function subscribe(){const t=$('tiersel').value;if(t=='free'){portal();ret
 async function portal(){const o=await api('POST','/v1/billing/portal');if(o.url)location.href=o.url}
 function renderMonth(b){const m=b.month;$('tiersel').innerHTML=Object.entries(b.tiers).map(([k,t])=>`<option value=${k} ${k==m.tier?'selected':''}>${k}: $${t.fee_usd}/mo, incl. $${t.included_usage_usd} usage</option>`).join('');
  $('tierinfo').textContent=`${m.tier} · ${m.month} · ${usd(m.included_usage_usd)} usage included`+(b.subscription?' · Stripe subscription':'');
- $('month').innerHTML='<tr><th>This month</th><th>Qty</th><th>Cost</th></tr>'+[['compute','instance-hours'],['volume','GB-months'],['egress','GB']].map(([k,u])=>`<tr><td>${k}</td><td>${(m.usage[k]||{qty:0}).qty} ${u}</td><td>${usd((m.usage[k]||{cost_usd:0}).cost_usd)}</td></tr>`).join('')+`<tr><td><b>Billable beyond included</b></td><td></td><td><b>${usd(m.billable_usd)}</b></td></tr>`}
+ $('month').innerHTML='<tr><th>This month</th><th>Qty</th><th>Cost</th></tr>'+[['compute','instance-hours'],['postgres','instance-hours'],['volume','GB-months'],['backup','GB-months (backups & snapshots)'],['egress','GB']].map(([k,u])=>`<tr><td>${k}</td><td>${(m.usage[k]||{qty:0}).qty} ${u}</td><td>${usd((m.usage[k]||{cost_usd:0}).cost_usd)}</td></tr>`).join('')+`<tr><td><b>Billable beyond included</b></td><td></td><td><b>${usd(m.billable_usd)}</b></td></tr>`}
 async function topup(){const o=await api('POST','/v1/billing/checkout',{credit_usd:+$('amt').value});if(o.url)location.href=o.url}
 async function saveProfile(){await api('PUT','/v1/billing/profile',{billing_name:$('b_name').value||null,country:$('b_country').value||null,tax_id:$('b_tax').value||null});toast('saved');bill()}
 async function account(){const m=await api('GET','/v1/auth/me');$('acct').innerHTML=`<p><b>${esc(m.email)}</b> ${m.email_verified?'<span class=ok>verified</span>':''}<br>API key: <code>${esc(m.api_key_prefix)}…</code> · password ${m.has_password?'set':'not set'} · credit ${usd(m.credit_usd)}</p>`}
 async function rotate(){if(!confirm('Rotate API key? The old key stops working immediately.'))return;const r=await api('POST','/v1/auth/api-key');$('newkey').style.display='';$('newkey').textContent=r.api_key}
 async function setpw(){await api('POST','/v1/auth/password',{password:$('newpw').value});toast('password updated')}
+
+// ---- releases / rollback
+async function rels(){const r=await api('GET','/v1/apps/'+A()+'/releases');$('rels').innerHTML='<tr><th>Version</th><th>Status</th><th>When</th><th>Reason</th><th>Image</th><th></th></tr>'+r.map(x=>`<tr><td><b>v${x.version}</b></td><td><span class="status s-${x.status=='active'?'running':x.status=='failed'?'failed':'stopped'}">${esc(x.status)}</span></td><td>${dt(x.created)}</td><td>${esc(x.reason||'')}</td><td><code>${esc(x.image||'')}</code></td>
+ <td>${x.status=='superseded'&&x.image?`<button class="btn ghost sm" onclick="rollback(${x.version})">Roll back to v${x.version}</button>`:''}</td></tr>`).join('')}
+async function rollback(v){if(!confirm('Roll back '+A()+' to v'+v+'? Zero downtime; current volumes and database attachments are kept.'))return;await api('POST','/v1/apps/'+A()+'/rollback',{version:v});toast('rolling back to v'+v);setTimeout(rels,1500)}
+// ---- console (WebSocket, tty)
+let WS=null;const ANSI=/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]|\x1b[=>]/g;
+function conClose(){if(WS){WS.onclose=null;WS.close();WS=null}}
+function conOpen(){conClose();const el=$('con');if(!el)return;el.textContent='';$('con_st').textContent='connecting…';
+ WS=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/v1/apps/'+encodeURIComponent(A())+'/console');WS.binaryType='arraybuffer';const dec=new TextDecoder();
+ WS.onopen=()=>{$('con_st').textContent='connected';WS.send(JSON.stringify({resize:[30,120]}));$('con_in').focus()};
+ WS.onmessage=e=>{let t=(typeof e.data=='string'?e.data:dec.decode(e.data,{stream:true})).replace(ANSI,'').replace(/\r\n/g,'\n').replace(/\r/g,'');el.textContent=(el.textContent+t).slice(-60000);el.scrollTop=el.scrollHeight};
+ WS.onclose=e=>{if($('con_st'))$('con_st').textContent='disconnected'+(e.reason?': '+e.reason:'')};
+ $('con_in').onkeydown=e=>{if(e.key=='Enter'){conSend($('con_in').value+'\r');$('con_in').value=''}}}
+function conSend(t){if(WS&&WS.readyState==1)WS.send(new TextEncoder().encode(t))}
+// ---- drains
+async function drains(){const d=await api('GET','/v1/apps/'+A()+'/drains');const h=await api('GET','/v1/apps/'+A()+'/logs/history?limit=1');if($('ret'))$('ret').textContent=h.retention_days;
+ $('drn').innerHTML=d.length?'<tr><th>Target</th><th>Sent</th><th>Last OK</th><th>Last error</th><th></th></tr>'+d.map(x=>`<tr><td><code>${esc(x.url)}</code></td><td>${x.sent}</td><td>${x.last_ok?dt(x.last_ok):'—'}</td><td class=bad>${esc(x.last_error||'')}</td><td><button class="btn danger sm" onclick="rmdrain('${x.id}')">Remove</button></td></tr>`).join(''):'<tr><td class=muted>No drains.</td></tr>'}
+async function adddrain(){await api('POST','/v1/apps/'+A()+'/drains',{url:$('dr_url').value});toast('drain added');drains()}
+async function rmdrain(i){await api('DELETE','/v1/apps/'+A()+'/drains/'+i);drains()}
+// ---- snapshots
+async function snap(v){toast('snapshotting '+v+'…');await api('POST','/v1/volumes/'+v+'/snapshots');toast('snapshot taken');snaps(v)}
+async function snaps(v){const s=await api('GET','/v1/volumes/'+v+'/snapshots');$('snapbox').innerHTML=`<div class=pnl><h3>Snapshots of ${esc(v)}</h3><div class=scroll><table class=tbl>${s.length?'<tr><th>Snapshot</th><th>Size</th><th>Taken</th><th></th></tr>'+s.map(x=>`<tr><td><code>${esc(x.id)}</code></td><td>${(x.size_bytes/1e6).toFixed(2)} MB</td><td>${dt(x.created)}</td>
+ <td><button class="btn ghost sm" onclick="restoreSnap('${esc(v)}','${x.id}')">Restore</button> <button class="btn danger sm" onclick="rmsnap('${esc(v)}','${x.id}')">Delete</button></td></tr>`).join(''):'<tr><td class=muted>No snapshots yet.</td></tr>'}</table></div></div>`}
+async function restoreSnap(v,i){if(!confirm('Restore '+v+' from '+i+'? Current data on the volume is replaced; the attached app restarts.'))return;await api('POST','/v1/volumes/'+v+'/restore',{snapshot_id:i});toast('restored');snaps(v)}
+async function rmsnap(v,i){if(!confirm('Delete snapshot '+i+'?'))return;await api('DELETE','/v1/volumes/'+v+'/snapshots/'+i);snaps(v)}
+// ---- Postgres
+let PGP=null;
+async function pgs(){if(!PGP){PGP=await api('GET','/v1/pg/plans');$('pg_plan').innerHTML=PGP.plans.map(p=>`<option value=${p.id}>${p.id}: ${p.vcpu} vCPU, ${p.memory_mb>=1024?p.memory_mb/1024+' GB':p.memory_mb+' MB'}, ${p.disk_gb} GB · $${p.price_usd_month}/mo</option>`).join('')}
+ const d=await api('GET','/v1/pg');$('pg_empty').style.display=d.length?'none':'';
+ $('pgs').innerHTML=d.length?'<tr><th>Database</th><th>Status</th><th>Plan</th><th>Host</th><th>Attached</th><th>Backups</th><th></th></tr>'+d.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td><span class="status s-${x.status}">${esc(x.status)}</span></td><td>${esc(x.plan)} <span class=muted>$${x.price_usd_month}/mo</span></td><td><code>${esc(x.host)}:5432/${esc(x.database)}</code></td>
+ <td>${x.attached.map(a=>esc(a.app)+' <span class=muted>$'+esc(a.var)+'</span>').join('<br>')||'<span class=muted>—</span>'}</td><td>${x.backups.length}</td><td><button class="btn ghost sm" onclick="pgshow('${x.name}')">Manage</button></td></tr>`).join(''):''}
+async function mkpg(){await api('POST','/v1/pg',{name:$('pg_name').value,plan:$('pg_plan').value});toast('creating database');pgs()}
+async function pgshow(n){const x=await api('GET','/v1/pg/'+n), ap=await api('GET','/v1/apps');
+ $('pgdetail').innerHTML=`<div class=pnl><h3 style="font-size:20px">${esc(n)} <span class="status s-${x.status}">${esc(x.status)}</span><span class=sp></span><button class="btn ghost sm" onclick="pgurl('${n}')">Reveal DATABASE_URL</button> <button class="btn danger sm" onclick="rmpg('${n}')">Destroy</button></h3>
+ <pre id=pgu style="display:none"></pre>
+ <h4 style="margin:12px 0 6px">Attach to an app</h4><div class=inline><select id=pg_app aria-label=App>${ap.map(a=>`<option>${esc(a.name)}</option>`).join('')}</select> <input id=pg_var value=DATABASE_URL aria-label="Env var" style="max-width:200px"> <button class="btn pri sm" onclick="pgattach('${n}')">Attach</button></div>
+ ${x.attached.map(a=>`<p>${esc(a.app)} <code>$${esc(a.var)}</code> <button class="btn ghost sm" onclick="pgdetach('${n}','${esc(a.app)}')">Detach</button></p>`).join('')}
+ <h4 style="margin:16px 0 6px">Backups <span class=muted style="font-weight:400;font-size:13px">daily, 7 kept · billed per GB-month</span> <button class="btn ghost sm" onclick="pgbackup('${n}')">Back up now</button></h4>
+ <div class=scroll><table class=tbl>${x.backups.map(b=>`<tr><td><code>${esc(b.id)}</code></td><td>${(b.size_bytes/1e6).toFixed(2)} MB</td><td>${dt(b.created)}</td><td>${esc(b.note)}</td><td><button class="btn ghost sm" onclick="pgrestore('${n}','${b.id}')">Restore</button></td></tr>`).join('')||'<tr><td class=muted>No backups yet (the first daily backup runs within an hour).</td></tr>'}</table></div></div>`}
+async function pgurl(n){const x=await api('GET','/v1/pg/'+n+'?reveal=true');$('pgu').style.display='';$('pgu').textContent=x.database_url}
+async function pgattach(n){await api('POST','/v1/pg/'+n+'/attach',{app:$('pg_app').value,var:$('pg_var').value});toast('attached; app redeploying');pgshow(n);pgs()}
+async function pgdetach(n,a){await api('DELETE','/v1/pg/'+n+'/attach/'+a);pgshow(n);pgs()}
+async function pgbackup(n){toast('backing up…');await api('POST','/v1/pg/'+n+'/backups');toast('backup done');pgshow(n);pgs()}
+async function pgrestore(n,b){if(!confirm('Restore '+n+' from '+b+'? Tables in the backup are replaced.'))return;await api('POST','/v1/pg/'+n+'/restore',{backup_id:b});toast('restored')}
+async function rmpg(n){if(!confirm('Destroy database '+n+' and its backups? This cannot be undone.'))return;await api('DELETE','/v1/pg/'+n);$('pgdetail').innerHTML='';pgs()}
+// ---- audit
+async function auditlog(){const a=await api('GET','/v1/audit?limit=200');$('auditt').innerHTML='<tr><th>When</th><th>App</th><th>Action</th><th>Detail</th><th>IP</th></tr>'+a.map(e=>`<tr><td>${dt(e.ts)}</td><td>${esc(e.app||'—')}</td><td><code>${esc(e.action)}</code></td><td>${esc(e.detail)}</td><td class=muted>${esc(e.ip||'')}</td></tr>`).join('')}
 async function logout(){await api('POST','/v1/auth/logout');location='/login'}
 (async()=>{const me=await api('GET','/v1/auth/me');$('who').textContent=me.email;
  if(sessionStorage.newKey){tab='account';document.querySelector('[data-t=account]').click();$('newkey').style.display='';$('newkey').textContent='Your API key (shown once): '+sessionStorage.newKey;delete sessionStorage.newKey}

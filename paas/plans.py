@@ -161,3 +161,31 @@ def check_floor():
 def margin(p, host=None):
     k = next(k for k, v in PLANS.items() if v is p); m = worst_case_margin(k); return round(m, 3) if m is not None else -1.0
 def cents(usd): return usd * 100.0
+# ---------------- managed Postgres (runs on local-docker next to the edge, private network to attached apps) ----------------
+# Price = the compute plan + the data disk at the volume rate (+ a management fee when needed for margin); backups (daily pg_dump, 7 kept) are metered at the volume rate.
+# Margin is checked against the worst-case cost of the compute pool Postgres runs on (local-docker) plus disk cost for data and
+# a full set of backups (BACKUP_FACTOR x disk), so it holds even if customers never pay for backup storage.
+PG_POOL = "local-docker"; PG_BACKUP_FACTOR = 1.0
+PG_PLANS = {
+  "pg-dev":      {"compute": "shared-1x-256mb", "disk_gb": 1,   "note": "development / hobby"},
+  "pg-basic":    {"compute": "shared-1x-1gb",   "disk_gb": 10,  "note": "small production"},
+  "pg-standard": {"compute": "shared-2x-2gb",   "disk_gb": 40,  "note": "production"},
+  "pg-perf":     {"compute": "perf-1x-2gb",     "disk_gb": 100, "note": "dedicated vCPU"},
+}
+import math as _m
+for _k, _p in PG_PLANS.items():   # compute + disk, plus a management fee where needed to keep a 35% target margin (floor 30%)
+    _base = PLANS[_p["compute"]]["price_usd_month"] + _p["disk_gb"] * RATES["volume_usd_gb_month"]
+    _cost = pool_cost_month(_p["compute"], PG_POOL) + _p["disk_gb"] * (1 + PG_BACKUP_FACTOR) * RATE_COST["volume_usd_gb_month"]
+    _need = _cost / (1 - fee_rate() - max(MIN_MARGIN, 0.35))
+    _p["price_usd_month"] = round(max(_base, _m.ceil(_need) - 0.01), 2)
+    _p["price_usd_hr"] = round(_p["price_usd_month"] / HOURS_MONTH, 6)
+    _p["vcpu"] = PLANS[_p["compute"]]["vcpu"]; _p["memory_mb"] = PLANS[_p["compute"]]["memory_mb"]
+RATES["backup_usd_gb_month"] = RATES["volume_usd_gb_month"]
+def pg_cost_month(k):
+    p = PG_PLANS[k]; c = pool_cost_month(p["compute"], PG_POOL)
+    return None if c is None else c + p["disk_gb"] * (1 + PG_BACKUP_FACTOR) * RATE_COST["volume_usd_gb_month"]
+def pg_margin(k):
+    c = pg_cost_month(k); return None if c is None else net_margin(PG_PLANS[k]["price_usd_month"], c)
+for _k in PG_PLANS: PG_PLANS[_k]["margin"] = round(pg_margin(_k) or 0, 3)
+# Log retention per workspace tier (days of searchable history on the platform; drains forward everything as it happens)
+for _t, _d in (("free", 1), ("hobby", 7), ("pro", 30)): TIERS[_t]["log_retention_days"] = _d
