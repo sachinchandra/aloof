@@ -1,6 +1,6 @@
 """Accounts: email+password (scrypt), magic links, HttpOnly session cookies; API keys (hashed) for CLI/MCP.
 Mailer: SMTP when SMTP_HOST is set (STARTTLS), otherwise appends to data/outbox.log (local dev)."""
-import os, time, secrets, smtplib, ssl, re
+import os, time, secrets, smtplib, ssl, re, logging
 from email.message import EmailMessage
 from .db import q
 from .crypto import sha256, hash_password, check_password
@@ -10,14 +10,27 @@ SESSION_TTL = 14 * 86400; MAGIC_TTL = 15 * 60
 COOKIE = "aloof_session"
 OUTBOX = os.environ.get("PAAS_OUTBOX") or os.path.join(os.path.dirname(__file__), "..", "data", "outbox.log")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+log = logging.getLogger("paas.mail")
+class MailError(RuntimeError): pass
+def _production(): return (E("PAAS_PUBLIC_API_URL") or "").startswith("https://") and E("PAAS_DEV_OUTBOX") != "1"
 def send_mail(to, subject, body):
+    """SMTP when SMTP_HOST is set. Without it: dev appends to the outbox; production refuses (the outbox would hold live
+    sign-in links and API keys) and raises MailError. SMTP failures are logged (never the body) and raise MailError."""
     msg = EmailMessage(); msg["From"] = E("MAIL_FROM", "Aloof <no-reply@aloof.si>"); msg["To"] = to; msg["Subject"] = subject; msg.set_content(body, cte="8bit")
     if E("SMTP_HOST"):
-        with smtplib.SMTP(E("SMTP_HOST"), int(E("SMTP_PORT", "587")), timeout=20) as s:
-            if E("SMTP_STARTTLS", "1") == "1": s.starttls(context=ssl.create_default_context())
-            if E("SMTP_USER"): s.login(E("SMTP_USER"), E("SMTP_PASSWORD", ""))
-            s.send_message(msg)
+        try:
+            with smtplib.SMTP(E("SMTP_HOST"), int(E("SMTP_PORT", "587")), timeout=20) as s:
+                if E("SMTP_STARTTLS", "1") == "1": s.starttls(context=ssl.create_default_context())
+                if E("SMTP_USER"): s.login(E("SMTP_USER"), E("SMTP_PASSWORD", ""))
+                s.send_message(msg)
+        except (smtplib.SMTPException, OSError) as e:
+            log.error("smtp send failed to=%s subject=%r host=%s: %s: %s", to, subject, E("SMTP_HOST"), type(e).__name__, e)
+            raise MailError("email delivery failed") from e
+        log.info("mail sent to=%s subject=%r", to, subject)
         return "smtp"
+    if _production():
+        log.error("SMTP_HOST not set in production; dropped mail to=%s subject=%r (set SMTP_* in golive.env)", to, subject)
+        raise MailError("email is not configured")
     with open(OUTBOX, "a") as f: f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')}\n{msg.as_string()}\n")
     return "outbox"
 def _check_email(email):
@@ -29,7 +42,8 @@ def register(email, password):
     if len(password or "") < 10: raise ValueError("password must be at least 10 characters")
     if q("select 1 from accounts where email=?", (email,), one=True): raise PermissionError("account exists; log in or use a magic link")
     a = engine.create_account(email, hash_password(password))
-    send_mail(email, "Welcome to Aloof", f"Your Aloof account is ready.\n\nAPI key (shown once): {a['api_key']}\nDashboard: {E('PAAS_PUBLIC_API_URL','http://localhost:8000')}/dashboard\n")
+    try: send_mail(email, "Welcome to Aloof", f"Your Aloof account is ready.\n\nAPI key (shown once): {a['api_key']}\nDashboard: {E('PAAS_PUBLIC_API_URL','http://localhost:8000')}/dashboard\n")
+    except MailError: pass   # already logged; the key is also returned in the register response
     return a
 def login(email, password):
     a = q("select * from accounts where email=?", ((email or "").strip().lower(),), one=True)

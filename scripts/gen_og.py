@@ -15,8 +15,7 @@ def card(name, eyebrow, title, sub):
     im = Image.blend(im, glow.filter(ImageFilter.GaussianBlur(160)), 0.55); d = ImageDraw.Draw(im)
     for x in range(0, W, 48): d.line((x, 0, x, H), fill=(18, 21, 30))
     for y in range(0, H, 48): d.line((0, y, W, y), fill=(18, 21, 30))
-    mk = lambda x, y: (x * 32 / 32 + 72, y + 64)
-    d.polygon([mk(16, 3.5), mk(28.5, 27.5), mk(22.3, 27.5), mk(16, 15.2), mk(9.7, 27.5), mk(3.5, 27.5)], fill=(238, 240, 246)); d.ellipse((72 + 13, 64 + 21.2, 72 + 19, 64 + 27.2), fill=(238, 240, 246))
+    for x, y in ((4, 5), (7, 13.2), (10, 21.4)): d.rounded_rectangle((72 + x, 64 + y, 72 + x + 18, 64 + y + 5.6), 2.8, fill=(238, 240, 246))
     d.text((118, 60), "aloof", font=font(32, 680), fill=(238, 240, 246))
     d.text((72, 170), eyebrow.upper(), font=ImageFont.truetype(M, 22), fill=(139, 123, 255))
     words, lines, cur = title.split(), [], ""

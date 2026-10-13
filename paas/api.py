@@ -374,6 +374,7 @@ def auth_login(c: Creds, request: Request):
 def auth_magic(m: MagicReq, request: Request):
     try: auth.start_magic(m.email, PUBLIC_API_URL if SECURE_COOKIES else str(request.base_url))
     except ValueError as e: raise HTTPException(400, str(e))
+    except auth.MailError: raise HTTPException(503, "email sign-in is temporarily unavailable; log in with your password or try again later")
     return {"ok": True, "detail": "If the address is valid, a sign-in link is on its way (valid 15 minutes)."}
 @app.get("/auth/magic")
 def auth_magic_finish(token: str):
@@ -528,7 +529,7 @@ def api_docs():
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>API reference · {BRAND}</title>
 <meta name=description content="Interactive reference for the {BRAND} REST API: apps, deploys, volumes, Postgres, domains, billing and keys. Authenticate with Authorization: Bearer.">
 <link rel=icon href="/favicon.ico" sizes="any"><link rel=icon href="/icon.svg" type="image/svg+xml"><link rel=apple-touch-icon href="/apple-touch-icon.png">
-<link rel=stylesheet href="/static/swagger/swagger-ui.css?v={SWAGGER_V}" integrity="{SWAGGER_SRI['css']}" crossorigin=anonymous><link rel=stylesheet href="/static/aloof.css?v=8">
+<link rel=stylesheet href="/static/swagger/swagger-ui.css?v={SWAGGER_V}" integrity="{SWAGGER_SRI['css']}" crossorigin=anonymous><link rel=stylesheet href="/static/aloof.css?v=9">
 <style>body{{margin:0;background:#fff}}.topbar{{display:none}}.abar{{display:flex;align-items:center;gap:14px;padding:14px 24px;background:#0b0c10;color:#eef0f6}}.abar .logo{{color:#eef0f6!important}}.abar a{{color:#a9b0c3}}.abar .sp{{flex:1}}</style></head>
 <body><div class=abar><a class=logo href="/"><i></i>{BRAND}</a><span style="color:#8b93a7">API reference</span><span class=sp></span><a href="/docs/api">Guide</a><a href="/dashboard">Dashboard</a></div><div id=swagger-ui></div>
 <script src="/static/swagger/swagger-ui-bundle.js?v={SWAGGER_V}" integrity="{SWAGGER_SRI['js']}" crossorigin=anonymous></script>
