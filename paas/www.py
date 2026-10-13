@@ -181,12 +181,14 @@ def admin_session(request):
     if os.environ.get("PAAS_ADMIN_REQUIRE_2FA") == "1" and not a.get("mfa_verified"): return None
     return a
 def require_admin(request: Request, authorization: str = Header(None), x_admin_token: str = Header(None)):
-    """Either the admin token as Bearer (automation), or owner session + admin token in X-Admin-Token (dashboard)."""
+    """Admin token as Bearer (API/automation), or a logged-in owner session (is_admin + owner email, 2FA-ready)."""
     import hmac
     from . import api
     if authorization and hmac.compare_digest(authorization.removeprefix("Bearer ").strip(), api.ADMIN): return {"via": "token"}
     a = admin_session(request)
-    if a and x_admin_token and hmac.compare_digest(x_admin_token.strip(), api.ADMIN): return {"via": "session", "account": a}
+    if a:   # owner session is enough for the dashboard; cookie writes still need the CSRF header
+        if request.method not in ("GET", "HEAD") and request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
+        return {"via": "session", "account": a}
     raise HTTPException(401, "admin token required")
 def _ids_test(): return {r["id"] for r in q("select id from accounts where is_test=1")}
 def _day(ts): return time.strftime("%Y-%m-%d", time.localtime(ts))
@@ -313,6 +315,9 @@ def admin_flag_test(account_id: int, b: TestFlag, ctx=Depends(require_admin)):
     from .db import audit; audit((ctx.get("account") or {}).get("id"), None, "admin.flag_test", f"account={account_id} is_test={b.is_test}"); return {"ok": True}
 @R.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 def admin_page(request: Request):
+    if not _session(request):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login?next=/admin", 303)
     if not admin_session(request): raise HTTPException(404, "Not Found")
     return open(os.path.join(ROOT, "dashboard", "admin.html")).read()
 def start():

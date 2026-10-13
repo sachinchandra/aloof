@@ -17,11 +17,9 @@
 </style></head><body>
 <header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle theme">◐</button><a href="/dashboard">Dashboard</a></div></header>
 <main class="wrap adm" id=main>
-<div id=gate class=card style="display:none"><h3>Admin token</h3><p>Owner session verified. Enter the admin token from <code>data/admin_token</code> on the server. It's kept in this tab only.</p>
-<form onsubmit="event.preventDefault();sessionStorage.setItem('adm',tk.value.trim());load()" class=form-card style="margin-top:14px"><input id=tk type=password autocomplete=off placeholder="adm_…" aria-label="Admin token"><button class="btn pri">Unlock</button><p id=gm class=bad></p></form></div>
 <div id=app style="display:none">
 <div class=ah><div><h1>Owner dashboard</h1><p class=muted id=gen style="margin:4px 0 0"></p></div><span class=sp></span>
-<div class=exp><button class="btn sm" onclick="load()">Refresh</button><select id=ex aria-label="CSV table"><option>summary</option><option>users</option><option>top_users</option><option>signups</option><option>deploys</option><option>failed_deploys</option><option>design_partners</option><option>audit</option></select><button class="btn pri sm" onclick="exportCsv()">Export CSV</button><button class="btn ghost sm" onclick="sessionStorage.removeItem('adm');location.reload()">Lock</button></div></div>
+<div class=exp><button class="btn sm" onclick="load()">Refresh</button><select id=ex aria-label="CSV table"><option>summary</option><option>users</option><option>top_users</option><option>signups</option><option>deploys</option><option>failed_deploys</option><option>design_partners</option><option>audit</option></select><button class="btn pri sm" onclick="exportCsv()">Export CSV</button><button class="btn ghost sm" onclick="fetch('/v1/auth/logout',{method:'POST',headers:H()}).then(()=>location='/login')">Log out</button></div></div>
 <div id=alerts></div>
 <h2>Users &amp; revenue</h2><div class=k id=k1></div>
 <div class=two style="margin-top:14px"><div class=card><h3>GPU unlock</h3><p id=gpu class=muted></p><div class=prog><b id=gpub></b></div><p class=muted id=gpun style="font-size:13px"></p></div>
@@ -41,7 +39,7 @@
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const T=t=>t?new Date(t*1000).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'—', $=id=>document.getElementById(id);
 const usd=v=>'$'+Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-const H=()=>({'X-Admin-Token':sessionStorage.getItem('adm')||'','X-Aloof-CSRF':'1','Content-Type':'application/json'});
+const H=()=>({'X-Aloof-CSRF':'1','Content-Type':'application/json'});
 const stat=(l,v,s)=>`<div class=stat><span>${E(l)}</span><b>${v}</b>${s?`<small>${s}</small>`:''}</div>`;
 const tbl=(id,cols,rows,empty)=>{$(id).innerHTML='<tr>'+cols.map(c=>'<th>'+E(c[0])+'</th>').join('')+'</tr>'+(rows.length?rows.map(r=>'<tr>'+cols.map(c=>'<td>'+c[1](r)+'</td>').join('')+'</tr>').join(''):`<tr><td colspan=${cols.length} class=muted>${E(empty||'Nothing yet')}</td></tr>`)};
 const chart=(id,s)=>{const m=Math.max(1,...s.map(x=>x.n));$(id).innerHTML=s.map(x=>`<i style="height:${Math.max(2,100*x.n/m)}%" data-t="${E(x.day)}: ${x.n}"></i>`).join('')};
@@ -49,10 +47,9 @@ const pills=(id,o)=>{const e=Object.entries(o||{});$(id).innerHTML=e.length?e.so
 const meter=p=>`<div class=meter><b class="${p>90?'x':p>75?'w':''}" style="width:${p||0}%"></b></div>`;
 const dur=s=>{if(s==null)return'—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?`${d}d ${h}h`:`${h}h ${Math.floor(s%3600/60)}m`};
 async function load(){
-  if(!sessionStorage.getItem('adm')){$('gate').style.display='';return}
-  const r=await fetch('/v1/admin/dashboard',{headers:H(),credentials:'same-origin'});
-  if(!r.ok){sessionStorage.removeItem('adm');$('gate').style.display='';$('app').style.display='none';$('gm').textContent=r.status==401?'Wrong admin token.':'Error '+r.status;return}
-  const m=await r.json();$('gate').style.display='none';$('app').style.display='';
+    const r=await fetch('/v1/admin/dashboard',{headers:H(),credentials:'same-origin'});
+  if(r.status==401){location='/login?next=/admin';return}if(!r.ok){$('gen').textContent='Error '+r.status;$('app').style.display='';return}
+  const m=await r.json();$('app').style.display='';
   $('gen').textContent='Generated '+T(m.generated)+' · '+m.excluded_test_accounts+' test account(s) excluded';
   const al=[...(m.backups.alerts||[])];m.certs.forEach(c=>{if(c.days_left!=null&&c.days_left<14)al.push(`certificate for ${c.host} expires in ${c.days_left} days`)});
   if(m.server.disk_pct>85)al.push(`disk ${m.server.disk_pct}% full`);

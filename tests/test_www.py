@@ -55,11 +55,12 @@ def test_admin_access_control_and_metrics():
     other = _login(f"z{time.time_ns()}@x.com"); www.mark_flags()
     tester = _login(f"t{time.time_ns()}@example.com"); www.mark_flags()
     assert q("select is_test from accounts where email like 't%@example.com' order by id desc limit 1", one=True)["is_test"] == 1
-    assert c.get("/admin").status_code == 404 and other.get("/admin").status_code == 404
+    r = c.get("/admin", follow_redirects=False); assert r.status_code == 303 and r.headers["location"] == "/login?next=/admin"
+    assert other.get("/admin").status_code == 404
     assert o.get("/admin").status_code == 200
-    assert o.get("/v1/admin/dashboard").status_code == 401                      # session alone isn't enough
+    assert c.get("/v1/admin/dashboard").status_code == 401
     assert other.get("/v1/admin/dashboard", headers={"X-Admin-Token": api.ADMIN}).status_code == 401   # token + wrong user
-    m = o.get("/v1/admin/dashboard", headers={"X-Admin-Token": api.ADMIN}).json()
+    m = o.get("/v1/admin/dashboard").json()
     for k in ("users", "paid_customers", "gpu_unlock", "revenue", "deployments", "data", "waitlist", "server", "backups", "certs", "errors", "audit", "top_users", "design_partners"): assert k in m
     assert m["excluded_test_accounts"] >= 1 and all("example.com" not in a["email"] for a in m["accounts"])
     assert len(m["users"]["signups_per_day"]) == 30 and m["waitlist"]["design_partners"] >= 1
@@ -71,4 +72,6 @@ def test_admin_access_control_and_metrics():
     try: assert o.get("/admin").status_code == 404
     finally: os.environ.pop("PAAS_ADMIN_REQUIRE_2FA")
     aid = q("select id from accounts where email like 'z%@x.com' order by id desc limit 1", one=True)["id"]
-    assert o.post(f"/v1/admin/accounts/{aid}/test", json={"is_test": True}, headers={"X-Admin-Token": api.ADMIN, "X-Aloof-CSRF": "1"}).status_code == 200
+    assert o.post(f"/v1/admin/accounts/{aid}/test", json={"is_test": True}, headers={"X-Aloof-CSRF": "1"}).status_code == 200
+def test_login_next_redirect_js_has_no_backslash_regex():
+    h = c.get("/login?next=/admin").text; assert "get('next')" in h and "fromCharCode(92)" in h and "/^\\/" not in h
