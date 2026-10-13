@@ -38,7 +38,7 @@ def head(title, desc):
 <meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
 <link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
-<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=12">{THEME_JS}</head>"""
+<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=13">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a></nav>
@@ -83,9 +83,9 @@ WAITLIST_FORM = """<form id=wl class=inline style="max-width:640px" onsubmit="ev
 <input name=email type=email required placeholder="you@company.com" aria-label="Email"> <select name=gpu aria-label="GPU"><option value="">Any GPU</option>%s</select> <button class="btn pri">Join the GPU waitlist</button></form>"""
 def _gpu_section():
     if _plans.GPU_ENABLED:
-        return f"""<h2 class=t id=gpus>GPUs</h2><p class=t>Dedicated GPU per app, billed per second while running. With <code>min 0</code> autoscaling you pay only while serving.</p><div class=scroll><table class=tbl>{GPU_HEAD}{_plan_rows("gpu")}</table></div>"""
+        return f"""<h2 class=pp-h id=gpus>GPUs</h2><p class=pp-sub>Dedicated GPU per app, billed per second while running. With <code>min 0</code> autoscaling you pay only while serving.</p><div class=scroll><table class=tbl>{GPU_HEAD}{_plan_rows("gpu")}</table></div>"""
     opts = "".join(f"<option value={k}>{p['gpu']}</option>" for k, p in PLANS.items() if p["kind"] == "gpu" and k != "gpu-t4-spot")
-    return f"""<div class="card hl" id=gpus style="margin-top:40px"><span class=tag>coming soon</span><h3 style="font-size:22px">GPUs</h3><p>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. GPUs launch in our second phase; leave your email and we'll tell you when they're live.</p><div style="margin-top:16px">{WAITLIST_FORM % opts}</div></div>"""
+    return f"""<h2 class=pp-h id=gpus>GPUs <span class=tag>coming soon</span></h2><div class="card pp-gpu"><p>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. GPUs launch in our second phase; leave your email and we'll tell you when they're live.</p><div style="margin-top:16px">{WAITLIST_FORM % opts}</div></div>"""
 TERM = [("p", "$ ", "aloof deploy api --git https://github.com/acme/api.git"), ("m", "", "→ cloning acme/api@main"), ("m", "", "→ building Dockerfile (cached layers: 7/9)"),
         ("m", "", "→ pushing image to registry"), ("c", "", "→ starting 2 instances in eu-de"), ("g", "✓ ", "health check passed /healthz (38 ms)"),
         ("g", "✓ ", "live: https://api.{base}/"), ("p", "$ ", "aloof autoscale api --min 0 --max 6 --idle 300"), ("g", "✓ ", "scale to zero enabled · billed per second")]
@@ -150,36 +150,63 @@ def _pg_rows():
     from .plans import PG_PLANS
     return "".join(f"<tr><td><code>{k}</code> <span class=muted>{p['note']}</span></td><td>{p['vcpu']:g} {'shared' if p['compute'].startswith('shared') else 'dedicated'} vCPU / {p['memory_mb'] if p['memory_mb'] < 1024 else p['memory_mb'] // 1024}{' MB' if p['memory_mb'] < 1024 else ' GB'}</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items())
 def pricing(brand):
-    T = TIERS
-    def tier(k, name, blurb, hl=False):
-        t = T[k]; fee = f"${t['fee_usd']:g}"
-        return (f"<div class='card{' hl' if hl else ''}'><h3 style='font-size:18px'>{name}</h3><div class=price>{fee}<small>/month{' per workspace' if k == 'pro' else ''}</small></div><p>{blurb}</p><ul>"
-                f"<li>${t['included_usage_usd']:g} of usage included</li>"
-                f"<li>{'Unlimited seats' if not t['seats'] else '1 seat'} · {'unlimited apps' if not t['max_apps'] else str(t['max_apps']) + ' apps'}</li></ul>"
-                f"<p style='margin-top:14px'><a class='btn {'pri' if hl else 'ghost'} sm' href='/login#register'>Get started</a></p></div>")
-    R = RATES
-    return page(f"Pricing · {brand}", f"""<section class=hero style="padding:72px 0 48px"><div class=wrap style="display:block"><span class=badge>Pricing · USD · per second</span><h1>Pay per second, <span class=grad>in dollars.</span></h1>
-<p class=lead>A workspace plan, then per-second compute, volumes per GB-month and egress per GB. Prices exclude VAT/GST/sales tax, which is added at checkout where it applies.</p></div></section>
-<section class=s style="border:0;padding-top:48px"><div class=wrap><div class=grid>{tier("free", "Free", "Prototypes and side projects. Up to 3 apps on shared-1x-256mb/512mb, 1 instance each, asleep after 5 min idle. Hard-capped at the included $1: apps pause instead of billing you.")}
-{tier("hobby", "Hobby", "Solo developers running always-on apps.", True)}
-{tier("pro", "Pro", "Teams shipping to production.")}
-<div class=card><h3 style='font-size:18px'>Enterprise</h3><div class=price>Custom</div><p>Committed capacity, dedicated nodes, invoicing.</p><p style='margin-top:14px'><a class="btn ghost sm" href="mailto:sales@aloof.si">Contact us</a></p></div></div>
-<h2 class=t style="margin-top:64px">Shared CPU</h2><p class=t>Burstable vCPUs with a guaranteed 1/8-core baseline. Good for APIs, bots and workers.</p><div class=scroll><table class=tbl>{CPU_HEAD}{_plan_rows("shared")}</table></div>
-<h2 class=t style="margin-top:48px">Performance CPU</h2><p class=t>A full vCPU reserved per vCPU of the plan (no 1/8 baseline sharing).</p><div class=scroll><table class=tbl>{CPU_HEAD}{_plan_rows("performance")}</table></div>
+    T, R = TIERS, RATES
+    ck = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>'
+    def plan(k, name, who, feats, cta, hl=False):
+        t = T[k]; per = " per workspace" if k == "pro" else ""
+        lis = "".join(f"<li>{ck}<span>{f}</span></li>" for f in feats)
+        return (f"<div class='pp-card{' hl' if hl else ''}'><div class=pp-name>{name}</div><p class=pp-who>{who}</p>"
+                f"<div class=pp-price>${t['fee_usd']:g}<small>/month{per}</small></div>"
+                f"<div class=pp-inc>{'$' + format(t['included_usage_usd'], 'g') + ' of usage included'}{' · hard cap' if t.get('hard_cap') else ''}</div>"
+                f"<a class='btn {'pri' if hl else 'ghost'} pp-cta' href='/login#register'>{cta}</a><ul class=pp-feat>{lis}</ul></div>")
+    free, hob, pro = T["free"], T["hobby"], T["pro"]
+    cards = plan("free", "Free", "For trying Aloof and side projects.", [
+        f"{free['max_apps']} apps, 1 instance each", "shared-1x-256mb and shared-1x-512mb", f"Apps sleep after {free['idle_seconds']//60} min idle",
+        f"Volumes up to {free['max_volume_gb']} GB", f"{free['log_retention_days']} day of log history", f"Never billed: apps pause at the included ${free['included_usage_usd']:g}"], "Start free") + \
+        plan("hobby", "Hobby", "For personal apps that stay on.", [
+        f"Up to {hob['max_apps']} apps, 1 seat", "Every CPU size, autoscaling", "Always-on apps or scale to zero", "Volumes, managed Postgres, custom domains",
+        f"{hob['log_retention_days']} days of log history", "Usage beyond the included amount billed per second"], "Start with Hobby", True) + \
+        plan("pro", "Pro", "For teams running production.", [
+        "Unlimited apps", "Unlimited seats, one bill per workspace", "Everything in Hobby",
+        f"{pro['log_retention_days']} days of log history", "Usage beyond the included amount billed per second"], "Start with Pro")
+    faq = [("What does “usage included” mean?", f"Your plan fee comes back as credit for compute, storage and egress. Hobby is ${hob['fee_usd']:g} a month and includes ${hob['included_usage_usd']:g} of usage, so a small always-on app often costs only the plan fee."),
+           ("What happens on the Free plan if I reach the limit?", f"Apps pause when they've used the included ${free['included_usage_usd']:g} for the month. You're never charged on Free."),
+           ("Do sleeping apps cost anything?", "No. Apps that are stopped or scaled to zero don't accrue compute charges. Volumes are still billed per provisioned GB-month."),
+           ("How do I pay?", "Add prepaid credit with a card through Stripe Checkout ($10 to $5,000 per top-up), or subscribe to Hobby or Pro. Each payment gets an invoice."),
+           ("Are taxes included?", "No. Prices are in USD and exclude VAT, GST and sales tax, which are added at checkout where they apply. You can add a VAT or GST ID to your billing profile."),
+           ("Can I change plans later?", "Yes, at any time from Billing in the dashboard. Upgrades paid from your balance are charged pro-rata.")]
+    faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq)
+    head = "<tr><th>Plan</th><th>vCPU</th><th>Memory</th><th class=num>Per hour</th><th class=num>Per month</th></tr>"
+    def rows(cls):
+        return "".join(f"<tr><td><code>{k}</code></td><td>{p['vcpu']:g} {cls}</td><td>{_gb(p['memory_mb'])} GB</td><td class=num>${p['price_usd_hr']:.4f}</td><td class=num><b>{_money(p['price_usd_month'])}</b></td></tr>"
+                       for k, p in PLANS.items() if p["kind"] == "cpu" and not p["legacy"] and p["cpu_class"] == cls)
+    return page(f"Pricing · {brand}", f"""<section class="pp-hero"><div class=wrap><h1>Pricing</h1><p class=lead>Start free. Pay per second for what you run.</p></div></section>
+<section class=pp><div class=wrap>
+<div class=pp-grid>{cards}</div>
+<p class="muted pp-note">Prices in USD, excluding tax. Need committed capacity, dedicated nodes or invoicing? <a href="mailto:sales@aloof.si">Talk to us</a>.</p>
+<h2 class=pp-h id=compute>Compute</h2><p class=pp-sub>Billed per second while an instance runs. The monthly figure is the cost of running all month.</p>
+<h3 class=pp-h3>Shared CPU</h3><p class="muted pp-d">Burstable vCPUs with a guaranteed 1/8-core baseline. Good for APIs, bots and workers.</p>
+<div class=scroll><table class="tbl pp-tbl">{head}{rows("shared")}</table></div>
+<h3 class=pp-h3>Performance CPU</h3><p class="muted pp-d">A full dedicated vCPU for each vCPU in the plan.</p>
+<div class=scroll><table class="tbl pp-tbl">{head}{rows("performance")}</table></div>
+<h2 class=pp-h id=storage>Storage and network</h2>
+<div class=scroll><table class="tbl pp-tbl"><tr><th>Resource</th><th>Unit</th><th class=num>Price</th></tr>
+<tr><td>Volumes</td><td>per provisioned GB-month</td><td class=num><b>${R['volume_usd_gb_month']:.2f}</b></td></tr>
+<tr><td>Backups and volume snapshots</td><td>per GB-month stored</td><td class=num><b>${R['backup_usd_gb_month']:.2f}</b></td></tr>
+<tr><td>Egress</td><td>per GB, counts toward included usage</td><td class=num><b>${R['egress_usd_gb']:.2f}</b></td></tr>
+<tr><td>Extra RAM</td><td>per GB-month</td><td class=num><b>${R['extra_ram_usd_gb_month']:.2f}</b></td></tr>
+<tr><td>Inbound data, custom domains and TLS</td><td>—</td><td class=num><b>Free</b></td></tr></table></div>
+<h2 class=pp-h id=postgres>Managed Postgres</h2><p class=pp-sub>Postgres 16 on a private network next to your apps. Daily backups (7 kept), on-demand backup and restore. The price covers compute and the data disk; backup storage is billed as above.</p>
+<div class=scroll><table class="tbl pp-tbl"><tr><th>Plan</th><th>CPU / RAM</th><th>Disk</th><th class=num>Per month</th></tr>{_pg_rows().replace("<td><b>$", "<td class=num><b>$")}</table></div>
 {_gpu_section()}
-<h2 class=t style="margin-top:48px">Storage &amp; network</h2><div class=scroll><table class=tbl><tr><th>Resource</th><th>Price</th></tr>
-<tr><td>Volumes (provisioned GB-month)</td><td><b>${R['volume_usd_gb_month']:.2f}</b></td></tr>
-<tr><td>Egress per GB (counts toward included usage)</td><td><b>${R['egress_usd_gb']:.2f}</b></td></tr>
-<tr><td>Backups &amp; volume snapshots (GB-month of archive)</td><td><b>${R['backup_usd_gb_month']:.2f}</b></td></tr>
-<tr><td>Extra RAM (GB-month)</td><td>${R['extra_ram_usd_gb_month']:.2f}</td></tr>
-<tr><td>Free tier limits</td><td>3 apps · shared-1x-256mb / 512mb · 1 instance · sleeps after 5 min idle · 1 GB volumes · hard cap at $1 usage per month (never charged)</td></tr>
-<tr><td>Inbound data, custom domains, TLS</td><td>Free</td></tr></table></div>
-<h2 class=t style="margin-top:48px" id=postgres>Managed Postgres</h2><p class=t>Postgres 16 on a private network next to your apps, with daily backups (7 kept) and on-demand backup and restore. The price covers compute and the data disk; backup storage is billed as above.</p>
-<div class=scroll><table class=tbl><tr><th>Plan</th><th>CPU / RAM</th><th>Disk</th><th>{brand}</th></tr>{_pg_rows()}</table></div>
-<h2 class=t style="margin-top:48px">Regions</h2>{_regions()}
-<div class="grid g3" style="margin-top:40px"><div class=card><h3>Top-ups</h3><p>$10 to $5,000 via Stripe Checkout (cards, Apple Pay, Google Pay). Every payment gets an invoice; VAT/GST IDs supported.</p></div>
-<div class=card><h3>Included usage</h3><p>Each plan's fee comes back as usage credit, and you pay extra only beyond it.</p></div>
-<div class=card><h3>No idle charges</h3><p>Stopped and scaled-to-zero apps cost nothing; volumes are still billed.</p></div></div></div></section>""", brand)
+<h2 class=pp-h id=billing>How billing works</h2>
+<div class=pp-how>
+<div><b>1. Pick a plan</b><p>Free, Hobby or Pro. The plan fee comes back to you as usage credit each month.</p></div>
+<div><b>2. Run your apps</b><p>Compute is metered per second while instances run. Volumes are billed per provisioned GB-month, egress per GB.</p></div>
+<div><b>3. Pay only beyond the credit</b><p>Usage past the included amount comes from your prepaid balance. Apps scaled to zero cost nothing.</p></div></div>
+<h2 class=pp-h id=faq>Pricing FAQ</h2><div class=pp-faq>{faqh}</div>
+<div class=pp-end><h2>Start free, upgrade when you need to.</h2><p class=muted>{T['free']['max_apps']} apps and ${free['included_usage_usd']:g} of usage a month on the Free plan. No card required.</p><a class="btn pri" href="/login#register">Create an account</a> <a class="btn ghost" href="/docs/billing">Billing docs</a></div>
+</div></section>""", brand, desc="Aloof pricing: Free, Hobby $5 and Pro $20 per workspace with usage included. Compute billed per second; volumes, egress and managed Postgres in USD.")
 DOCS = ["quickstart", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "mcp", "api", "nodes"]
 TITLES = {"quickstart": "Quickstart", "cli": "CLI", "deploy": "Deploying apps", "config": "aloof.toml reference", "private": "Private registries & repos", "github": "GitHub App: push-to-deploy & previews", "ci": "Deploy tokens & CI", "processes": "Workers, release commands & cron", "networking": "Private networking, proxy, IPs & certs", "gpu": "GPU workloads", "volumes": "Volumes", "autoscaling": "Autoscaling & scale to zero",
           "domains": "Custom domains", "releases": "Releases & rollback", "postgres": "Managed Postgres", "console": "SSH & exec console", "logs": "Logs, retention & drains", "billing": "Billing, invoices & tax", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes"}
