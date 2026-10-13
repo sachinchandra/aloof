@@ -20,7 +20,10 @@ def missing():
     c = cfg(); return [n for n, k in (("BACKUP_S3_ACCESS_KEY", "access"), ("BACKUP_S3_SECRET_KEY", "secret"), ("BACKUP_ENCRYPTION_KEY", "key"), ("BACKUP_SECRETS_PASSPHRASE", "pass")) if not c[k]]
 def enabled(): return E("BACKUP_OFFSITE_ENABLED", "1") == "1" and not missing()
 def _schema():
-    q("create table if not exists offsite(id TEXT primary key, kind TEXT, owner TEXT, account_id bigint, s3_key TEXT, size_bytes bigint, sha256 TEXT, created REAL, verified REAL, verify_result TEXT)")
+    from .db import _dialect
+    q(_dialect("create table if not exists offsite(id TEXT primary key, kind TEXT, owner TEXT, account_id bigint, s3_key TEXT, size_bytes bigint, sha256 TEXT, created REAL, verified REAL, verify_result TEXT)"))
+    if PGDB:   # early builds created float4 columns on Postgres (second-level precision lost)
+        for c in ("created", "verified"): q(f"alter table offsite alter column {c} type double precision")
 _schema()
 # ---------------- crypto ----------------
 MAGIC = b"ALOOFBK1"; CHUNK = 1 << 20
@@ -95,7 +98,9 @@ def download(oid, dest):
         with open(dest, "wb") as o: decrypt_stream(io.BytesIO(raw[20:]), o, passphrase_key(salt))
     if hashlib.sha256(open(dest, "rb").read()).hexdigest() != r["sha256"]: raise ValueError("checksum mismatch after decrypt")
     os.chmod(dest, 0o600); return r
-def view(r): return {k: r[k] for k in ("id", "kind", "owner", "size_bytes", "created", "verified", "verify_result")}
+def view(r):
+    if not r: raise RuntimeError("backup record vanished (concurrent prune?)")
+    return {k: r[k] for k in ("id", "kind", "owner", "size_bytes", "created", "verified", "verify_result")}
 def list_(kind, owner): return [view(r) for r in q("select * from offsite where kind=? and owner=? order by created desc", (kind, owner))]
 # ---------------- retention (GFS) ----------------
 KEEP = {"daily": int(E("BACKUP_KEEP_DAILY", "7")), "weekly": int(E("BACKUP_KEEP_WEEKLY", "4")), "monthly": int(E("BACKUP_KEEP_MONTHLY", "3"))}
