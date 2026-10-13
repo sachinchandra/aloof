@@ -96,6 +96,15 @@ Nothing secret is committed. At first start the box creates `data/secret.key` (F
 `scripts/rotate_secret_key.py`), `PAAS_ADMIN_TOKEN` and `PAAS_DB_URL` override those files. Stripe (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HOBBY`, `STRIPE_PRICE_PRO`, `STRIPE_TAX`), provider and SMTP settings are documented in
 [`deploy/golive.env.example`](deploy/golive.env.example). A provider pool activates once its keys are set (`GET /v1/providers`).
 
+## Health monitoring
+Both the API and MCP server expose `/healthz` endpoints. To enable email alerts on failure:
+```bash
+export HEALTH_CHECK_ENABLED=1
+export HEALTH_ALERT_EMAIL=ops@example.com
+# SMTP settings from golive.env are used; runs via cron every 5 minutes after setup-box.sh
+```
+A GitHub Actions workflow (`.github/workflows/health-check.yml`) also pings production every 15 minutes.
+
 ## Tests
 ```bash
 pip install -r requirements-dev.txt                        # test dependencies (pytest, respx, dnslib, ruff, pip-audit)
