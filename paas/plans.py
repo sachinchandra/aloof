@@ -1,4 +1,4 @@
-"""Aloof pricing v3 (2026-10-13): sold in USD worldwide. Phase 1 = CPU only on Hetzner Cloud in the EU (Germany/Finland);
+"""Aloof pricing v3 (2026-10-13): sold in USD worldwide. Phase 1 = CPU only on Hetzner Cloud in Nuremberg, Germany (backups in Helsinki, Finland);
 phase 2 (PAAS_GPU_ENABLED=1, planned at 10 paying customers) adds GPUs from Hyperstack VMs and Runpod pods.
 Structure mirrors Fly.io (shared vs performance CPU, per-second billing, volumes per GB-month, egress per GB) with Railway-style
 workspace tiers (the fee comes back as included usage). Prices are USD excl. sales tax/VAT. A "month" is 720 hours.
@@ -68,7 +68,7 @@ TIERS = {
             "compare": "Railway Free ($0 + $1 usage), Render Hobby ($0), Fly: no free tier"},
   "hobby": {"fee_usd": 5,  "included_usage_usd": 5,  "seats": 1,    "max_apps": 50,  "autoscale": True, "note": "",
             "compare": "Railway Hobby $5 incl. $5 usage"},
-  "pro":   {"fee_usd": 20, "included_usage_usd": 20, "seats": None, "max_apps": None, "autoscale": True, "note": "unlimited seats, per workspace",
+  "pro":   {"fee_usd": 20, "included_usage_usd": 20, "seats": 1, "max_apps": None, "autoscale": True, "note": "per workspace; single-user account plus scoped deploy tokens (team seats not available yet)",
             "compare": "Railway Pro $20 incl. $20; Render Pro $25 + compute"},
 }
 for t in TIERS.values(): t["egress_gb"] = 0

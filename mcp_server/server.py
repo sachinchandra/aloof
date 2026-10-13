@@ -6,16 +6,26 @@ API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", "http://loc
 BRAND = os.environ.get("PAAS_BRAND", "Aloof")
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.auth.middleware.auth_context import get_access_token
-from oauth import PaasOAuthProvider, login_page, api_key_for
+from oauth import PaasOAuthProvider, login_page, api_key_for, patch_metadata
 HTTP_MODE = "--http" in sys.argv
 PUBLIC = os.environ.get("MCP_PUBLIC_URL", f"http://localhost:{os.environ.get('MCP_PORT','8001')}").rstrip("/")
+def docs_url():
+    """Public llms.txt for OAuth metadata: PAAS_PUBLIC_API_URL, else api.<domain> derived from the public MCP URL. Never the internal API."""
+    from urllib.parse import urlsplit
+    pub = (os.environ.get("PAAS_PUBLIC_API_URL") or "").rstrip("/")
+    if not pub:
+        h = urlsplit(PUBLIC).hostname or ""
+        if h.startswith("mcp."): pub = f"https://api.{h[4:]}"
+    if not pub or (urlsplit(pub).hostname or "") in ("localhost", "127.0.0.1", "::1"): return None
+    return f"{pub}/llms.txt"
+if HTTP_MODE: patch_metadata()
 auth_kw = dict(auth_server_provider=PaasOAuthProvider(PUBLIC), auth=AuthSettings(
-    issuer_url=PUBLIC, resource_server_url=f"{PUBLIC}/mcp", service_documentation_url=f"{API}/llms.txt",
+    issuer_url=PUBLIC, resource_server_url=f"{PUBLIC}/mcp", service_documentation_url=docs_url(),
     client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=["paas"], default_scopes=["paas"]),
     revocation_options=RevocationOptions(enabled=True), required_scopes=["paas"], validate_token_resource=False)) if HTTP_MODE else {}
 mcp = FastMCP(BRAND, **auth_kw, instructions=(
   f"{BRAND} hosts backend web apps, APIs and workers cheaply for anyone worldwide, billed per second in USD "
-  "(Stripe: cards, Apple/Google Pay; tax handled at checkout). Compute runs in the EU on Hetzner (Germany/Finland), so be "
+  "(Stripe: cards, Apple/Google Pay; tax handled at checkout). Compute runs in Nuremberg, Germany on Hetzner (backups in Helsinki), so be "
   "honest about latency: ~10-40 ms within Europe, ~90-110 ms from US East, more from Asia. GPUs are coming soon: GPU plans "
   "can't be deployed yet; offer join_gpu_waitlist instead. Deploy from a Docker image or a git repo with a Dockerfile. "
   "Flow: list_plans -> (signup if no key) -> deploy_app -> get_status until running -> share url."),
@@ -35,7 +45,7 @@ def _r(method, path, key=None, **kw):
 def list_plans() -> dict:
     """Aloof pricing (USD excl. tax): shared/performance CPU plans billed per second, volume $/GB-month,
     egress $/GB, workspace tiers (Free $0, Hobby $5, Pro $20/workspace, each with that much usage included), regions
-    (EU: Germany, Finland) and provider availability. CPU from $1.99/mo (shared-1x-256mb), perf-1x-2gb $24/mo;
+    (Nuremberg, Germany; backups in Helsinki) and provider availability. CPU from $1.99/mo (shared-1x-256mb), perf-1x-2gb $24/mo;
     volumes $0.22/GB-mo; egress $0.06/GB. GPUs: coming soon (see the `gpu` field; use join_gpu_waitlist).
     Free tier: 3 apps, shared-1x-256mb/512mb only, 1 instance, sleeps after 5 min idle, hard-capped at $1/month
     (apps pause, never billed).

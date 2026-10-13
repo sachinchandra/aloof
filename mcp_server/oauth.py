@@ -1,9 +1,14 @@
 """OAuth 2.1 authorization server for the MCP endpoint (MCP auth spec 2025-06-18):
 - RFC 9728 protected-resource metadata, RFC 8414 AS metadata, RFC 7591 dynamic client registration,
-  authorization code + PKCE (S256, enforced by the SDK), refresh-token rotation, revocation.
+  authorization code + PKCE (S256, mandatory for every client, enforced by the SDK), refresh-token rotation, revocation.
+- Public clients: token_endpoint_auth_method "none" (no secret; PKCE is the proof), via DCR or a Client ID Metadata Document.
+- Client ID Metadata Documents (draft-ietf-oauth-client-id-metadata-document, MCP auth 2025-11-25): an https client_id URL is
+  fetched with SSRF guards (https:443 only, every resolved IP public, connection pinned to the checked IP, no redirects,
+  5 s / 5 KB limits, bounded cache) and its redirect_uris are enforced.
 - The user "logs in" on /oauth/login by pasting their platform API key (or signing up); the issued
   access token maps to that account's API key server-side. Raw pk_ API keys are also accepted as bearer tokens."""
-import os, time, json, secrets, sqlite3, threading, html, httpx
+import os, time, json, secrets, sqlite3, threading, html, httpx, socket, ipaddress, re, logging
+from urllib.parse import urlsplit
 from pydantic import AnyUrl
 from mcp.server.auth.provider import (AccessToken, AuthorizationCode, AuthorizationParams, RefreshToken,
     OAuthAuthorizationServerProvider, construct_redirect_uri, TokenError)
@@ -49,9 +54,102 @@ def password_login(email, password):
         k = c.post(f"{API}/v1/auth/mcp-key", headers={"X-Aloof-CSRF": "1", "Cookie": f"aloof_session={sess}"})
         c.post(f"{API}/v1/auth/logout", headers={"X-Aloof-CSRF": "1", "Cookie": f"aloof_session={sess}"})   # don't leave the session lying around
         return k.json().get("api_key") if k.status_code == 200 else None
+log = logging.getLogger("mcp.oauth")
+# ---------- Client ID Metadata Documents ----------
+CIMD_MAX_BYTES, CIMD_TIMEOUT, CIMD_TTL, CIMD_TTL_MIN, CIMD_TTL_MAX, CIMD_NEG_TTL, CIMD_CACHE_MAX = 5120, 5.0, 300, 60, 86400, 60, 1000
+_cimd_cache = {}   # url -> (expires, OAuthClientInformationFull | None)
+class CIMDError(ValueError): pass
+def is_cimd_client_id(cid): return isinstance(cid, str) and cid.startswith("https://")
+def _public(ip):
+    a = ipaddress.ip_address(ip)
+    if getattr(a, "ipv4_mapped", None): a = a.ipv4_mapped
+    return a.is_global and not (a.is_multicast or a.is_reserved or a.is_loopback or a.is_link_local or a.is_private)
+def _resolve(host): return {ai[4][0] for ai in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
+def check_cimd_url(url):
+    u = urlsplit(url)
+    if u.scheme != "https" or not u.hostname: raise CIMDError("client_id must be an https URL")
+    if u.username or u.password or u.fragment or "#" in url: raise CIMDError("client_id URL must not contain credentials or a fragment")
+    if u.port not in (None, 443): raise CIMDError("client_id URL must use the default https port")
+    if not u.path or u.path == "/" or any(seg in (".", "..") for seg in u.path.split("/")): raise CIMDError("client_id URL needs a path without dot segments")
+    if len(url) > 2048: raise CIMDError("client_id URL too long")
+    try: ipaddress.ip_address(u.hostname); is_ip = True
+    except ValueError: is_ip = False
+    if is_ip: raise CIMDError("client_id URL must use a DNS name, not an IP")
+    return u
+_REDIRECT_SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*\.[a-z0-9+.-]+$")   # RFC 8252 private-use (reverse-DNS) schemes
+def _ok_redirect(r):
+    u = urlsplit(r)
+    if u.fragment: return False
+    if u.scheme == "https": return bool(u.hostname)
+    if u.scheme == "http": return u.hostname in ("localhost", "127.0.0.1", "::1")   # native-app loopback
+    return bool(_REDIRECT_SCHEME.match(u.scheme or ""))
+def _ttl(cache_control):
+    m = re.search(r"max-age=(\d+)", cache_control or "")
+    if re.search(r"no-store|no-cache", cache_control or ""): return CIMD_TTL_MIN
+    return max(CIMD_TTL_MIN, min(CIMD_TTL_MAX, int(m.group(1)))) if m else CIMD_TTL
+def _fetch(url, u):
+    ips = _resolve(u.hostname)
+    if not ips or not all(_public(ip) for ip in ips): raise CIMDError("client_id host resolves to a non-public address")
+    ip = sorted(ips)[0]; hostport = f"[{ip}]" if ":" in ip else ip
+    target = f"https://{hostport}{u.path}" + (f"?{u.query}" if u.query else "")
+    with httpx.Client(timeout=CIMD_TIMEOUT, follow_redirects=False, verify=True) as c:   # pinned to the checked IP; TLS still verifies the hostname
+        req = c.build_request("GET", target, headers={"Host": u.hostname, "Accept": "application/json", "User-Agent": "aloof-mcp-oauth/1"},
+                              extensions={"sni_hostname": u.hostname})
+        r = c.send(req, stream=True)
+        try:
+            if r.status_code != 200: raise CIMDError(f"client metadata fetch returned HTTP {r.status_code}")
+            if int(r.headers.get("content-length") or 0) > CIMD_MAX_BYTES: raise CIMDError("client metadata document too large")
+            body = b""
+            for chunk in r.iter_bytes():
+                body += chunk
+                if len(body) > CIMD_MAX_BYTES: raise CIMDError("client metadata document too large")
+            return body, r.headers.get("cache-control", "")
+        finally: r.close()
+def validate_cimd(url, doc):
+    if not isinstance(doc, dict): raise CIMDError("client metadata must be a JSON object")
+    if doc.get("client_id") != url: raise CIMDError("client_id in the metadata document must equal its URL")
+    if "client_secret" in doc or "client_secret_expires_at" in doc: raise CIMDError("client metadata must not contain a client_secret")
+    if doc.get("token_endpoint_auth_method", "none") != "none": raise CIMDError("only token_endpoint_auth_method 'none' is supported for metadata-document clients")
+    ru = doc.get("redirect_uris")
+    if not isinstance(ru, list) or not ru or not all(isinstance(r, str) for r in ru) or len(ru) > 20: raise CIMDError("redirect_uris must be a non-empty list of strings")
+    bad = [r for r in ru if not _ok_redirect(r)]
+    if bad: raise CIMDError(f"redirect_uri not allowed: {bad[0][:200]}")
+    if not set(doc.get("grant_types") or ["authorization_code"]) <= {"authorization_code", "refresh_token"}: raise CIMDError("unsupported grant_types")
+    if not set(doc.get("response_types") or ["code"]) <= {"code"}: raise CIMDError("unsupported response_types")
+    host = urlsplit(url).hostname; name = str(doc.get("client_name") or host)[:100]
+    return OAuthClientInformationFull.model_validate({"client_id": url, "client_name": f"{name} ({host})" if host not in name else name,
+        "redirect_uris": ru, "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"], "scope": "paas", **({"client_uri": doc["client_uri"]} if isinstance(doc.get("client_uri"), str) and doc["client_uri"].startswith("https://") else {})})
+def resolve_cimd_client(url, now=None):
+    now = now or time.time(); hit = _cimd_cache.get(url)
+    if hit and hit[0] > now: return hit[1]
+    client, ttl = None, CIMD_NEG_TTL
+    try:
+        u = check_cimd_url(url); body, cc = _fetch(url, u)
+        try: doc = json.loads(body)
+        except ValueError: raise CIMDError("client metadata is not valid JSON")
+        client, ttl = validate_cimd(url, doc), _ttl(cc)
+    except CIMDError as e: log.warning("CIMD rejected %s: %s", url[:200], e)
+    except Exception as e: log.warning("CIMD fetch failed %s: %s: %s", url[:200], type(e).__name__, e)
+    if len(_cimd_cache) >= CIMD_CACHE_MAX: _cimd_cache.pop(next(iter(_cimd_cache)))
+    _cimd_cache[url] = (now + ttl, client); return client
+def patch_metadata():
+    """Advertise public clients and CIMD in /.well-known/oauth-authorization-server (the SDK's builder lists secret methods only)."""
+    from mcp.server.auth import routes
+    if getattr(routes.build_metadata, "_aloof", False): return
+    orig = routes.build_metadata
+    def build(*a, **k):
+        m = orig(*a, **k)
+        m.token_endpoint_auth_methods_supported = ["client_secret_post", "client_secret_basic", "none"]
+        if m.revocation_endpoint: m.revocation_endpoint_auth_methods_supported = ["client_secret_post", "client_secret_basic", "none"]
+        m.client_id_metadata_document_supported = True
+        return m
+    build._aloof = True; routes.build_metadata = build
 class PaasOAuthProvider(OAuthAuthorizationServerProvider):
     def __init__(self, issuer): self.issuer = issuer.rstrip("/")
     async def get_client(self, client_id):
+        if is_cimd_client_id(client_id):
+            import anyio; return await anyio.to_thread.run_sync(resolve_cimd_client, client_id)
         d = S.get("client", client_id); return OAuthClientInformationFull.model_validate(d) if d else None
     async def register_client(self, client_info): S.put("client", client_info.client_id, client_info.model_dump(mode="json"))
     async def authorize(self, client, params: AuthorizationParams) -> str:

@@ -4,7 +4,9 @@ import argparse, json, os, sys, time, urllib.request, urllib.error
 CFG = os.path.expanduser("~/.aloof.json")
 if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")
 cfg = json.load(open(CFG)) if os.path.exists(CFG) else {}
-API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", cfg.get("api", "http://localhost:8000"))); KEY = os.environ.get("ALOOF_API_TOKEN") or os.environ.get("ALOOF_API_KEY", os.environ.get("PAAS_API_KEY", cfg.get("key")))
+DEFAULT_API = "https://api.aloof.si"   # precedence: ALOOF_API_URL / PAAS_API_URL env > ~/.aloof.json "api" > this
+DEFAULT_API = "https://api.aloof.si"   # precedence: ALOOF_API_URL / PAAS_API_URL env > ~/.aloof.json "api" > this
+API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", cfg.get("api", DEFAULT_API))); KEY = os.environ.get("ALOOF_API_TOKEN") or os.environ.get("ALOOF_API_KEY", os.environ.get("PAAS_API_KEY", cfg.get("key")))
 def call(m, p, body=None, raw=False):
     req = urllib.request.Request(API+p, method=m, data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Content-Type":"application/json", **({"Authorization":f"Bearer {KEY}"} if KEY else {})})

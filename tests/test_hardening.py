@@ -38,3 +38,18 @@ def test_security_headers():
     assert h["x-frame-options"] == "DENY" and h["referrer-policy"] == "strict-origin-when-cross-origin"
     assert "frame-ancestors 'none'" in h["content-security-policy"] and "script-src" in h["content-security-policy"]
     assert "frame-ancestors 'none'" in c.get("/v1/plans").headers["content-security-policy"]
+def test_mcp_manifest_region_and_tools():
+    m = c.get("/.well-known/mcp.json").json()
+    assert m["region"] == "Nuremberg, Germany (backups in Helsinki)" and "Finland" not in m["description"]
+    src = open(os.path.join(os.path.dirname(__file__), "..", "mcp_server", "server.py")).read()
+    assert len(m["tools"]) == src.count("@mcp.tool()") and "deploy_app" in m["tools"]
+    from paas import www_blog
+    post = next(p for p in www_blog.posts() if p["slug"] == "mcp-let-your-agent-deploy")
+    assert f"{len(m['tools'])} tools cover" in post["html"] and "__MCP" not in post["html"]
+def test_pricing_seats_truthful():
+    from paas.plans import TIERS
+    assert TIERS["pro"]["seats"] == 1
+    h = c.get("/pricing").text; assert "Unlimited seats" not in h and "deploy tokens" in h
+def test_cli_default_api():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "cli", "aloof")).read()
+    assert 'DEFAULT_API = "https://api.aloof.si"' in src and "localhost:8000" not in src

@@ -167,7 +167,7 @@ def pricing(brand):
         f"Up to {hob['max_apps']} apps, 1 seat", "Every CPU size, autoscaling", "Always-on apps or scale to zero", "Volumes, managed Postgres, custom domains",
         f"{hob['log_retention_days']} days of log history", "Usage beyond the included amount billed per second"], "Start with Hobby", True) + \
         plan("pro", "Pro", "For teams running production.", [
-        "Unlimited apps", "Unlimited seats, one bill per workspace", "Everything in Hobby",
+        "Unlimited apps", "One user plus scoped deploy tokens (team seats coming later)", "Everything in Hobby",
         f"{pro['log_retention_days']} days of log history", "Usage beyond the included amount billed per second"], "Start with Pro")
     faq = [("What does “usage included” mean?", f"Your plan fee comes back as credit for compute, storage and egress. Hobby is ${hob['fee_usd']:g} a month and includes ${hob['included_usage_usd']:g} of usage, so a small always-on app often costs only the plan fee."),
            ("What happens on the Free plan if I reach the limit?", f"Apps pause when they've used the included ${free['included_usage_usd']:g} for the month. You're never charged on Free."),

@@ -506,7 +506,9 @@ def mcp_manifest():
     m = json.load(open(os.path.join(ROOT,"mcp_server","manifest.json")))
     m["transports"][0]["url"] = PUBLIC_MCP_URL; m["transports"][1]["env"]["ALOOF_API_URL"] = PUBLIC_API_URL; m["docs"] = f"{PUBLIC_API_URL}/llms.txt"
     m["auth"]["oauth_protected_resource"] = PUBLIC_MCP_URL.rsplit("/mcp",1)[0] + "/.well-known/oauth-protected-resource/mcp"
+    m["region"] = "Nuremberg, Germany (backups in Helsinki)"; m["tools"] = mcp_tool_names()   # from the server's registered tools
     return m
+from .mcp_tools import mcp_tool_names
 @app.get("/v1/config")
 def config(): return {"brand": BRAND, "base_domain": BASE_DOMAIN, "api": PUBLIC_API_URL, "mcp": PUBLIC_MCP_URL, "app_url_pattern": f"https://<app>.{URL_DOMAIN}/", "app_domains": APP_DOMAINS}
 from . import site

@@ -2,7 +2,7 @@
   "schema_version": "2025-06",
   "name": "aloof",
   "display_name": "Aloof",
-  "description": "Cheap backends: deploy web apps, APIs and workers, billed per second in USD (compute in the EU on Hetzner, Germany/Finland; GPUs coming soon). Apps at https://<app>.aloof.si. Docker image or git+Dockerfile; volumes + snapshots, managed Postgres with daily backups, zero-downtime deploys with rollback, audited exec console, log drains, autoscaling, scale-to-zero, custom domains.",
+  "description": "Cheap backends: deploy web apps, APIs and workers, billed per second in USD (compute in Nuremberg, Germany (backups in Helsinki); GPUs coming soon). Apps at https://<app>.aloof.si. Docker image or git+Dockerfile; volumes + snapshots, managed Postgres with daily backups, zero-downtime deploys with rollback, audited exec console, log drains, autoscaling, scale-to-zero, custom domains.",
   "transports": [
     {
       "type": "streamable-http",

@@ -3,6 +3,12 @@ from .plans import PLANS, PG_PLANS, RATES
 P = lambda k: PLANS[k]
 def _m(v): return f"${v:,.2f}"
 def posts():
+    out = _posts(); n = str(len(_mcp_tools()))
+    for p in out: p["html"] = p["html"].replace("__MCP_TOOL_COUNT__", n)
+    return out
+def _mcp_tools():
+    from .mcp_tools import mcp_tool_names; return mcp_tool_names()
+def _posts():
     s1, s1g, s2 = P("shared-1x-256mb"), P("shared-1x-1gb"), P("shared-2x-2gb")
     hr = s1g["price_usd_hr"]; mo = s1g["price_usd_month"]
     busy2 = hr * 2 * 30; busy8 = hr * 8 * 22
@@ -82,7 +88,7 @@ aloof secrets deploy</pre>
  "summary": "How Aloof's remote MCP server works, what an agent can and can't do, and how to keep a human in the loop for destructive actions.",
  "html": """<p>Aloof ships a Model Context Protocol server at <code>https://mcp.aloof.si/mcp</code>. Any MCP client that supports remote servers with OAuth (Claude, ChatGPT connectors, Cursor and others) can connect. You can also run it locally over stdio.</p>
 <h2>Authentication</h2><p>The remote server implements OAuth 2.1 with PKCE and dynamic client registration. The client discovers the authorization server, you log in to Aloof in the browser, and the client receives a scoped token you can revoke from the dashboard. Headless setups can send an API key as a Bearer token instead.</p>
-<h2>What the agent can do</h2><p>34 tools cover the platform: <code>deploy_app</code>, <code>deploy_with_config</code> (an aloof.toml as JSON), <code>get_status</code>, <code>app_status</code>, <code>get_logs</code>, <code>scale_app</code>, <code>set_env</code>, <code>set_autoscale</code>, domains, volumes, managed Postgres, releases and rollback, snapshots and off-site restores, private registry and git credentials, deploy tokens and audited exec.</p>
+<h2>What the agent can do</h2><p>__MCP_TOOL_COUNT__ tools cover the platform: <code>deploy_app</code>, <code>deploy_with_config</code> (an aloof.toml as JSON), <code>get_status</code>, <code>app_status</code>, <code>get_logs</code>, <code>scale_app</code>, <code>set_env</code>, <code>set_autoscale</code>, domains, volumes, managed Postgres, releases and rollback, snapshots and off-site restores, private registry and git credentials, deploy tokens and audited exec.</p>
 <pre><span class=muted># you:</span> "Deploy github.com/acme/api on Aloof with 512 MB, scale to zero, and tell me the URL."
 <span class=muted># the agent:</span> list_plans → deploy_app(name="api", git_url=..., plan="shared-1x-512mb")
            → set_autoscale(min=0) → app_status → https://api.aloof.si/</pre>
