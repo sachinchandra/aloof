@@ -59,7 +59,7 @@ def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(rou
 def _money(v, unit=""):
     return (f"${v:,.2f}" if v < 100 or v != int(v) else f"${v:,.0f}") + unit
 def _cmp(v): return f"${v:g}" if v else "<span class=muted>—</span>"
-def _plan_rows(kind=None, compare=True):
+def _plan_rows(kind=None, compare=False):
     rows = []
     for k, p in PLANS.items():
         if p["legacy"] or (kind and (p["cpu_class"] if p["kind"] == "cpu" else "gpu") != kind): continue
@@ -74,8 +74,8 @@ def _plan_rows(kind=None, compare=True):
             rows.append(f"<tr><td><code>{k}</code></td><td>{p['gpu']}</td><td>{p['vcpu']} vCPU · {_gb(p['memory_mb'])} GB</td>"
                         f"<td><b>${p['price_usd_hr']:.2f}</b>/hr</td><td>${p['price_usd_hr']/3600:.6f}/s</td>{cmpc}</tr>")
     return "".join(rows)
-CPU_HEAD = "<tr><th>Plan</th><th>CPU</th><th>RAM</th><th>Always-on (30 days)</th><th>Per hour</th><th>Fly.io</th><th>Render</th><th>Railway*</th></tr>"
-GPU_HEAD = "<tr><th>Plan</th><th>GPU</th><th>Host</th><th>Per hour</th><th>Per second</th><th>Fly.io (last list price)</th></tr>"
+CPU_HEAD = "<tr><th>Plan</th><th>CPU</th><th>RAM</th><th>Always-on (30 days)</th><th>Per hour</th></tr>"
+GPU_HEAD = "<tr><th>Plan</th><th>GPU</th><th>Host</th><th>Per hour</th><th>Per second</th></tr>"
 def _regions():
     rows = "".join(f"<tr><td><code>{k}</code></td><td>{v}</td></tr>" for k, v in REGIONS.items() if k != "local")
     return f"<div class=scroll><table class=tbl id=regions><tr><th>Region</th><th>Location</th></tr>{rows}</table></div><p class=muted>{REGION_NOTE} More regions will be listed here only once they're live.</p>"
@@ -156,30 +156,29 @@ def pricing(brand):
         return (f"<div class='card{' hl' if hl else ''}'><h3 style='font-size:18px'>{name}</h3><div class=price>{fee}<small>/month{' per workspace' if k == 'pro' else ''}</small></div><p>{blurb}</p><ul>"
                 f"<li>${t['included_usage_usd']:g} of usage included</li>"
                 f"<li>{'Unlimited seats' if not t['seats'] else '1 seat'} · {'unlimited apps' if not t['max_apps'] else str(t['max_apps']) + ' apps'}</li></ul>"
-                f"<p class=muted style='font-size:13px'>{t['compare']}</p><p style='margin-top:14px'><a class='btn {'pri' if hl else 'ghost'} sm' href='/login#register'>Get started</a></p></div>")
+                f"<p style='margin-top:14px'><a class='btn {'pri' if hl else 'ghost'} sm' href='/login#register'>Get started</a></p></div>")
     R = RATES
     return page(f"Pricing · {brand}", f"""<section class=hero style="padding:72px 0 48px"><div class=wrap style="display:block"><span class=badge>Pricing · USD · per second</span><h1>Pay per second, <span class=grad>in dollars.</span></h1>
-<p class=lead>Same model as Fly.io, Render and Railway: a workspace plan, then per-second compute, volumes per GB-month and egress per GB. Prices exclude VAT/GST/sales tax, which is added at checkout where it applies.</p></div></section>
+<p class=lead>A workspace plan, then per-second compute, volumes per GB-month and egress per GB. Prices exclude VAT/GST/sales tax, which is added at checkout where it applies.</p></div></section>
 <section class=s style="border:0;padding-top:48px"><div class=wrap><div class=grid>{tier("free", "Free", "Prototypes and side projects. Up to 3 apps on shared-1x-256mb/512mb, 1 instance each, asleep after 5 min idle. Hard-capped at the included $1: apps pause instead of billing you.")}
 {tier("hobby", "Hobby", "Solo developers running always-on apps.", True)}
 {tier("pro", "Pro", "Teams shipping to production.")}
 <div class=card><h3 style='font-size:18px'>Enterprise</h3><div class=price>Custom</div><p>Committed capacity, dedicated nodes, invoicing.</p><p style='margin-top:14px'><a class="btn ghost sm" href="mailto:sales@aloof.si">Contact us</a></p></div></div>
 <h2 class=t style="margin-top:64px">Shared CPU</h2><p class=t>Burstable vCPUs with a guaranteed 1/8-core baseline. Good for APIs, bots and workers.</p><div class=scroll><table class=tbl>{CPU_HEAD}{_plan_rows("shared")}</table></div>
 <h2 class=t style="margin-top:48px">Performance CPU</h2><p class=t>A full vCPU reserved per vCPU of the plan (no 1/8 baseline sharing).</p><div class=scroll><table class=tbl>{CPU_HEAD}{_plan_rows("performance")}</table></div>
-<p class=muted style="font-size:13px">*Railway bills actual use at $20/vCPU and $10/GB per month; the figure shown assumes full utilisation of the same size. Competitor prices are list prices in USD, read 12 Oct 2026: fly.io/docs/about/pricing (iad), render.com/pricing, railway.com/pricing.</p>
 {_gpu_section()}
-<h2 class=t style="margin-top:48px">Storage &amp; network</h2><div class=scroll><table class=tbl><tr><th>Resource</th><th>{brand}</th><th>Fly.io</th><th>Render</th><th>Railway</th></tr>
-<tr><td>Volumes (provisioned GB-month)</td><td><b>${R['volume_usd_gb_month']:.2f}</b></td><td>$0.15</td><td>$0.25</td><td>$0.15</td></tr>
-<tr><td>Egress per GB (counts toward included usage)</td><td><b>${R['egress_usd_gb']:.2f}</b></td><td>$0.02 (NA/EU)</td><td>$0.15 beyond allowance</td><td>$0.05</td></tr>
-<tr><td>Backups &amp; volume snapshots (GB-month of archive)</td><td><b>${R['backup_usd_gb_month']:.2f}</b></td><td>snapshots $0.08</td><td>included</td><td>—</td></tr>
-<tr><td>Extra RAM (GB-month)</td><td>${R['extra_ram_usd_gb_month']:.2f}</td><td>$5–6</td><td>—</td><td>$10</td></tr>
-<tr><td>Free tier limits</td><td colspan=4>3 apps · shared-1x-256mb / 512mb · 1 instance · sleeps after 5 min idle · 1 GB volumes · hard cap at $1 usage per month (never charged)</td></tr>
-<tr><td>Inbound data, custom domains, TLS</td><td>Free</td><td>Free (10 certs)</td><td>2–25 domains</td><td>2–20 domains</td></tr></table></div>
+<h2 class=t style="margin-top:48px">Storage &amp; network</h2><div class=scroll><table class=tbl><tr><th>Resource</th><th>Price</th></tr>
+<tr><td>Volumes (provisioned GB-month)</td><td><b>${R['volume_usd_gb_month']:.2f}</b></td></tr>
+<tr><td>Egress per GB (counts toward included usage)</td><td><b>${R['egress_usd_gb']:.2f}</b></td></tr>
+<tr><td>Backups &amp; volume snapshots (GB-month of archive)</td><td><b>${R['backup_usd_gb_month']:.2f}</b></td></tr>
+<tr><td>Extra RAM (GB-month)</td><td>${R['extra_ram_usd_gb_month']:.2f}</td></tr>
+<tr><td>Free tier limits</td><td>3 apps · shared-1x-256mb / 512mb · 1 instance · sleeps after 5 min idle · 1 GB volumes · hard cap at $1 usage per month (never charged)</td></tr>
+<tr><td>Inbound data, custom domains, TLS</td><td>Free</td></tr></table></div>
 <h2 class=t style="margin-top:48px" id=postgres>Managed Postgres</h2><p class=t>Postgres 16 on a private network next to your apps, with daily backups (7 kept) and on-demand backup and restore. The price covers compute and the data disk; backup storage is billed as above.</p>
 <div class=scroll><table class=tbl><tr><th>Plan</th><th>CPU / RAM</th><th>Disk</th><th>{brand}</th></tr>{_pg_rows()}</table></div>
 <h2 class=t style="margin-top:48px">Regions</h2>{_regions()}
 <div class="grid g3" style="margin-top:40px"><div class=card><h3>Top-ups</h3><p>$10 to $5,000 via Stripe Checkout (cards, Apple Pay, Google Pay). Every payment gets an invoice; VAT/GST IDs supported.</p></div>
-<div class=card><h3>Included usage</h3><p>Like Railway, each plan's fee comes back as usage credit, and you pay extra only beyond it.</p></div>
+<div class=card><h3>Included usage</h3><p>Each plan's fee comes back as usage credit, and you pay extra only beyond it.</p></div>
 <div class=card><h3>No idle charges</h3><p>Stopped and scaled-to-zero apps cost nothing; volumes are still billed.</p></div></div></div></section>""", brand)
 DOCS = ["quickstart", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "mcp", "api", "nodes"]
 TITLES = {"quickstart": "Quickstart", "cli": "CLI", "deploy": "Deploying apps", "config": "aloof.toml reference", "private": "Private registries & repos", "github": "GitHub App: push-to-deploy & previews", "ci": "Deploy tokens & CI", "processes": "Workers, release commands & cron", "networking": "Private networking, proxy, IPs & certs", "gpu": "GPU workloads", "volumes": "Volumes", "autoscaling": "Autoscaling & scale to zero",
