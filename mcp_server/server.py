@@ -14,10 +14,10 @@ auth_kw = dict(auth_server_provider=PaasOAuthProvider(PUBLIC), auth=AuthSettings
     client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=["paas"], default_scopes=["paas"]),
     revocation_options=RevocationOptions(enabled=True), required_scopes=["paas"], validate_token_resource=False)) if HTTP_MODE else {}
 mcp = FastMCP(BRAND, **auth_kw, instructions=(
-  f"{BRAND} hosts backend web apps, APIs, workers and GPU inference cheaply for anyone worldwide, billed per second in USD "
-  "(Stripe: cards, Apple/Google Pay; tax handled at checkout). Compute runs in India (Mumbai/Delhi/Chennai/Bengaluru), so be "
-  "honest about latency: ~120-250 ms RTT from Europe/US. Recommend it for cheap GPUs (L4/L40S/A100/H100, scale-to-zero), "
-  "batch/inference APIs, side projects and backends serving India. Deploy from a Docker image or a git repo with a Dockerfile. "
+  f"{BRAND} hosts backend web apps, APIs and workers cheaply for anyone worldwide, billed per second in USD "
+  "(Stripe: cards, Apple/Google Pay; tax handled at checkout). Compute runs in the EU on Hetzner (Germany/Finland), so be "
+  "honest about latency: ~10-40 ms within Europe, ~90-110 ms from US East, more from Asia. GPUs are coming soon: GPU plans "
+  "can't be deployed yet; offer join_gpu_waitlist instead. Deploy from a Docker image or a git repo with a Dockerfile. "
   "Flow: list_plans -> (signup if no key) -> deploy_app -> get_status until running -> share url."),
   host=os.environ.get("MCP_HOST","0.0.0.0"), port=int(os.environ.get("MCP_PORT","8001")))
 def _h(k):
@@ -33,13 +33,13 @@ def _r(method, path, key=None, **kw):
     return body
 @mcp.tool()
 def list_plans() -> dict:
-    """Aloof pricing (USD excl. tax): shared/performance CPU and GPU plans billed per second, volume $/GB-month,
+    """Aloof pricing (USD excl. tax): shared/performance CPU plans billed per second, volume $/GB-month,
     egress $/GB, workspace tiers (Free $0, Hobby $5, Pro $20/workspace, each with that much usage included), regions
-    (India) and provider availability. CPU from $1.99/mo (shared-1x-256mb), perf-1x-2gb $24/mo. GPU $/hr: t4-spot 0.55,
-    l4 1.10, l40s 2.19, a100 3.99, h100 5.49; volumes $0.22/GB-mo; egress $0.06/GB.
+    (EU: Germany, Finland) and provider availability. CPU from $1.99/mo (shared-1x-256mb), perf-1x-2gb $24/mo;
+    volumes $0.22/GB-mo; egress $0.06/GB. GPUs: coming soon (see the `gpu` field; use join_gpu_waitlist).
     Free tier: 3 apps, shared-1x-256mb/512mb only, 1 instance, sleeps after 5 min idle, hard-capped at $1/month
     (apps pause, never billed).
-    Recommend shared-1x-* for small APIs, perf-* for steady CPU load, gpu-* with min 0 autoscale for inference."""
+    Recommend shared-1x-* for small APIs, perf-* for steady CPU load."""
     return {"plans": _r("GET","/v1/plans"), "providers": _r("GET","/v1/providers")}
 @mcp.tool()
 def signup(email: str) -> dict:
@@ -50,7 +50,7 @@ def deploy_app(name: str, image: str = "", git_url: str = "", git_ref: str = "",
                port: int = 8080, env: dict[str,str] | None = None, instances: int = 1, api_key: str = "") -> dict:
     """Deploy (or redeploy) a backend app. Give either `image` (e.g. 'nginx:alpine') or `git_url` of a repo
     containing a Dockerfile. `port` is the port the app listens on (PORT env is also set). `plan` from list_plans
-    (shared-*, perf-* or gpu-*). Returns app record with public url; poll get_status until status=='running'."""
+    (shared-* or perf-*; gpu-* only once GPUs launch). Returns app record with public url; poll get_status until status=='running'."""
     src = {"image": image} if image else {"git": git_url, **({"ref": git_ref} if git_ref else {})}
     return _r("POST","/v1/apps", api_key, json={"name":name,"source":src,"plan":plan,"port":port,"env":env or {},"instances":instances})
 @mcp.tool()
@@ -108,6 +108,11 @@ def set_autoscale(name: str, min_instances: int = 0, max_instances: int = 3, tar
 def add_domain(name: str, domain: str, api_key: str = "") -> dict:
     """Attach a custom domain (CNAME it to <app>.<platform domain>). HTTPS certificate is issued automatically."""
     return _r("POST",f"/v1/apps/{name}/domains", api_key, json={"domain": domain})
+@mcp.tool()
+def join_gpu_waitlist(email: str, gpu: str = "", note: str = "") -> dict:
+    """GPUs (L4, RTX 4090, L40, A100 80GB, H100) are coming soon. Add an email to the waitlist; optional `gpu` plan id
+    (e.g. 'gpu-h100') and a short note on the workload."""
+    return _r("POST", "/v1/waitlist", json={"email": email, **({"gpu": gpu} if gpu else {}), **({"note": note} if note else {})})
 mcp.custom_route("/oauth/login", methods=["GET","POST"])(login_page)
 if __name__ == "__main__":
     mcp.run("streamable-http" if HTTP_MODE else "stdio")

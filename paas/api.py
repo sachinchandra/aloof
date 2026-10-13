@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from . import engine
 from .db import q
 from .plans import PLANS, REGIONS, REGION_NOTE, TIERS, RATES
+from . import plans as _plans
 from .drivers import get_drivers
 from . import controller, auth, billing, stripe_billing, razorpay_legacy as rzp, domains as doms
 from .drivers import remote
@@ -51,9 +52,22 @@ def signup(s: Signup):
 @app.get("/v1/plans")
 def plans(legacy: bool = False):
     """Pricing v3 (USD excl. tax/VAT): per-second plans, usage rates, workspace tiers and regions."""
-    out = [{"id": k, **{x: y for x, y in v.items() if x not in ("providers",)}} for k, v in PLANS.items() if legacy or not v["legacy"]]
+    """GPU plans are only listed once GPUs are enabled (phase 2); until then `gpu` says they're coming soon, with the waitlist."""
+    out = [{"id": k, **{x: y for x, y in v.items() if x not in ("providers",)}} for k, v in PLANS.items()
+           if (legacy or not v["legacy"]) and (v["kind"] != "gpu" or _plans.GPU_ENABLED)]
+    gpu = _plans.gpu_status() | ({} if _plans.GPU_ENABLED else {"coming_soon": [{"id": k, "gpu": v["gpu"]} for k, v in PLANS.items() if v["kind"] == "gpu"]})
     return {"currency": "USD", "tax": "excluded; VAT/GST/sales tax added at checkout where applicable", "billing": "per second while running; volumes per provisioned GB-month; egress per GB (counts toward included usage)",
-            "plans": out, "rates": RATES, "tiers": TIERS, "regions": REGIONS, "region_note": REGION_NOTE}
+            "plans": out, "gpu": gpu, "rates": RATES, "tiers": TIERS, "regions": REGIONS, "region_note": REGION_NOTE}
+class WaitlistReq(BaseModel): email: str; gpu: str | None = None; note: str | None = None
+@app.post("/v1/waitlist")
+def waitlist(w: WaitlistReq):
+    """GPU waitlist (phase 2). Idempotent per email."""
+    try: e = auth._check_email(w.email)
+    except ValueError as x: raise HTTPException(400, str(x))
+    if w.gpu and (w.gpu not in PLANS or PLANS[w.gpu]["kind"] != "gpu"): raise HTTPException(400, "gpu must be a GPU plan id")
+    from .db import kv_put
+    kv_put("gpu_waitlist", e, json.dumps({"gpu": w.gpu, "note": (w.note or "")[:500], "ts": time.time()}))
+    return {"ok": True, "message": "You're on the GPU waitlist. We'll email you when GPUs launch."}
 @app.get("/v1/providers")
 def providers():
     out = []
@@ -341,12 +355,32 @@ def node_bootstrap(node: str, token: str):
     return bootstrap.render(node, n["provider"], n["plan"], token, bool(n["gpus"]))
 @app.get("/v1/admin/nodes", dependencies=[Depends(admin)])
 def admin_nodes(): return q("select id,provider,provider_ref,status,public_ip,wg_ip,vcpu,mem_mb,gpus,gpu_model,plan,created,last_seen,error from nodes order by created desc")
+def paid_customers():
+    """Accounts that have actually paid us: a paid Stripe top-up/invoice, an active subscription, or a paid Razorpay order."""
+    return q("""select count(distinct id) as c from (
+      select account_id as id from stripe_sessions where status='paid'
+      union select id from accounts where stripe_subscription is not null and stripe_subscription != ''
+      union select account_id as id from payments where status='paid') t""", one=True)["c"]
+@app.get("/v1/admin/metrics", dependencies=[Depends(admin)])
+def admin_metrics():
+    n = paid_customers(); goal = _plans.GPU_UNLOCK_PAID_CUSTOMERS
+    return {"paid_customers": n, "accounts": q("select count(*) as c from accounts", one=True)["c"],
+            "gpu_waitlist": q("select count(*) as c from kv where kind='gpu_waitlist'", one=True)["c"],
+            "gpu_enabled": _plans.GPU_ENABLED, "gpu_unlock_at_paid_customers": goal,
+            "note": "GPUs enabled (phase 2)." if _plans.GPU_ENABLED else
+                    (f"Phase 1 (CPU only). GPU unlocks at {goal} paid customers: {max(0, goal - n)} to go." if n < goal else
+                     f"{n} paid customers: GPU unlock reached. Set PAAS_GPU_ENABLED=1 plus HYPERSTACK_API_KEY / RUNPOD_API_KEY.")}
 @app.delete("/v1/admin/nodes/{node_id}", dependencies=[Depends(admin)])
 def admin_drop_node(node_id: str): remote.destroy_node(node_id, "admin"); return {"ok": True}
 @app.get("/healthz")
 def health(): return {"ok":True}
+def _llms_gpu():
+    if _plans.GPU_ENABLED:
+        return "GPU per hour: " + ", ".join(f"{k} ${v['price_usd_hr']:.2f}" for k, v in PLANS.items() if v["kind"] == "gpu")
+    return ("GPUs: COMING SOON (phase 2: " + ", ".join(k for k, v in PLANS.items() if v["kind"] == "gpu") + "). Not deployable yet; "
+            "join the waitlist: POST {{API}}/v1/waitlist {\"email\":\"...\",\"gpu\":\"gpu-h100\"}")
 @app.get("/llms.txt", response_class=PlainTextResponse)
-def llms(): return open(os.path.join(ROOT,"llms.txt")).read().replace("{{API}}", PUBLIC_API_URL).replace("{{MCP}}", PUBLIC_MCP_URL).replace("{{DOMAIN}}", BASE_DOMAIN).replace("{{BRAND}}", BRAND)
+def llms(): return open(os.path.join(ROOT,"llms.txt")).read().replace("{{GPU}}", _llms_gpu()).replace("{{API}}", PUBLIC_API_URL).replace("{{MCP}}", PUBLIC_MCP_URL).replace("{{DOMAIN}}", BASE_DOMAIN).replace("{{BRAND}}", BRAND)
 @app.get("/.well-known/mcp.json")
 def mcp_manifest():
     m = json.load(open(os.path.join(ROOT,"mcp_server","manifest.json")))

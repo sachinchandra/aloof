@@ -1,15 +1,20 @@
 # Aloof
 
-**Cheap global GPUs and backends, billed per second in US dollars.** Deploy a Docker image or a git repo with a Dockerfile and get HTTPS at
+**Cheap backends, billed per second in US dollars.** Deploy a Docker image or a git repo with a Dockerfile and get HTTPS at
 `https://<app>.aloof.si`, autoscaling down to zero, persistent volumes, custom domains and simple USD billing through Stripe.
-It stays cheap because the capacity comes from low-cost Indian clouds (E2E Networks, Jarvislabs, Ola Krutrim), AWS Mumbai spot, or your own nodes.
+It stays cheap because phase 1 runs on Hetzner Cloud in the EU (shared-vCPU CX servers). GPUs (Hyperstack VMs, Runpod pods) come in phase 2.
 AI assistants can deploy for you over MCP.
 
 > Status: working prototype. Everything below runs end to end on a single box. Going live needs real provider keys, Stripe, SMTP and DNS (see [Go live](#go-live)).
 
 ## Regions
-All compute runs in **India** today: Mumbai, Delhi NCR, Chennai and Bengaluru. That's ideal for GPU inference and batch jobs, side projects,
-and APIs serving South Asia. Expect roughly 120–250 ms RTT from Europe and the US. Other regions will only be listed once they actually exist.
+Phase 1: all compute and the control plane/edge run in the **EU** on Hetzner Cloud: Germany (Falkenstein `fsn1`, Nuremberg `nbg1`) and
+Finland (Helsinki `hel1`). Expect ~10–40 ms within Europe, ~90–110 ms from US East and ~150–200 ms from India or US West. E2E Networks
+(Delhi) stays available as an optional CPU overflow pool and is only listed when its keys are set. Other regions will only be listed once they exist.
+
+**GPUs are coming soon.** Phase 2 adds L4 / RTX 4090 (Runpod pods) and L40 / A100 80GB / H100 (Hyperstack VMs) once there are 10 paying
+customers (`GET /v1/admin/metrics`). Until then `PAAS_GPU_ENABLED=0`: GPU plans are hidden from the API, MCP and `/llms.txt`, deploys
+on them are refused, and the pricing page shows a waitlist (`POST /v1/waitlist`).
 
 ## Features
 - **Deploy** from an image or git (`aloof deploy`, REST, dashboard or MCP), with rolling redeploys, env vars (encrypted at rest) and health checks with auto-replace.
@@ -29,11 +34,12 @@ and APIs serving South Asia. Expect roughly 120–250 ms RTT from Europe and the
 | Hobby / Pro | $5 / $20 per workspace a month, with the fee returned as included usage | Railway $5 / $20 (same model) · Render Pro $25 |
 | Shared CPU | $1.99 (256 MB) · $3.49 · $5.99 · $11.99 · $44 (4 vCPU / 8 GB) a month | Fly $2.19 · $3.69 · $6.70 · $13.39 |
 | Performance CPU | $24 (1 vCPU / 2 GB) · $59 · $119 · $239 (8 vCPU / 16 GB) a month | Fly $33–264 · Render $25–300 |
-| GPU per hour | T4 spot $0.55 · L4 $1.10 · L40S $2.19 · A100 80GB $3.99 · H100 $5.49 | Render/Railway none; Fly retired GPUs |
+| GPU per hour (phase 2, coming soon) | RTX 4090 $0.79 · L4 $1.10 · L40 $1.89 · A100 80GB $3.99 · H100 $5.49 | Render/Railway none; Fly retired GPUs |
 | Volumes / egress | $0.22 per GB-month / $0.06 per GB | Fly $0.15 / $0.02–0.12 · Render $0.25 / $0.15 · Railway $0.15 / $0.05 |
 
 The full table is at `/pricing`. `paas/plans.py` enforces a 30% minimum margin after payment fees, against worst-case costs converted at a
-pessimistic ₹83/$ (`PAAS_COST_USD_INR`). A test fails if any plan or rate falls under it, and the scheduler refuses pools that would.
+pessimistic ₹83/$ (`PAAS_COST_USD_INR`); Hetzner/Hyperstack/Runpod USD list prices get a 10% buffer. On a Hetzner CX43
+(8 vCPU / 16 GB, $18.49 + IPv4) every CPU plan clears 62–79%; the CPX42 fallback is refused for all shared plans. A test fails if any plan or rate falls under it, and the scheduler refuses pools that would.
 
 ## Quick start (local)
 Requires Linux with Docker, Python 3.11+ and sudo.
@@ -68,7 +74,7 @@ Add `https://mcp.aloof.si/mcp` as a connector in Claude, ChatGPT or Cursor (OAut
 {"mcpServers": {"aloof": {"command": "python3", "args": ["mcp_server/server.py"],
   "env": {"ALOOF_API_URL": "http://localhost:8000", "ALOOF_API_KEY": "pk_..."}}}}
 ```
-Tools: `list_plans, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain`.
+Tools: `list_plans, join_gpu_waitlist, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain`.
 
 ## Layout
 ```
@@ -79,7 +85,7 @@ paas/plans.py         plans (USD), tiers, rates, cost model, fees, 30% margin fl
 paas/billing.py       USD wallet (cents), metering, free-tier cap
 paas/stripe_billing.py  Stripe Checkout, subscriptions, portal, webhooks, Stripe Tax
 paas/razorpay_legacy.py optional INR/UPI top-ups + GST invoices (off by default)
-paas/drivers/         local_docker, remote (node agent + registry), providers (E2E/Jarvislabs/Krutrim/AWS/self-hosted), wg
+paas/drivers/         local_docker, remote (node agent + registry), providers (Hetzner, Hyperstack, E2E/Jarvislabs/Krutrim/AWS, self-hosted), runpod (pod driver), wg
 paas/agent/agent.py   node agent (Docker + NVIDIA runtime) on remote VMs
 mcp_server/           MCP server + OAuth 2.1 authorization server
 dashboard/, cli/, deploy/, scripts/, tests/
@@ -99,9 +105,14 @@ sg docker -c '.venv/bin/python -m pytest -q tests/'        # unit + mocked-cloud
 .venv/bin/python tests/loadtest.py <app> <concurrency> <seconds>
 ```
 
-## Go live
-`cp deploy/golive.env.example deploy/golive.env`, fill it in (edge IP, ACME email, Stripe keys and price IDs, SMTP, provider keys), point the Stripe webhook at `https://api.aloof.si/v1/billing/stripe/webhook`, point DNS
-`A aloof.si, api, mcp, *` at the edge, then run `deploy/golive.sh` on the edge server.
+## Go live (Hetzner)
+1. `cp deploy/golive.env.example deploy/golive.env` and fill it in: `HCLOUD_TOKEN`, `ACME_EMAIL`, Stripe keys and price IDs, SMTP, seller details.
+2. `python3 deploy/hetzner_golive.py` (needs `~/.ssh/id_ed25519.pub`). It creates the firewall and a CX33 `aloof-edge` in `fsn1`, waits for
+   cloud-init to run `deploy/setup-box.sh`, copies `golive.env` over SSH with the server IP filled in, runs `deploy/golive.sh` (Caddy with
+   Let's Encrypt), and prints the DNS records.
+3. Create the DNS records it prints: `A`/`AAAA` for `aloof.si`, `www`, `api`, `mcp` and `*` pointing at the server.
+4. Point the Stripe webhook at `https://api.aloof.si/v1/billing/stripe/webhook`.
+CPU nodes (CX43) are then created and deleted on demand by the scheduler with the same `HCLOUD_TOKEN`.
 
 ## License
 [MIT](LICENSE)

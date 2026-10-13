@@ -1,6 +1,7 @@
 """Public site: landing, pricing, docs, login. Server-rendered, no JS framework."""
 import html
 from .plans import PLANS, TIERS, RATES, REGIONS, REGION_NOTE
+from . import plans as _plans
 CSS = """*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;color:#1d1d1f;background:#fbfbfa;line-height:1.55}
 a{color:#3b5bdb;text-decoration:none}a:hover{text-decoration:underline}
 nav{display:flex;align-items:center;gap:22px;padding:16px 32px;border-bottom:1px solid #eee;background:#fff;position:sticky;top:0}
@@ -22,7 +23,7 @@ input{padding:10px;border:1px solid #ccc;border-radius:8px;width:100%;margin:4px
 def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(round(g))
 def page(title, body, brand="Aloof"):
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>{html.escape(title)}</title><meta name=description content="{brand}: cheap global GPUs and backends, billed per second in USD. Deploy Docker images or git repos; scale to zero; MCP for AI assistants.">
+<title>{html.escape(title)}</title><meta name=description content="{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants.">
 <style>{CSS}</style></head><body><nav><a class=logo href="/">{brand}</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/docs/mcp">MCP</a>
 <span class=sp></span><a href="/login">Log in</a><a class=btn href="/login#register">Start free</a></nav>{body}
 <footer><div class=wrap>{brand} · <a href="/pricing#regions">Regions</a> · <a href="/llms.txt">llms.txt</a> · <a href="/.well-known/mcp.json">MCP manifest</a> · <a href="/api/docs">API reference</a></div></footer></body></html>"""
@@ -49,25 +50,33 @@ GPU_HEAD = "<tr><th>Plan</th><th>GPU</th><th>Host</th><th>Per hour</th><th>Per s
 def _regions():
     rows = "".join(f"<tr><td><code>{k}</code></td><td>{v}</td></tr>" for k, v in REGIONS.items() if k != "local")
     return f"<table id=regions><tr><th>Region</th><th>Location</th></tr>{rows}</table><p class=muted>{REGION_NOTE} More regions will be listed here only once they're live.</p>"
+WAITLIST_FORM = """<form id=wl onsubmit="event.preventDefault();fetch('/v1/waitlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:this.email.value,gpu:this.gpu.value||null})}).then(r=>r.json()).then(j=>{this.outerHTML='<p><b>'+(j.message||j.detail)+'</b></p>'})">
+<input name=email type=email required placeholder="you@example.com"> <select name=gpu><option value="">Any GPU</option>%s</select> <button class=btn>Join the GPU waitlist</button></form>"""
+def _gpu_section():
+    if _plans.GPU_ENABLED:
+        return f"""<h2 id=gpus>GPUs</h2><p class=muted>Dedicated GPU per app, billed per second while running. With <code>min 0</code> autoscaling you pay only while serving. Render and Railway don't offer GPUs, and Fly.io retired its GPUs on 31 Jul 2026.</p><table>{GPU_HEAD}{_plan_rows("gpu")}</table>"""
+    opts = "".join(f"<option value={k}>{p['gpu']}</option>" for k, p in PLANS.items() if p["kind"] == "gpu" and k != "gpu-t4-spot")
+    return f"""<h2 id=gpus>GPUs <span class=pill>coming soon</span></h2><p class=muted>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. GPUs launch in our second phase; leave your email and we'll tell you when they're live.</p>{WAITLIST_FORM % opts}"""
 def landing(brand, base, api, mcp):
     g = {k: PLANS[k]["price_usd_hr"] for k in ("gpu-l4", "gpu-l40s", "gpu-a100", "gpu-h100")}
-    return page(f"{brand}: cheap global GPUs and backends", f"""<div class=wrap><section class=hero><span class=pill>Pay per second in USD · compute in India (Mumbai · Delhi · Chennai · Bengaluru)</span>
-<h1>Cheap GPUs and backends,<br>for anyone, in one command.</h1>
-<p>{brand} runs your Docker image or git repo on low-cost GPU and CPU capacity. You get HTTPS at <code>&lt;app&gt;.{base}</code>, autoscaling down to zero, volumes, and simple USD billing with cards worldwide. AI assistants can deploy for you over MCP.</p>
+    gpu_card = (f"{gpu_card}"
+                if _plans.GPU_ENABLED else "<div class=card><h3>GPUs: coming soon</h3>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist →</a></div>")
+    return page(f"{brand}: cheap backends, billed per second", f"""<div class=wrap><section class=hero><span class=pill>Pay per second in USD · compute in the EU (Germany · Finland)</span>
+<h1>Cheap backends,<br>for anyone, in one command.</h1>
+<p>{brand} runs your Docker image or git repo on low-cost CPU capacity in Europe. You get HTTPS at <code>&lt;app&gt;.{base}</code>, autoscaling down to zero, volumes, and simple USD billing with cards worldwide. AI assistants can deploy for you over MCP.</p>
 <p><a class=btn href="/login#register">Deploy your first app</a> &nbsp; <a class="btn alt" href="/docs">Read the docs</a></p></section>
 <pre>$ aloof deploy my-api --git https://github.com/me/api.git
   building… running
 live: https://my-api.{base}/
 
-$ aloof deploy llm --image vllm/vllm-openai --plan gpu-l4 --port 8000
-$ aloof autoscale llm --min 0 --max 4 --idle 300     # pay only while serving</pre>
+$ aloof autoscale my-api --min 0 --max 4 --idle 300   # pay only while serving</pre>
 <div class=grid>
 <div class=card><h3>CPU from {_money(PLANS['shared-1x-256mb']['price_usd_month'])}/mo</h3>Shared and dedicated (performance) vCPUs, priced at or below Fly.io and Render, billed per second.</div>
-<div class=card><h3>GPUs by the second</h3>L4 ${g['gpu-l4']:.2f}/hr, L40S ${g['gpu-l40s']:.2f}/hr, A100 80GB ${g['gpu-a100']:.2f}/hr, H100 ${g['gpu-h100']:.2f}/hr on dedicated nodes. Scale to zero between requests.</div>
+{gpu_card}
 <div class=card><h3>Scale to zero</h3>Idle apps cost nothing. The first request wakes them in about a second (CPU) and you're billed per second.</div>
 <div class=card><h3>Built for AI agents</h3>An MCP server with OAuth lets Claude, ChatGPT and Cursor deploy and manage apps for your users. <a href="/docs/mcp">Connect →</a></div>
 <div class=card><h3>Simple global billing</h3>Prepaid USD wallet or a monthly plan via Stripe (cards, Apple Pay, Google Pay). Invoices with VAT/GST/sales tax handled at checkout.</div>
-<div class=card><h3>Honest about regions</h3>All compute runs in India today, which keeps it cheap. Great for GPU inference, batch jobs, and APIs that serve India or don't need sub-50 ms latency. <a href="/pricing#regions">Regions →</a></div></div>
+<div class=card><h3>Honest about regions</h3>All compute runs in the EU today, on Hetzner in Germany and Finland, which keeps it cheap. Great for APIs and backends serving Europe; expect ~90–110 ms from US East. <a href="/pricing#regions">Regions →</a></div></div>
 <h2>Pricing</h2><table>{CPU_HEAD.replace("<th>Fly.io</th><th>Render</th><th>Railway*</th>","")}{_plan_rows("shared", False)}</table>
 <p class=muted>Free tier with $1/month of usage. Prices in USD excluding tax, billed per second. <a href="/pricing">Performance CPUs, GPUs, volumes and tiers →</a></p></div>""", brand)
 def pricing(brand):
@@ -88,12 +97,12 @@ Prices are in USD and exclude VAT/GST/sales tax, which is added at checkout wher
 {tier("pro", "Pro", "Teams shipping to production.")}
 <div class=card><h3>Enterprise</h3><div style='font-size:28px;font-weight:700'>Custom</div><p>Committed GPU capacity, dedicated nodes, SLAs, invoicing.</p><p><a href="mailto:sales@aloof.si">Contact us</a></p></div></div>
 <h2>Shared CPU</h2><p class=muted>Burstable vCPUs with a guaranteed 1/8-core baseline. Good for APIs, bots and workers.</p><table>{CPU_HEAD}{_plan_rows("shared")}</table>
-<h2>Performance CPU</h2><p class=muted>Dedicated vCPUs.</p><table>{CPU_HEAD}{_plan_rows("performance")}</table>
+<h2>Performance CPU</h2><p class=muted>A full vCPU reserved per vCPU of the plan (no 1/8 baseline sharing).</p><table>{CPU_HEAD}{_plan_rows("performance")}</table>
 <p class=muted>*Railway bills actual use at $20/vCPU and $10/GB per month; the figure shown assumes full utilisation of the same size. Competitor prices are list prices in USD, read 12 Oct 2026: fly.io/docs/about/pricing (iad), render.com/pricing, railway.com/pricing.</p>
-<h2>GPUs</h2><p class=muted>Dedicated GPU node per app, billed per second while running. With <code>min 0</code> autoscaling you pay only while serving. Render and Railway don't offer GPUs, and Fly.io retired its GPUs on 31 Jul 2026.</p><table>{GPU_HEAD}{_plan_rows("gpu")}</table>
+{_gpu_section()}
 <h2>Storage &amp; network</h2><table><tr><th>Resource</th><th>{brand}</th><th>Fly.io</th><th>Render</th><th>Railway</th></tr>
 <tr><td>Volumes (provisioned GB-month)</td><td><b>${R['volume_usd_gb_month']:.2f}</b></td><td>$0.15</td><td>$0.25</td><td>$0.15</td></tr>
-<tr><td>Egress per GB (counts toward included usage)</td><td><b>${R['egress_usd_gb']:.2f}</b></td><td>$0.02 (NA/EU) · $0.12 (India)</td><td>$0.15 beyond allowance</td><td>$0.05</td></tr>
+<tr><td>Egress per GB (counts toward included usage)</td><td><b>${R['egress_usd_gb']:.2f}</b></td><td>$0.02 (NA/EU)</td><td>$0.15 beyond allowance</td><td>$0.05</td></tr>
 <tr><td>Extra RAM (GB-month)</td><td>${R['extra_ram_usd_gb_month']:.2f}</td><td>$5–6</td><td>—</td><td>$10</td></tr>
 <tr><td>Free tier limits</td><td colspan=4>3 apps · shared-1x-256mb / 512mb · 1 instance · sleeps after 5 min idle · 1 GB volumes · hard cap at $1 usage per month (never charged)</td></tr>
 <tr><td>Inbound data, custom domains, TLS</td><td>Free</td><td>Free (10 certs)</td><td>2–25 domains</td><td>2–20 domains</td></tr></table>
@@ -127,10 +136,10 @@ aloof domains &lt;app&gt; add api.example.in | verify &lt;domain&gt; | list | re
 <p><b>From git</b>: we build the repo's <code>Dockerfile</code> (<code>--git URL --ref main</code>, optional <code>subdir</code>) and push it to the {brand} registry, where your nodes pull it.</p>
 <p>Redeploys are rolling: new instances must pass a readiness check before old ones stop. Env vars, volumes, autoscale and health settings carry over between deploys.</p>
 <p>Health checks: set an HTTP path with <code>aloof health app --path /healthz</code>. After N consecutive failures the instance is replaced.</p>""",
-"gpu": f"""<h1>GPU workloads</h1><p>Pick a GPU plan: <code>gpu-t4-spot</code>, <code>gpu-l4</code>, <code>gpu-l40s</code>, <code>gpu-a100</code> or <code>gpu-h100</code> (billed per second; see <a href='/pricing'>pricing</a>). Each GPU instance gets a dedicated node with the NVIDIA container runtime, and your container sees the GPU via CUDA (<code>--gpus</code>).</p>
+"gpu": f"""<h1>GPU workloads</h1><p><b>Coming soon.</b> GPUs aren't deployable yet; join the waitlist on the <a href='/pricing#gpus'>pricing page</a> or with <code>POST /v1/waitlist</code>. When they launch:</p><p>Pick a GPU plan: <code>gpu-l4</code>, <code>gpu-rtx4090</code>, <code>gpu-l40</code>, <code>gpu-a100</code> or <code>gpu-h100</code> (billed per second; see <a href='/pricing'>pricing</a>). Each GPU instance gets a dedicated node with the NVIDIA container runtime, and your container sees the GPU via CUDA (<code>--gpus</code>).</p>
 <pre>aloof deploy llm --image vllm/vllm-openai:latest --plan gpu-l4 --port 8000 -e MODEL=Qwen/Qwen2.5-7B-Instruct
 aloof autoscale llm --min 0 --max 2 --idle 600</pre>
-<p>Capacity comes from E2E Networks, Jarvislabs, Ola Krutrim (all in India), AWS Mumbai spot (T4) or your own self-hosted nodes, tried in order of cost and availability. GPU nodes therefore run in India: fine for inference APIs and batch jobs, expect ~120–250 ms RTT from Europe/US. GPU nodes are released after 10 idle minutes. A cold start on GPU means provisioning a node, which takes a few minutes, so keep <code>min 1</code> for latency-sensitive inference.</p>""",
+<p>Planned capacity: Hyperstack GPU VMs (A100, H100, L40; Canada/Europe/US) and Runpod pods (L4, RTX 4090; many regions), tried in order of cost and availability. GPU nodes are released after 10 idle minutes. A cold start on GPU means provisioning a node, which takes a few minutes, so keep <code>min 1</code> for latency-sensitive inference.</p>""",
 "volumes": """<h1>Volumes</h1><pre>aloof volumes create pgdata --size 10
 aloof volumes attach db pgdata --path /var/lib/postgresql/data
 aloof volumes detach db pgdata      # data is kept

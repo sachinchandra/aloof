@@ -7,4 +7,6 @@ def get_drivers():
         from .remote import RemoteDriver
         REGISTRY["local-docker"] = LocalDockerDriver()
         for pool in PROVISIONERS: REGISTRY[pool] = RemoteDriver(pool)
+        from .runpod import RunpodDriver
+        REGISTRY["runpod"] = RunpodDriver()
     return REGISTRY

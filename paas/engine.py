@@ -9,6 +9,9 @@ def _lock(app): return _locks.setdefault(app, threading.Lock())
 def validate(spec):
     if not NAME_RE.match(spec.get("name","")): raise ValueError("name must be 3-32 chars, lowercase letters/digits/hyphens")
     if spec.get("plan","cpu-small") not in PLANS: raise ValueError(f"unknown plan; choose from {list(PLANS)}")
+    from . import plans as _plans
+    if PLANS[spec.get("plan","cpu-small")]["kind"] == "gpu" and not _plans.GPU_ENABLED:
+        raise ValueError("GPU plans are coming soon (phase 2). Join the waitlist: POST /v1/waitlist {\"email\": \"...\"}")
     src = spec.get("source") or {}
     if not (src.get("image") or src.get("git") or src.get("path")): raise ValueError("source.image or source.git required")
     spec.setdefault("plan","cpu-small"); spec.setdefault("port",8080); spec.setdefault("env",{}); spec.setdefault("instances",1)

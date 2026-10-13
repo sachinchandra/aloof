@@ -1,4 +1,4 @@
-"""Stub drivers for real Indian capacity. Each documents the API it will call.
+"""Stub drivers (legacy India/AWS pools; real provisioners live in providers.py). Each documents the API it will call.
 They report unavailable until credentials are set; start_instance raises NotImplemented.
 Implementation pattern (all): create VM/GPU node from an image with Docker preinstalled,
 cloud-init installs our node agent, agent pulls the app image from our registry and runs it,

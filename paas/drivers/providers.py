@@ -5,7 +5,9 @@ Endpoints follow the providers' public docs/SDKs (checked Oct 2026):
               users/fetch/{id}, templates/vm/destroy, scripts/add
   Krutrim Cloud (krutrim-client 0.8.4): cloud.olakrutrim.com /vm/v1/create_instance_async, get_instance_task_status,
               search_instances, delete_instance_async (x-region header); IAM /iam/v1/signInAsRootUser
-  AWS EC2 ap-south-1 spot (boto3 RunInstances InstanceMarketOptions=spot, AMI via SSM public parameters)"""
+  AWS EC2 ap-south-1 spot (boto3 RunInstances InstanceMarketOptions=spot, AMI via SSM public parameters)
+  Hetzner Cloud  https://docs.hetzner.cloud  (POST/GET/DELETE /v1/servers, /v1/firewalls; Bearer HCLOUD_TOKEN; user_data = cloud-init)
+  Hyperstack     https://docs.hyperstack.cloud  (infrahub-api.nexgencloud.com/v1/core/virtual-machines; header api_key)"""
 import os, time, base64, json, threading, logging, httpx
 from ..plans import PLANS
 log = logging.getLogger("paas.providers")
@@ -196,6 +198,94 @@ class AWSSpotProvisioner(Provisioner):
         return {"state": {"running": "running", "pending": "provisioning"}.get(st, "gone" if st in ("terminated", "shutting-down") else "provisioning"),
                 "public_ip": i.get("PublicIpAddress"), "raw_status": st}
     def destroy(self, ref): self.clients()[0].terminate_instances(InstanceIds=[ref])
+# ---------------- Hetzner Cloud (phase 1 CPU pool) ----------------
+class HetznerProvisioner(Provisioner):
+    """CPU nodes on Hetzner Cloud. Default cx43 (8 shared vCPU / 16 GB); locations tried in order until one has capacity.
+    Nodes get a firewall that allows nothing inbound except ICMP (+ SSH from PAAS_SSH_ALLOW_CIDR): the agent is only reached
+    over WireGuard, which the node dials out to the hub."""
+    name = "hetzner"; supports_gpu = False; env = ["HCLOUD_TOKEN"]
+    regions = ["eu-de", "eu-fi"]
+    LOCATIONS = {"eu-de": ["fsn1", "nbg1"], "eu-fi": ["hel1"]}
+    docs = "https://docs.hetzner.cloud/reference/cloud#servers-create-a-server"
+    DEFAULT_SIZES = {"cpu-node": "cx43"}
+    base = property(lambda s: E("HCLOUD_API_BASE", "https://api.hetzner.cloud/v1"))
+    def _h(self): return {"Authorization": f"Bearer {E('HCLOUD_TOKEN')}", "Content-Type": "application/json"}
+    def locations(self, region=None):
+        if E("HCLOUD_LOCATIONS"): return E("HCLOUD_LOCATIONS").split(",")
+        return self.LOCATIONS.get(region) or ["fsn1", "nbg1", "hel1"]
+    def firewall(self, c, name="aloof-node", rules=None):
+        """Find or create the node firewall (idempotent by name)."""
+        d = _raise(c.get(f"{self.base}/firewalls", params={"name": name}, headers=self._h()), "hetzner firewalls")
+        if d.get("firewalls"): return d["firewalls"][0]["id"]
+        if rules is None:
+            rules = [{"direction": "in", "protocol": "icmp", "source_ips": ["0.0.0.0/0", "::/0"]}]
+            if E("PAAS_SSH_ALLOW_CIDR"): rules.append({"direction": "in", "protocol": "tcp", "port": "22", "source_ips": E("PAAS_SSH_ALLOW_CIDR").split(",")})
+        d = _raise(c.post(f"{self.base}/firewalls", headers=self._h(), json={"name": name, "rules": rules, "labels": {"aloof": "1"}}), "hetzner create firewall")
+        return d["firewall"]["id"]
+    def server_body(self, name, server_type, location, script, firewall_id, labels):
+        b = {"name": name, "server_type": server_type, "image": E("HCLOUD_IMAGE", "ubuntu-24.04"), "location": location,
+             "user_data": script, "start_after_create": True, "labels": labels, "firewalls": [{"firewall": firewall_id}],
+             "public_net": {"enable_ipv4": True, "enable_ipv6": True}}
+        if E("HCLOUD_SSH_KEY"): b["ssh_keys"] = [E("HCLOUD_SSH_KEY")]
+        return b
+    def create_server(self, c, name, server_type, script, labels, firewall_id, region=None):
+        last = None
+        for loc in self.locations(region):
+            r = c.post(f"{self.base}/servers", headers=self._h(), json=self.server_body(name, server_type, loc, script, firewall_id, labels))
+            if r.status_code in (409, 412, 422) or (r.status_code >= 400 and "unavailable" in r.text):
+                last = f"{loc}: HTTP {r.status_code} {r.text[:150]}"; log.warning("hetzner %s", last); continue   # no capacity / type not orderable here
+            return _raise(r, "hetzner create server")["server"]
+        raise ProvisionError(f"hetzner: {server_type} not available in {self.locations(region)} ({last})")
+    def create(self, node_id, plan_id, script, gpu):
+        if gpu: raise ProvisionError("hetzner: no GPUs in phase 1")
+        with self.http() as c:
+            fw = self.firewall(c)
+            s = self.create_server(c, f"aloof-{node_id}", self.node_size(plan_id), script, {"aloof-node": node_id, "aloof-pool": self.name}, fw)
+        return str(s["id"])
+    def status(self, ref):
+        with self.http() as c: r = c.get(f"{self.base}/servers/{ref}", headers=self._h())
+        if r.status_code == 404: return {"state": "gone"}
+        s = _raise(r, "hetzner get server")["server"]; st = s.get("status", "")
+        ip = ((s.get("public_net") or {}).get("ipv4") or {}).get("ip")
+        return {"state": "running" if st == "running" else "gone" if st == "deleting" else "provisioning", "public_ip": ip, "raw_status": st}
+    def destroy(self, ref):
+        with self.http() as c: r = c.delete(f"{self.base}/servers/{ref}", headers=self._h())
+        if r.status_code not in (200, 202, 204, 404): _raise(r, "hetzner delete server")
+class HetznerCPXProvisioner(HetznerProvisioner):
+    """Fallback when the CX line can't be ordered: CPX42 (8 vCPU / 16 GB AMD). Its cost is ~4x CX43, so the margin floor
+    refuses the shared plans here; only plans that still clear 30% get scheduled."""
+    name = "hetzner-cpx"; DEFAULT_SIZES = {"cpu-node": "cpx42"}
+# ---------------- Hyperstack (phase 2 GPU VMs; behind PAAS_GPU_ENABLED) ----------------
+class HyperstackProvisioner(Provisioner):
+    name = "hyperstack"; supports_gpu = True; env = ["HYPERSTACK_API_KEY", "HYPERSTACK_ENVIRONMENT"]; regions = ["ca-mtl", "eu-no", "us"]
+    docs = "https://docs.hyperstack.cloud/docs/api-reference (POST /core/virtual-machines, GET/DELETE /core/virtual-machines/{id})"
+    DEFAULT_SIZES = {"gpu-a100": "n3-A100x1", "gpu-h100": "n3-H100x1", "gpu-l40": "n3-L40x1"}
+    base = property(lambda s: E("HYPERSTACK_API_BASE", "https://infrahub-api.nexgencloud.com/v1"))
+    def available(self):
+        from .. import plans
+        if not plans.GPU_ENABLED: return False, "GPUs are coming soon (PAAS_GPU_ENABLED=0)"
+        return super().available()
+    def _h(self): return {"api_key": E("HYPERSTACK_API_KEY"), "Content-Type": "application/json"}
+    def create(self, node_id, plan_id, script, gpu):
+        flavor = self.node_size(plan_id)
+        if not gpu or not flavor: raise ProvisionError(f"hyperstack: no GPU flavor for {plan_id}")
+        body = {"name": f"aloof-{node_id}", "environment_name": E("HYPERSTACK_ENVIRONMENT"), "flavor_name": flavor,
+                "image_name": E("HYPERSTACK_IMAGE", "Ubuntu Server 22.04 LTS R535 CUDA 12.2 with Docker"), "key_name": E("HYPERSTACK_KEY_NAME", ""),
+                "count": 1, "user_data": script, "assign_floating_ip": True, "labels": ["aloof", node_id],
+                "security_rules": [{"direction": "ingress", "protocol": "icmp", "ethertype": "IPv4", "remote_ip_prefix": "0.0.0.0/0"}]}
+        with self.http() as c: d = _raise(c.post(f"{self.base}/core/virtual-machines", headers=self._h(), json=body), "hyperstack create vm")
+        inst = (d.get("instances") or [{}])[0]
+        if not inst.get("id"): raise ProvisionError(f"hyperstack: no vm id in {str(d)[:200]}")
+        return str(inst["id"])
+    def status(self, ref):
+        with self.http() as c: r = c.get(f"{self.base}/core/virtual-machines/{ref}", headers=self._h())
+        if r.status_code == 404: return {"state": "gone"}
+        i = _raise(r, "hyperstack get vm").get("instance", {}); st = str(i.get("status", "")).upper()
+        return {"state": "running" if st == "ACTIVE" else "failed" if st == "ERROR" else "gone" if st in ("DELETED", "DELETING") else "provisioning",
+                "public_ip": i.get("floating_ip"), "raw_status": st}
+    def destroy(self, ref):
+        with self.http() as c: r = c.delete(f"{self.base}/core/virtual-machines/{ref}", headers=self._h())
+        if r.status_code not in (200, 202, 204, 404): _raise(r, "hyperstack delete vm")
 # ---------------- self-hosted (Yotta bare metal, own servers): nodes join with `curl .../bootstrap.sh | sudo bash` ----------------
 class SelfHostedProvisioner(Provisioner):
     name = "self-hosted"; supports_gpu = True; regions = ["any"]; env = []
@@ -204,4 +294,4 @@ class SelfHostedProvisioner(Provisioner):
     def create(self, *a): raise ProvisionError("self-hosted pool cannot auto-provision; add a node with POST /v1/admin/nodes")
     def status(self, ref): return {"state": "running"}
     def destroy(self, ref): pass
-PROVISIONERS = {p.name: p for p in (E2EProvisioner(), JarvislabsProvisioner(), KrutrimProvisioner(), AWSSpotProvisioner(), SelfHostedProvisioner())}
+PROVISIONERS = {p.name: p for p in (HetznerProvisioner(), HetznerCPXProvisioner(), HyperstackProvisioner(), E2EProvisioner(), JarvislabsProvisioner(), KrutrimProvisioner(), AWSSpotProvisioner(), SelfHostedProvisioner())}

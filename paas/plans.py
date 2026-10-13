@@ -1,4 +1,5 @@
-"""Aloof pricing v3 (2026-10-12): sold in USD worldwide, run on low-cost Indian clouds (plus AWS Mumbai spot and self-hosted).
+"""Aloof pricing v3 (2026-10-13): sold in USD worldwide. Phase 1 = CPU only on Hetzner Cloud in the EU (Germany/Finland);
+phase 2 (PAAS_GPU_ENABLED=1, planned at 10 paying customers) adds GPUs from Hyperstack VMs and Runpod pods.
 Structure mirrors Fly.io (shared vs performance CPU, per-second billing, volumes per GB-month, egress per GB) with Railway-style
 workspace tiers (the fee comes back as included usage). Prices are USD excl. sales tax/VAT. A "month" is 720 hours.
 
@@ -11,7 +12,13 @@ E = lambda k, d: os.environ.get(k, d)
 CURRENCY = "USD"
 COST_USD_INR = float(E("PAAS_COST_USD_INR", "83"))     # worst-case FX for costs
 USD_INR = float(E("PAAS_USD_INR", "88"))               # only for legacy INR conversions (Razorpay, v3->v4 migration)
-CPU_POOLS = [p for p in E("PAAS_CPU_POOLS", "").split(",") if p]
+CPU_POOLS = [p for p in E("PAAS_CPU_POOLS", "hetzner,hetzner-cpx,e2e").split(",") if p]   # tried in order; floor refuses under-margin pools
+GPU_ENABLED = E("PAAS_GPU_ENABLED", "0") == "1"
+GPU_UNLOCK_PAID_CUSTOMERS = int(E("PAAS_GPU_UNLOCK_PAID_CUSTOMERS", "10"))
+def gpu_status():
+    return {"enabled": GPU_ENABLED, "status": "available" if GPU_ENABLED else "coming_soon",
+            "waitlist": "POST /v1/waitlist {\"email\": \"...\", \"gpu\": \"gpu-h100\"}",
+            "note": "" if GPU_ENABLED else f"GPUs (L4, RTX 4090, L40, A100 80GB, H100) launch in phase 2. Join the waitlist to be notified."}
 HOURS_MONTH = 720
 # ---------------- payment fees (Stripe) ----------------
 FEES = {"pct": float(E("PAAS_FEE_PCT", "0.029")), "intl_pct": float(E("PAAS_FEE_INTL_PCT", "0.015")),
@@ -38,10 +45,12 @@ PLANS = {
   "perf-4x-8gb":     _cpu("performance", 4, 8192,  119, fly_usd=132, render_usd=175, railway_usd=160),
   "perf-8x-16gb":    _cpu("performance", 8, 16384, 239, fly_usd=264, render_usd=300, railway_usd=320),
   "gpu-t4-spot": _gpu("NVIDIA T4 16GB (spot, interruptible)", 4, 15360, 0.55, ["aws-ap-south-1-spot", "self-hosted"]),
-  "gpu-l4":      _gpu("NVIDIA L4 24GB", 8, 30720, 1.10, ["e2e", "jarvislabs", "self-hosted"], fly_usd_hr=1.50, note="vs Fly A10 24GB"),
+  "gpu-rtx4090": _gpu("NVIDIA RTX 4090 24GB (community hosts)", 8, 30720, 0.79, ["runpod", "self-hosted"]),
+  "gpu-l4":      _gpu("NVIDIA L4 24GB", 8, 30720, 1.10, ["runpod", "e2e", "jarvislabs", "self-hosted"], fly_usd_hr=1.50, note="vs Fly A10 24GB"),
+  "gpu-l40":     _gpu("NVIDIA L40 48GB", 8, 61440, 1.89, ["hyperstack", "self-hosted"]),
   "gpu-l40s":    _gpu("NVIDIA L40S 48GB", 8, 61440, 2.19, ["e2e", "self-hosted"], fly_usd_hr=1.25, note="above Fly's last $1.25 (retired) to hold the margin floor"),
-  "gpu-a100":    _gpu("NVIDIA A100 80GB", 16, 92160, 3.99, ["jarvislabs", "krutrim", "e2e", "self-hosted"], fly_usd_hr=3.50, note="vs Fly a100-80gb"),
-  "gpu-h100":    _gpu("NVIDIA H100 80GB", 24, 194560, 5.49, ["krutrim", "e2e", "jarvislabs", "self-hosted"], note="Fly never offered H100"),
+  "gpu-a100":    _gpu("NVIDIA A100 80GB", 16, 92160, 3.99, ["hyperstack", "jarvislabs", "krutrim", "e2e", "self-hosted"], fly_usd_hr=3.50, note="vs Fly a100-80gb"),
+  "gpu-h100":    _gpu("NVIDIA H100 80GB", 24, 194560, 5.49, ["hyperstack", "krutrim", "e2e", "jarvislabs", "self-hosted"], note="Fly never offered H100"),
 }
 # v1 plan ids keep working for existing apps (hidden from the pricing page)
 PLANS["cpu-nano"]   = _cpu("shared", 0.25, 256, 1.99, legacy=True)
@@ -63,9 +72,12 @@ TIERS = {
             "compare": "Railway Pro $20 incl. $20; Render Pro $25 + compute"},
 }
 for t in TIERS.values(): t["egress_gb"] = 0
-# Regions, listed honestly: compute runs in India (and AWS Mumbai); the edge/control plane location is wherever it's deployed.
-REGIONS = {"in-blr": "Bengaluru, India", "in-mum": "Mumbai, India", "in-del": "Delhi NCR, India", "in-chn": "Chennai, India", "local": "Prototype box"}
-REGION_NOTE = "All compute currently runs in India (E2E Networks, Jarvislabs, Ola Krutrim, AWS ap-south-1, or your own nodes). Expect ~120–250 ms RTT from Europe/US; ideal for GPU batch/inference and APIs that aren't latency-critical."
+# Regions, listed honestly. Phase 1: compute and the control plane/edge run on Hetzner in the EU. E2E (India) is only a CPU
+# overflow pool and is listed only when its keys are set.
+REGIONS = {"eu-de": "Germany (Hetzner Falkenstein / Nuremberg)", "eu-fi": "Finland (Hetzner Helsinki)"}
+if E("E2E_API_KEY", ""): REGIONS["in-del"] = "Delhi NCR, India (E2E overflow)"
+REGION_NOTE = ("Phase 1: all compute runs in the EU on Hetzner Cloud (Germany and Finland), next to the edge. Typical RTT: ~10-40 ms within "
+               "Europe, ~90-110 ms from US East, ~150-200 ms from India/US West." + (" When EU capacity is short, CPU apps may overflow to E2E Networks in Delhi, India." if "in-del" in REGIONS else ""))
 # ---------------- margin floor ----------------
 MIN_MARGIN = float(E("PAAS_MIN_MARGIN", "0.30"))
 COST_BUFFER = 1.5   # unverified costs inflated 1.5x (E2E CPU repriced 1 Aug 2026; storage/egress not confirmed)
@@ -74,7 +86,10 @@ def fee_rate(charge_usd=None):
     c = charge_usd or min(FEES["min_topup_usd"], min(t["fee_usd"] for t in TIERS.values() if t["fee_usd"]))
     return FEES["pct"] + FEES["intl_pct"] + FEES["tax_pct"] + FEES["fixed_usd"] / c
 # CPU hosts per pool for 4 vCPU (inr_hr in INR, or usd_hr for USD-billed providers). Worst case = on-demand list prices.
+HETZNER_BUFFER = 1.10   # EUR/USD swings, billing rounding; list prices from docs.hetzner.com (15 Jun 2026 adjustment), +$0.60 IPv4
 CPU_HOSTS = {
+  "hetzner":             {"usd_hr": (18.49 + 0.60) * HETZNER_BUFFER / 720, "vcpu": 8, "mem_gb": 16, "src": "Hetzner CX43 8 vCPU/16GB $18.49/mo + IPv4, x1.1"},
+  "hetzner-cpx":         {"usd_hr": (81.99 + 0.60) * HETZNER_BUFFER / 720, "vcpu": 8, "mem_gb": 16, "src": "Hetzner CPX42 8 vCPU/16GB $81.99/mo + IPv4, x1.1 (fallback)"},
   "e2e":                 {"inr_hr": 2.25 * COST_BUFFER, "vcpu": 4, "mem_gb": 12, "src": "E2E C2 4vCPU/12GB ₹2.25/hr x1.5 buffer"},
   "krutrim":             {"inr_hr": 13.0, "vcpu": 4, "mem_gb": 16, "src": "Krutrim 4vCPU/16GB ₹13/hr"},
   "aws-ap-south-1-spot": {"usd_hr": 0.1504 * 1.1, "vcpu": 4, "mem_gb": 16, "src": "t3a.xlarge on-demand $0.1504/hr +10%"},
@@ -83,12 +98,16 @@ CPU_HOSTS = {
 }
 # GPU cost per pool per hour: float = INR, ("usd", x) = USD. Missing = unknown, so the pool is refused for that plan.
 # Override: PAAS_COST_<POOL>_<PLAN>=USD/hr, e.g. PAAS_COST_JARVISLABS_GPU_L4=0.65
+# Hyperstack/Runpod: on-demand list prices (Oct 2026) x1.1 for IPs/disk extras. Hyperstack includes vCPU/RAM/local disk.
+_B = 1.10
 GPU_COSTS = {
   "gpu-t4-spot": {"aws-ap-south-1-spot": ("usd", 0.30)},     # spot bid capped at MaxPrice $0.30 (typical ~$0.21)
-  "gpu-l4":      {"e2e": 49.0},
+  "gpu-rtx4090": {"runpod": ("usd", 0.34 * _B)},              # Runpod community cloud $0.34
+  "gpu-l4":      {"runpod": ("usd", 0.59 * _B), "e2e": 49.0},  # Runpod secure cloud $0.59
+  "gpu-l40":     {"hyperstack": ("usd", 1.00 * _B)},
   "gpu-l40s":    {"e2e": 102.0},
-  "gpu-a100":    {"jarvislabs": 131.0, "krutrim": 189.0, "e2e": 189.0},
-  "gpu-h100":    {"krutrim": 213.0, "e2e": 255.55},
+  "gpu-a100":    {"hyperstack": ("usd", 1.35 * _B), "jarvislabs": 131.0, "krutrim": 189.0, "e2e": 189.0},   # Hyperstack A100 PCIe 80GB
+  "gpu-h100":    {"hyperstack": ("usd", 2.50 * _B), "krutrim": 213.0, "e2e": 255.55},                     # Hyperstack H100 PCIe
 }
 def _usd(v): return v[1] if isinstance(v, tuple) else v / COST_USD_INR
 RATE_COST = {"volume_usd_gb_month": 7.0 * COST_BUFFER / COST_USD_INR, "egress_usd_gb": 1.0 * 2.5 / COST_USD_INR,
