@@ -75,7 +75,7 @@ def customers():
     inner = f"""<p class=muted style="margin:0 0 22px">These are reference architectures we built and tested ourselves. They're not customer stories, and no company names, logos or metrics are implied.</p>
 <div class='grid g3'>{cards}</div><div id=partner style="margin-top:56px">{PARTNER_FORM}</div>"""
     return render("/customers", "Example architectures · Aloof", "Reference architectures on Aloof: SaaS API with worker, Next.js with private API, scale-to-zero webhooks, MCP-operated backends.",
-                  shell("Example architectures", "What you can build on Aloof", "Clearly labeled reference builds, each with the plans and features it uses.", inner), og="customers")
+                  shell("Example architectures", "What you can build on Aloof", "Reference builds we tested ourselves, with the plans and features each one uses.", inner), og="customers")
 # ---------------- regions ----------------
 @R.get("/regions", response_class=HTMLResponse)
 def regions():
@@ -89,11 +89,11 @@ def regions():
 <h3>Region waitlist</h3><div class=fgrid><input name=email type=email required placeholder="you@company.com" aria-label=Email><select name=region aria-label=Region>{opts}</select></div><button class="btn pri">Join waitlist</button><p id=rwmsg role=status aria-live=polite></p></form>
 <script>function wl(c){{rw.region.value=c;rw.scrollIntoView({{behavior:'smooth',block:'center'}});rw.email.focus()}}</script>"""
     return render("/regions", "Regions · Aloof", "Aloof runs compute in Nuremberg, Germany, with encrypted off-site backups in Helsinki, Finland. Planned regions and waitlist.",
-                  shell("Regions", "Where your apps run", "One live compute region today: Nuremberg, Germany. We list other regions only as coming soon, never as available.", inner), og="regions")
+                  shell("Regions", "Where your apps run", "One live compute region today: Nuremberg, Germany. Other regions below are planned, not available.", inner), og="regions")
 @R.get("/about", response_class=HTMLResponse)
 def about(): return render("/about", "About · Aloof", "Aloof is a small, independent hosting platform for backends, APIs and workers.", shell("About", "Hosting for backends, without the bill shock", "What we are, what we aren't, and how we make money.", f"<div class=prose>{ABOUT}</div>", narrow=True), og="about")
 @R.get("/security", response_class=HTMLResponse)
-def security(): return render("/security", "Security · Aloof", "What Aloof does today for transport, secrets, isolation, access, backups and disclosure. No certifications claimed.", shell("Security", "Security, stated plainly", "Only what the platform does today. Gaps are listed too.", f"<div class=prose>{SECURITY}</div>", narrow=True), og="security")
+def security(): return render("/security", "Security · Aloof", "What Aloof does today for transport, secrets, isolation, access, backups and disclosure. No certifications claimed.", shell("Security", "Security at Aloof", "What the platform does today, and what it doesn't do yet.", f"<div class=prose>{SECURITY}</div>", narrow=True), og="security")
 # ---------------- status: server-side probes ----------------
 def _targets():
     from . import api

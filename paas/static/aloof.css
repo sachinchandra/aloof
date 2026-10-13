@@ -222,3 +222,4 @@ a.logo i{width:28px;height:28px;flex:none}
 .abar a.logo{color:#f6f1ec!important;font-size:19px}.abar a.logo i{width:26px;height:26px}
 @media(max-width:640px){a.logo,.top a.logo{font-size:19px;gap:9px}a.logo i{width:26px;height:26px}}
 .tbl{color:var(--fg)}.tbl td b,.tbl td a b{color:var(--fg)}
+.hero:before{display:none}

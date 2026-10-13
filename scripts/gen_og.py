@@ -11,8 +11,8 @@ def font(sz, w=700):
 def card(name, eyebrow, title, sub):
     W, H = 1200, 630; im = Image.new("RGB", (W, H), (10, 8, 7))
     glow = Image.new("RGB", (W, H), (0, 0, 0)); g = ImageDraw.Draw(glow)
-    g.ellipse((-200, -260, 700, 360), fill=(190, 70, 0)); g.ellipse((700, 300, 1400, 900), fill=(150, 95, 0))
-    im = Image.blend(im, glow.filter(ImageFilter.GaussianBlur(160)), 0.55); d = ImageDraw.Draw(im)
+    pass  # no decorative blobs
+    d = ImageDraw.Draw(im)
     for x in range(0, W, 48): d.line((x, 0, x, H), fill=(26, 21, 17))
     for y in range(0, H, 48): d.line((0, y, W, y), fill=(26, 21, 17))
     for x, y in ((4, 5), (7, 13.2), (10, 21.4)): d.rounded_rectangle((72 + x, 64 + y, 72 + x + 18, 64 + y + 5.6), 2.8, fill=(238, 240, 246))

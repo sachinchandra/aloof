@@ -18,7 +18,7 @@ detected: fastapi
 wrote Dockerfile
 wrote aloof.toml
 wrote .dockerignore</pre>
-<p>The generated Dockerfile is deliberately boring: <code>python:3.12-slim</code>, <code>pip install -r requirements.txt</code>, and <code>uvicorn main:app --host 0.0.0.0 --port $PORT</code>. Aloof injects <code>PORT</code> (8080 by default), so the same image runs locally and on the platform. If you already have a Dockerfile, <code>launch</code> leaves it alone.</p>
+<p>The generated Dockerfile is minimal: <code>python:3.12-slim</code>, <code>pip install -r requirements.txt</code>, and <code>uvicorn main:app --host 0.0.0.0 --port $PORT</code>. Aloof injects <code>PORT</code> (8080 by default), so the same image runs locally and on the platform. If you already have a Dockerfile, <code>launch</code> leaves it alone.</p>
 <h2>2. Add a database</h2><pre>$ aloof pg create notes-db --plan pg-dev
 $ aloof pg attach notes-db notes-api      # injects DATABASE_URL, joins the private network</pre>
 <p><code>pg-dev</code> is {_m(PG_PLANS['pg-dev']['price_usd_month'])}/month. The database never gets a public port: the app reaches it over a private Docker network, and <code>DATABASE_URL</code> is stored encrypted with the app's other secrets. Daily logical backups are kept on the host, and encrypted copies go off-site (see <a href="/blog/postgres-offsite-backups">the backups post</a>).</p>
@@ -125,7 +125,7 @@ $ aloof rollback api 6</pre>
 $ aloof pg offsite-restore mydb pg_20261013082102_065225</pre>
 <p>The same works for volumes (<code>aloof snapshots offsite-restore</code>), through the API and MCP, and from the dashboard.</p>
 <h2>Limits</h2><p>These are logical backups. There's no point-in-time recovery or streaming replica yet, so the recovery point is your newest dump. Take an on-demand backup before risky migrations.</p>"""},
-{"slug": "aloof-vs-fly-render-railway", "title": "Aloof vs Fly.io, Render and Railway: an honest comparison", "date": "2026-10-13", "tags": ["comparison"],
+{"slug": "aloof-vs-fly-render-railway", "title": "Aloof vs Fly.io, Render and Railway: how they compare", "date": "2026-10-13", "tags": ["comparison"],
  "summary": "Where Aloof is cheaper or simpler, and where Fly.io, Render or Railway are clearly the better choice today.",
  "html": f"""<p>We built Aloof to be a cheaper, simpler home for backends. "Cheaper" is easy to claim, so here are the numbers, and also the places where the alternatives are better.</p>
 <h2>Price</h2><p>Always-on monthly prices for comparable instances. Competitor figures are their public list prices as we recorded them; check their sites for current numbers. A dash means no direct equivalent.</p>
@@ -133,5 +133,5 @@ $ aloof pg offsite-restore mydb pg_20261013082102_065225</pre>
 <p class=muted>*Railway bills by resource usage; we show the cost of the equivalent resources running 24/7.</p>
 <h2>Where Aloof is a good fit</h2><ul><li>Backends, APIs, workers and side projects whose users are in or near Europe.</li><li>Fly-style workflows (<code>aloof.toml</code>, <code>launch</code>, <code>secrets</code>, process groups, release commands, previews) at a lower price.</li><li>AI-agent-driven operations through a first-party MCP server.</li><li>Teams that want encrypted off-site backups and an audit log without assembling them.</li></ul>
 <h2>Where the others are better today</h2><ul><li><b>Global footprint</b>: Fly.io runs in dozens of regions with anycast. Aloof runs in one region (Nuremberg, Germany). Users in Asia or the Americas will see higher latency.</li><li><b>Compliance</b>: Fly.io, Render and Railway publish SOC 2 reports. Aloof holds no certifications.</li><li><b>Teams</b>: all three have organisations with roles. Aloof has single-user accounts plus scoped deploy tokens.</li><li><b>Managed data</b>: Postgres HA and point-in-time recovery, managed Redis/Key-Value, and private services across regions are more mature elsewhere.</li><li><b>Track record</b>: Aloof is new. The others have years of production history.</li><li><b>Raw TCP/UDP</b>: Fly.io exposes arbitrary public ports. Aloof serves HTTP/HTTPS only.</li></ul>
-<h2>The honest summary</h2><p>If your users are in Europe and you want Fly-like ergonomics with per-second billing at or below list prices, Aloof is worth a try; the free tier is hard-capped at $1, so it costs nothing to test. If you need multiple regions, compliance reports or org-level RBAC today, use one of the others. Where we run today is on the <a href="/regions">regions page</a>.</p>"""},
+<h2>Summary</h2><p>If your users are in Europe and you want Fly-like ergonomics with per-second billing at or below list prices, Aloof is worth a try; the free tier is hard-capped at $1, so it costs nothing to test. If you need multiple regions, compliance reports or org-level RBAC today, use one of the others. Where we run today is on the <a href="/regions">regions page</a>.</p>"""},
 ]
