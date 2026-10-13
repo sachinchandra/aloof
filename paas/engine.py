@@ -190,7 +190,8 @@ def _run_deploy(name, image=None, reason=None):
         app = q("select * from apps where name=?", (name,), one=True); spec = load_spec(app["spec"])
         drv = get_drivers()[app["provider"]]; log = lambda m: event(name, m)
         prev = q("select * from releases where app=? and status='active' order by version desc", (name,), one=True)
-        ver = _new_release(name, spec, reason or ("config change" if (spec.get("source") or {}).get("image") == spec.get("_image") else "deploy"))
+        src = spec.get("source") or {}
+        ver = _new_release(name, spec, reason or ("config change" if src.get("image") and src.get("image") == spec.get("_image") else "deploy"))
         log(f"release v{ver}: {reason or 'deploy'}")
         new = []
         try:

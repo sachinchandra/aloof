@@ -216,7 +216,9 @@ x = cr.add_parser("run"); x.add_argument("job"); x.add_argument("-a", "--app", d
 o = p.parse_args()
 pj = lambda x: print(json.dumps(x, indent=2))
 if o.cmd == "signup":
-    r = call("POST","/v1/signup",{"email":o.email}); json.dump({"api":API,"key":r["api_key"]}, open(CFG,"w")); print("saved key to", CFG); pj(r)
+    r = call("POST","/v1/signup",{"email":o.email}); fd = os.open(CFG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as f: json.dump({"api":API,"key":r["api_key"]}, f)
+    print("saved key to", CFG); pj({k: v for k, v in r.items() if k != "api_key"} | {"api_key": r["api_key"][:10] + "... (saved)"})
 elif o.cmd == "plans":
     for pl in call("GET","/v1/plans")["plans"]: print(f"{pl['id']:<11} {pl['kind']} {pl['vcpu']:>5} vCPU {pl['memory_mb']:>7}MB {pl['gpu'] or '':<18} ${pl['price_usd_hr']:.4f}/hr  via {pl['provider']}")
 elif o.cmd == "apps":

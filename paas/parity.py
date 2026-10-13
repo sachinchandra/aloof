@@ -144,7 +144,11 @@ def exec_cmd(account_id, app, cmd, ip=None, instance=None):
     if not i: raise ValueError("instance not found")
     d = d or get_drivers()[i["provider"]]
     audit(account_id, app, "exec", json.dumps(cmd)[:1000], ip)
-    t = time.time(); code, out = d.exec_run(i["id"], cmd)
+    t = time.time()
+    try: code, out = d.exec_run(i["id"], cmd)
+    except Exception as e:
+        if "is not running" in str(e) or "No such container" in str(e): raise ValueError("instance is stopping or asleep; send a request to wake it and retry")
+        raise
     audit(account_id, app, "exec.result", f"exit {code} in {time.time()-t:.2f}s, {len(out)} bytes", ip)
     return {"instance": i["id"], "exit_code": code, "output": out[-200000:].decode(errors="replace")}
 # ---------------- log retention + drains ----------------
