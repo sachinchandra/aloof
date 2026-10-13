@@ -60,6 +60,7 @@ service-account*.json
 # --- screenshots / scratch / editors / OS ---
 *.png
 !docs/**/*.png
+!paas/static/og/*.png
 *.out
 *.tmp
 .idea/

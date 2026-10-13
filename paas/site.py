@@ -1,5 +1,5 @@
 """Public site: landing, pricing, docs, login. Server-rendered, no JS framework."""
-import html
+import html, os
 from .plans import PLANS, TIERS, RATES, REGIONS, REGION_NOTE
 from . import plans as _plans
 ICON = {
@@ -29,21 +29,27 @@ COMMON_JS = """<script>document.querySelectorAll('pre').forEach(function(p){if(p
 b.onclick=function(){var t=p.cloneNode(true);t.querySelectorAll('.copy').forEach(function(x){x.remove()});navigator.clipboard.writeText(t.innerText.trim()).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1400)})};p.appendChild(b)});
 var io=window.IntersectionObserver&&new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.12});
 document.querySelectorAll('.reveal').forEach(function(el){io?io.observe(el):el.classList.add('in')});</script>"""
+SITE = os.environ.get("PAAS_PUBLIC_WWW", "https://www.aloof.si").rstrip("/")
+CUR = {"path": "/", "og": "default", "type": "website"}
 def head(title, desc):
+    t, d = html.escape(title), html.escape(desc); u = SITE + CUR["path"]; og = f"{SITE}/static/og/{CUR['og']}.png"
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>{html.escape(title)}</title><meta name=description content="{html.escape(desc)}"><meta name=theme-color content="#07080c">
-<link rel=icon href="/favicon.ico"><link rel=stylesheet href="/static/aloof.css?v=5">{THEME_JS}</head>"""
+<title>{t}</title><meta name=description content="{d}"><meta name=theme-color content="#07080c"><link rel=canonical href="{u}">
+<meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
+<link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
+<link rel=icon href="/favicon.ico"><link rel=stylesheet href="/static/aloof.css?v=6">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
-<nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/docs/mcp">AI agents</a><a href="/security">Security</a></nav>
+<nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/changelog">Changelog</a></nav>
 <span class=sp></span><button class=icon-btn onclick="toggleTheme()" aria-label="Toggle dark/light theme">{svg("sun")}</button>
 <a href="/login" class=hide-sm>Log in</a><a class="btn pri sm" href="/login#register">Start free</a>
 <button class="icon-btn menu-btn" aria-label="Menu" onclick="document.getElementById('nl').classList.toggle('open')">{svg("menu")}</button></div></header>"""
 def footer(brand):
-    return f"""<footer class=f><div class=wrap><div class=cols><div><a class=logo href="/"><i></i>{brand}</a><p class=muted style="max-width:300px;margin-top:12px">Cheap, per-second hosting for backends and APIs. Compute in the EU (Germany and Finland), billed in USD.</p></div>
-<div><h5>Product</h5><a href="/#features">Features</a><a href="/pricing">Pricing</a><a href="/pricing#regions">Regions</a><a href="/pricing#gpus">GPUs (soon)</a></div>
-<div><h5>Developers</h5><a href="/docs">Docs</a><a href="/docs/cli">CLI</a><a href="/api/docs">API reference</a><a href="/docs/mcp">MCP</a><a href="/llms.txt">llms.txt</a></div>
-<div><h5>Trust</h5><a href="/security">Security</a><a href="/status">Status</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
+    return f"""<footer class=f><div class=wrap><div class=cols><div><a class=logo href="/"><i></i>{brand}</a><p class=muted style="max-width:300px;margin-top:12px">Cheap, per-second hosting for backends and APIs. Compute in Nuremberg, Germany; billed in USD.</p></div>
+<div><h5>Product</h5><a href="/#features">Features</a><a href="/pricing">Pricing</a><a href="/regions">Regions</a><a href="/customers">Example architectures</a><a href="/changelog">Changelog</a><a href="/pricing#gpus">GPUs (soon)</a></div>
+<div><h5>Developers</h5><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/docs/cli">CLI</a><a href="/api/docs">API reference</a><a href="/docs/mcp">MCP</a><a href="/llms.txt">llms.txt</a><a href="/rss.xml">RSS</a></div>
+<div><h5>Company</h5><a href="/about">About</a><a href="/security">Security</a><a href="/status">Status</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
 <div><h5>Account</h5><a href="/login">Log in</a><a href="/login#register">Sign up</a><a href="/dashboard">Dashboard</a></div></div>
 <div class=base><span>© 2026 {brand}</span><span>Prices in USD, excluding tax.</span></div></div></footer>"""
 def page(title, body, brand="Aloof", desc=None):
@@ -129,7 +135,7 @@ list_plans → deploy_app → set_autoscale → get_status
 <div class="grid g3">{_feat("lock", "TLS everywhere", "Every app, API and MCP endpoint is served over HTTPS with automatically issued certificates. Certificates are only requested for hosts we know.")}
 {_feat("key", "Encrypted secrets", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes.")}
 {_feat("box", "Isolated containers", "Each app runs in its own container with CPU and memory limits. Nodes join over WireGuard and expose no inbound ports.")}
-{_feat("eu", "EU hosting", "Phase 1 compute and the control plane run on Hetzner Cloud in Germany and Finland.")}
+{_feat("eu", "EU hosting", "Compute and the control plane run on Hetzner Cloud in Nuremberg, Germany. Off-site backups are stored in Helsinki, Finland.")}
 {_feat("shield", "Session hardening", "HttpOnly, SameSite cookies with a CSRF header requirement, single-use magic links, and OAuth 2.1 with PKCE for agents.")}
 {_feat("card", "Payments by Stripe", "Card data never touches our servers. Checkout, invoices and tax are handled by Stripe.")}</div>
 <p class=muted style="margin-top:22px">Read more on the <a href="/security">security page</a>. Found an issue? Email <a href="mailto:security@aloof.si">security@aloof.si</a>.</p></div></section>
@@ -312,7 +318,7 @@ LEGAL = {
 <h3>Data at rest</h3><ul><li>App environment variables are encrypted at rest (Fernet) and never returned by the API.</li><li>API keys and session tokens are stored as SHA-256 hashes.</li></ul>
 <h3>Isolation</h3><ul><li>Each app instance runs in its own container with CPU and memory limits.</li></ul>
 <h3>Accounts</h3><ul><li>HttpOnly, SameSite session cookies; state-changing cookie requests require a CSRF header.</li><li>Single-use, expiring magic links. OAuth 2.1 with PKCE for MCP clients; tokens are scoped and revocable.</li></ul>
-<h3>Infrastructure</h3><ul><li>Phase 1 compute and the control plane run on Hetzner Cloud in Germany and Finland.</li><li>Payments are processed by Stripe; card data never reaches our servers.</li></ul>
+<h3>Infrastructure</h3><ul><li>Compute and the control plane run on Hetzner Cloud in Nuremberg, Germany. Off-site backups are stored in Helsinki, Finland.</li><li>Payments are processed by Stripe; card data never reaches our servers.</li></ul>
 <h3>Reporting</h3><p>Email <a href="mailto:security@aloof.si">security@aloof.si</a>. Please give us reasonable time to fix an issue before disclosing it.</p>"""),
 "privacy": ("Privacy policy", """<p><b>Draft.</b> A full policy will be published before general availability.</p><p>We collect your email, billing details you provide, and operational data needed to run and bill your apps (logs, usage). Payments are handled by Stripe. We don't sell personal data. Data is hosted in the EU. Contact: <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>"""),
 "terms": ("Terms of service", """<p><b>Draft.</b> Full terms will be published before general availability.</p><p>Don't use the service for illegal content, abuse, spam or cryptocurrency mining. Prepaid credit is consumed per second of usage; the free tier is hard-capped. Contact: <a href="mailto:legal@aloof.si">legal@aloof.si</a>.</p>"""),

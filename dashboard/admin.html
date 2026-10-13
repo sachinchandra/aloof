@@ -1,0 +1,81 @@
+<!doctype html><html lang=en><head><meta charset="utf-8"><meta name=viewport content="width=device-width,initial-scale=1"><meta name=robots content="noindex,nofollow"><title>Owner dashboard · Aloof</title>
+<link rel=icon href="/favicon.ico"><link rel=stylesheet href="/static/aloof.css?v=6">
+<script>(function(){var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t})();function toggleTheme(){var d=document.documentElement,c=d.dataset.theme||'dark',n=c=='dark'?'light':'dark';d.dataset.theme=n;localStorage.setItem('theme',n)}</script>
+<style>
+.adm{padding:28px 0 64px}.adm h1{font-size:28px;letter-spacing:-.025em;margin:0}.adm h2{font-size:15px;letter-spacing:.02em;margin:34px 0 12px;color:var(--fg2);text-transform:uppercase;font-family:var(--mono)}
+.ah{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:20px}.ah .sp{flex:1}
+.k{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}.k .stat small{display:block;color:var(--fg3);font-size:12px;margin-top:4px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:960px){.two{grid-template-columns:1fr}}
+.chart{display:flex;align-items:flex-end;gap:3px;height:120px;padding-top:8px}.chart i{flex:1;background:linear-gradient(180deg,var(--acc),color-mix(in srgb,var(--acc) 45%,transparent));border-radius:3px 3px 0 0;min-height:2px;position:relative}
+.chart i:hover:after{content:attr(data-t);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:3px 7px;border-radius:6px;font-size:11px;white-space:nowrap}
+.chart.c2 i{background:linear-gradient(180deg,var(--acc2),color-mix(in srgb,var(--acc2) 40%,transparent))}.axis{display:flex;justify-content:space-between;font-size:11.5px;color:var(--fg3);margin-top:6px}
+.prog{height:10px;border-radius:99px;background:var(--line);overflow:hidden;margin:10px 0 6px}.prog b{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.meter{height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px}.meter b{display:block;height:100%;background:var(--ok)}.meter b.w{background:var(--warn)}.meter b.x{background:var(--bad)}
+.tbl td,.tbl th{font-size:13.5px}.pills{display:flex;gap:8px;flex-wrap:wrap}.pills span{background:var(--panel2);border:1px solid var(--line);padding:4px 10px;border-radius:99px;font-size:13px}
+.alert{border:1px solid color-mix(in srgb,var(--bad) 45%,var(--line));background:color-mix(in srgb,var(--bad) 8%,transparent);color:var(--fg);padding:12px 16px;border-radius:12px;margin:8px 0}
+#gate{max-width:440px;margin:12vh auto}.exp{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.exp select{width:auto;height:34px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-size:13px}
+</style></head><body>
+<header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle theme">◐</button><a href="/dashboard">Dashboard</a></div></header>
+<main class="wrap adm" id=main>
+<div id=gate class=card style="display:none"><h3>Admin token</h3><p>Owner session verified. Enter the admin token from <code>data/admin_token</code> on the server. It's kept in this tab only.</p>
+<form onsubmit="event.preventDefault();sessionStorage.setItem('adm',tk.value.trim());load()" class=form-card style="margin-top:14px"><input id=tk type=password autocomplete=off placeholder="adm_…" aria-label="Admin token"><button class="btn pri">Unlock</button><p id=gm class=bad></p></form></div>
+<div id=app style="display:none">
+<div class=ah><div><h1>Owner dashboard</h1><p class=muted id=gen style="margin:4px 0 0"></p></div><span class=sp></span>
+<div class=exp><button class="btn sm" onclick="load()">Refresh</button><select id=ex aria-label="CSV table"><option>summary</option><option>users</option><option>top_users</option><option>signups</option><option>deploys</option><option>failed_deploys</option><option>design_partners</option><option>audit</option></select><button class="btn pri sm" onclick="exportCsv()">Export CSV</button><button class="btn ghost sm" onclick="sessionStorage.removeItem('adm');location.reload()">Lock</button></div></div>
+<div id=alerts></div>
+<h2>Users &amp; revenue</h2><div class=k id=k1></div>
+<div class=two style="margin-top:14px"><div class=card><h3>GPU unlock</h3><p id=gpu class=muted></p><div class=prog><b id=gpub></b></div><p class=muted id=gpun style="font-size:13px"></p></div>
+<div class=card><h3>Signups per day <span class=muted style="font-weight:400">(30 days)</span></h3><div class=chart id=ch1></div><div class=axis><span>30 days ago</span><span>today</span></div></div></div>
+<h2>Deployments</h2><div class=k id=k2></div>
+<div class=two style="margin-top:14px"><div class=card><h3>Deploys per day <span class=muted style="font-weight:400">(30 days)</span></h3><div class="chart c2" id=ch2></div><div class=axis><span>30 days ago</span><span>today</span></div></div>
+<div class=card><h3>Apps by plan</h3><div class=pills id=byplan></div><h3 style="margin-top:18px">Apps by account tier</h3><div class=pills id=bytier></div></div></div>
+<h2>Top users by usage (this month)</h2><div class=scroll><table class=tbl id=top></table></div>
+<h2>Waitlists &amp; design partners</h2><div class=k id=k3></div><div class=scroll style="margin-top:14px"><table class=tbl id=dp></table></div>
+<h2>Infrastructure</h2><div class=k id=k4></div>
+<div class=two style="margin-top:14px"><div class=card><h3>Backups</h3><div id=bk></div></div><div class=card><h3>Certificates</h3><div class=scroll><table class=tbl id=certs></table></div></div></div>
+<h2>Recent errors &amp; failed deploys</h2><div class=two><div class=scroll><table class=tbl id=fd></table></div><div class=scroll><table class=tbl id=ae></table></div></div>
+<h2>Audit log</h2><div class=scroll><table class=tbl id=aud></table></div>
+<h2>Test accounts (excluded)</h2><p class=muted style="font-size:13px">Accounts flagged <code>is_test</code> are left out of every number above. Flag with <code>POST /v1/admin/accounts/&lt;id&gt;/test</code> or the buttons in the accounts table.</p><div class=scroll><table class=tbl id=acc></table></div>
+</div></main>
+<script>
+const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const T=t=>t?new Date(t*1000).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'—', $=id=>document.getElementById(id);
+const usd=v=>'$'+Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const H=()=>({'X-Admin-Token':sessionStorage.getItem('adm')||'','X-Aloof-CSRF':'1','Content-Type':'application/json'});
+const stat=(l,v,s)=>`<div class=stat><span>${E(l)}</span><b>${v}</b>${s?`<small>${s}</small>`:''}</div>`;
+const tbl=(id,cols,rows,empty)=>{$(id).innerHTML='<tr>'+cols.map(c=>'<th>'+E(c[0])+'</th>').join('')+'</tr>'+(rows.length?rows.map(r=>'<tr>'+cols.map(c=>'<td>'+c[1](r)+'</td>').join('')+'</tr>').join(''):`<tr><td colspan=${cols.length} class=muted>${E(empty||'Nothing yet')}</td></tr>`)};
+const chart=(id,s)=>{const m=Math.max(1,...s.map(x=>x.n));$(id).innerHTML=s.map(x=>`<i style="height:${Math.max(2,100*x.n/m)}%" data-t="${E(x.day)}: ${x.n}"></i>`).join('')};
+const pills=(id,o)=>{const e=Object.entries(o||{});$(id).innerHTML=e.length?e.sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<span><code>${E(k)}</code> ${v}</span>`).join(''):'<span class=muted>none</span>'};
+const meter=p=>`<div class=meter><b class="${p>90?'x':p>75?'w':''}" style="width:${p||0}%"></b></div>`;
+const dur=s=>{if(s==null)return'—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?`${d}d ${h}h`:`${h}h ${Math.floor(s%3600/60)}m`};
+async function load(){
+  if(!sessionStorage.getItem('adm')){$('gate').style.display='';return}
+  const r=await fetch('/v1/admin/dashboard',{headers:H(),credentials:'same-origin'});
+  if(!r.ok){sessionStorage.removeItem('adm');$('gate').style.display='';$('app').style.display='none';$('gm').textContent=r.status==401?'Wrong admin token.':'Error '+r.status;return}
+  const m=await r.json();$('gate').style.display='none';$('app').style.display='';
+  $('gen').textContent='Generated '+T(m.generated)+' · '+m.excluded_test_accounts+' test account(s) excluded';
+  const al=[...(m.backups.alerts||[])];m.certs.forEach(c=>{if(c.days_left!=null&&c.days_left<14)al.push(`certificate for ${c.host} expires in ${c.days_left} days`)});
+  if(m.server.disk_pct>85)al.push(`disk ${m.server.disk_pct}% full`);
+  $('alerts').innerHTML=al.map(a=>`<div class=alert>⚠ ${E(a)}</div>`).join('');
+  const u=m.users,t=u.by_tier,rv=m.revenue;
+  $('k1').innerHTML=stat('Total users',u.total,`+${u.new_7d} in 7 days`)+stat('Free',t.free||0)+stat('Hobby',t.hobby||0)+stat('Pro',t.pro||0)+stat('Paid customers',m.paid_customers)+stat('MRR',usd(rv.mrr_usd),rv.subscriptions+' subscription(s)')+stat('Revenue '+rv.month,usd(rv.revenue_this_month_usd),'paid Stripe sessions')+stat('Credit balances',usd(rv.credit_balance_usd),'usage this month '+usd(rv.usage_this_month_usd));
+  const g=m.gpu_unlock;$('gpu').textContent=g.enabled?'GPUs are enabled.':`${g.have} of ${g.goal} paid customers`;$('gpub').style.width=g.pct+'%';$('gpun').textContent=g.enabled?'':(g.have>=g.goal?'Unlock reached: set PAAS_GPU_ENABLED=1.':`${g.goal-g.have} to go`);
+  chart('ch1',u.signups_per_day);const d=m.deployments;chart('ch2',d.deploys_per_day);
+  $('k2').innerHTML=stat('Apps',d.apps_total)+stat('Active apps',d.apps_active,'with a running instance')+stat('Running instances',d.running_instances)+stat('Deploys (30 d)',d.deploys_30d,d.failed_30d+' failed')+stat('Postgres DBs',m.data.postgres_dbs)+stat('Volumes',m.data.volumes,m.data.volume_gb+' GB');
+  pills('byplan',d.apps_by_plan);pills('bytier',d.apps_by_tier);
+  tbl('top',[['User',r=>E(r.email)],['Tier',r=>`<span class=tag>${E(r.tier)}</span>`],['Apps',r=>r.apps],['Usage',r=>usd(r.usage_usd)]],m.top_users,'No usage this month');
+  const w=m.waitlist;$('k3').innerHTML=stat('GPU waitlist',w.gpu)+stat('Region waitlist',w.regions,Object.entries(w.by_region).map(([k,v])=>k+' '+v).join(' · ')||'—')+stat('Design partners',w.design_partners);
+  tbl('dp',[['Design partner',r=>E(r.email)],['Company',r=>E(r.company)],['What they would run',r=>E(r.note)],['When',r=>T(r.ts)]],m.design_partners,'No applications yet');
+  const s=m.server;$('k4').innerHTML=stat('CPU',(s.cpu_pct??'—')+'%',`${s.cpus} vCPU · load ${(s.load||[]).join(' / ')}`+meter(s.cpu_pct))+stat('Memory',(s.mem_pct??'—')+'%',`${s.mem_used_mb} / ${s.mem_total_mb} MB`+meter(s.mem_pct))+stat('Disk',s.disk_pct+'%',`${s.disk_used_gb} / ${s.disk_total_gb} GB`+meter(s.disk_pct))+stat('Uptime',dur(s.uptime_seconds),(s.nodes||[]).length+' remote node(s)');
+  const b=m.backups;$('bk').innerHTML=`<p>${b.enabled?'<span class="status s-running">enabled</span>':'<span class="status s-failed">disabled</span>'}</p><p class=muted style="font-size:14px">Last off-site backup: <b>${T(b.last_offsite_backup)}</b> (${b.last_offsite_age_hours??'—'} h ago)<br>Last verify: ${T(b.last_verify)} · objects: ${b.objects??0} · bucket <code>${E(b.bucket)}</code></p>`;
+  tbl('certs',[['Host',r=>E(r.host)],['Expires',r=>r.expires?T(r.expires):'<span class=bad>'+E(r.error||'?')+'</span>'],['Days left',r=>r.days_left==null?'—':`<span class="${r.days_left<14?'bad':r.days_left<30?'warn':'ok'}">${r.days_left}</span>`]],m.certs);
+  tbl('fd',[['Failed deploy',r=>`<code>${E(r.app)}</code> v${r.version}`],['Reason',r=>E(r.reason)],['When',r=>T(r.created)]],m.errors.failed_deploys,'No failed deploys');
+  tbl('ae',[['App error',r=>`<code>${E(r.app)}</code>`],['Error',r=>`<span class=muted>${E((r.error||'').slice(0,160))}</span>`],['When',r=>T(r.updated)]],[...m.errors.app_errors,...m.errors.status_failures.map(x=>({app:'status:'+x.component,error:x.error||('HTTP '+x.code),updated:x.ts}))],'No errors');
+  tbl('aud',[['When',r=>T(r.ts)],['Account',r=>E(r.email||r.account_id||'—')],['App',r=>E(r.app||'')],['Action',r=>`<code>${E(r.action)}</code>`],['Detail',r=>`<span class=muted>${E(r.detail)}</span>`]],m.audit);
+  const rows=[...m.test_accounts.map(a=>({...a,t:1})),...m.accounts.slice(0,30)];
+  tbl('acc',[['Account',r=>E(r.email)],['Created',r=>T(r.created)],['Flag',r=>r.t?'<span class=tag>is_test</span>':`<span class=tag>${E(r.tier)}</span>`],['',r=>`<button class="btn ghost sm" onclick="flag(${r.id},${r.t?'false':'true'})">${r.t?'Unflag':'Mark test'}</button>`]],rows);
+}
+async function flag(id,v){const r=await fetch(`/v1/admin/accounts/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:v})});if(r.ok)load();else alert('failed: '+r.status)}
+async function exportCsv(){const t=$('ex').value,r=await fetch('/v1/admin/export.csv?table='+t,{headers:H()});if(!r.ok)return alert('export failed: '+r.status);const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`aloof-${t}.csv`;a.click()}
+load();
+</script></body></html>

@@ -78,6 +78,13 @@ create table if not exists uploads(id TEXT primary key, account_id bigint, app T
 create table if not exists cron_runs(id AUTOPK, app TEXT, job TEXT, ts REAL, exit_code int, output TEXT);
 create index if not exists cron_runs_app on cron_runs(app, id);
 """)
+    ,(7, """
+alter table accounts add column is_admin int default 0;
+alter table accounts add column is_test int default 0;
+alter table sessions add column mfa_verified int default 0;
+create table if not exists status_checks(id AUTOPK, ts REAL, component TEXT, ok int, ms REAL, code int, error TEXT);
+create index if not exists status_checks_c on status_checks(component, ts);
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

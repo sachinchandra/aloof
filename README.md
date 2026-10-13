@@ -8,8 +8,7 @@ AI assistants can deploy for you over MCP.
 > Status: working prototype. Everything below runs end to end on a single box. Going live needs real provider keys, Stripe, SMTP and DNS (see [Go live](#go-live)).
 
 ## Regions
-Phase 1: all compute and the control plane/edge run in the **EU** on Hetzner Cloud: Germany (Falkenstein `fsn1`, Nuremberg `nbg1`) and
-Finland (Helsinki `hel1`). Expect ~10–40 ms within Europe, ~90–110 ms from US East and ~150–200 ms from India or US West. E2E Networks
+Phase 1: all compute and the control plane/edge run in the **EU** on Hetzner Cloud: Nuremberg, Germany (`nbg1`); encrypted off-site backups go to Helsinki, Finland. Other regions are listed as coming soon on /regions. Expect ~10–40 ms within Europe, ~90–110 ms from US East and ~150–200 ms from India or US West. E2E Networks
 (Delhi) stays available as an optional CPU overflow pool and is only listed when its keys are set. Other regions will only be listed once they exist.
 
 **GPUs are coming soon.** Phase 2 adds L4 / RTX 4090 (Runpod pods) and L40 / A100 80GB / H100 (Hyperstack VMs) once there are 10 paying

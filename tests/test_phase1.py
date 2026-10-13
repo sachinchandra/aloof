@@ -11,6 +11,7 @@ HZ = "https://api.hetzner.cloud/v1"
 @respx.mock
 def test_hetzner_create_firewall_location_fallback_status_destroy(monkeypatch):
     monkeypatch.setenv("HCLOUD_TOKEN", "hz"); monkeypatch.setenv("PAAS_SSH_ALLOW_CIDR", "198.51.100.7/32")
+    monkeypatch.setenv("HCLOUD_LOCATIONS", "fsn1,nbg1")   # default is nbg1 only (the one live region); fallback still works when configured
     p = P.PROVISIONERS["hetzner"]; assert p.available()[0] and p.node_size("shared-1x-1gb") == "cx43"
     respx.get(f"{HZ}/firewalls").mock(return_value=httpx.Response(200, json={"firewalls": []}))
     fw = respx.post(f"{HZ}/firewalls").mock(return_value=httpx.Response(201, json={"firewall": {"id": 7}}))

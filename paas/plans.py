@@ -74,9 +74,9 @@ TIERS = {
 for t in TIERS.values(): t["egress_gb"] = 0
 # Regions, listed honestly. Phase 1: compute and the control plane/edge run on Hetzner in the EU. E2E (India) is only a CPU
 # overflow pool and is listed only when its keys are set.
-REGIONS = {"eu-de": "Germany (Hetzner Falkenstein / Nuremberg)", "eu-fi": "Finland (Hetzner Helsinki)"}
+REGIONS = {"eu-de": "Nuremberg, Germany (Hetzner nbg1)"}   # live compute only; off-site backups in Helsinki, FI. See /regions
 if E("E2E_API_KEY", ""): REGIONS["in-del"] = "Delhi NCR, India (E2E overflow)"
-REGION_NOTE = ("Phase 1: all compute runs in the EU on Hetzner Cloud (Germany and Finland), next to the edge. Typical RTT: ~10-40 ms within "
+REGION_NOTE = ("All compute runs in Nuremberg, Germany (Hetzner), next to the edge; encrypted off-site backups are stored in Helsinki, Finland. Typical RTT: ~10-40 ms within "
                "Europe, ~90-110 ms from US East, ~150-200 ms from India/US West." + (" When EU capacity is short, CPU apps may overflow to E2E Networks in Delhi, India." if "in-del" in REGIONS else ""))
 # ---------------- margin floor ----------------
 MIN_MARGIN = float(E("PAAS_MIN_MARGIN", "0.30"))

@@ -81,14 +81,24 @@ def plans(legacy: bool = False):
     gpu = _plans.gpu_status() | ({} if _plans.GPU_ENABLED else {"coming_soon": [{"id": k, "gpu": v["gpu"]} for k, v in PLANS.items() if v["kind"] == "gpu"]})
     return {"currency": "USD", "tax": "excluded; VAT/GST/sales tax added at checkout where applicable", "billing": "per second while running; volumes per provisioned GB-month; egress per GB (counts toward included usage)",
             "plans": out, "gpu": gpu, "rates": RATES, "tiers": TIERS, "regions": REGIONS, "region_note": REGION_NOTE}
-class WaitlistReq(BaseModel): email: str; gpu: str | None = None; note: str | None = None
+class WaitlistReq(BaseModel): email: str; gpu: str | None = None; note: str | None = None; kind: str = "gpu"; region: str | None = None; company: str | None = None
 @app.post("/v1/waitlist")
 def waitlist(w: WaitlistReq):
-    """GPU waitlist (phase 2). Idempotent per email."""
+    """Waitlists: kind=gpu (phase 2 GPUs), kind=region (a coming-soon region), kind=design_partner. Idempotent per email (and region)."""
     try: e = auth._check_email(w.email)
     except ValueError as x: raise HTTPException(400, str(x))
-    if w.gpu and (w.gpu not in PLANS or PLANS[w.gpu]["kind"] != "gpu"): raise HTTPException(400, "gpu must be a GPU plan id")
     from .db import kv_put
+    from .www_content import SOON_REGIONS
+    if w.kind == "region":
+        codes = {c: l for c, l, _, _ in SOON_REGIONS}
+        if w.region not in codes: raise HTTPException(400, f"region must be one of {list(codes)}")
+        kv_put("region_waitlist", f"{e}|{w.region}", json.dumps({"region": w.region, "ts": time.time()}))
+        return {"ok": True, "message": f"You're on the waitlist for {codes[w.region]}. We'll email you once, when it's live."}
+    if w.kind == "design_partner":
+        kv_put("design_partner", e, json.dumps({"company": (w.company or "")[:200], "note": (w.note or "")[:1000], "ts": time.time()}))
+        return {"ok": True, "message": "Thanks. We read every application and will reply by email."}
+    if w.kind != "gpu": raise HTTPException(400, "kind must be gpu, region or design_partner")
+    if w.gpu and (w.gpu not in PLANS or PLANS[w.gpu]["kind"] != "gpu"): raise HTTPException(400, "gpu must be a GPU plan id")
     kv_put("gpu_waitlist", e, json.dumps({"gpu": w.gpu, "note": (w.note or "")[:500], "ts": time.time()}))
     return {"ok": True, "message": "You're on the GPU waitlist. We'll email you when GPUs launch."}
 @app.get("/v1/providers")
@@ -403,16 +413,17 @@ def paid_customers():
       select account_id as id from stripe_sessions where status='paid'
       union select id from accounts where stripe_subscription is not null and stripe_subscription != ''
       union select account_id as id from payments where status='paid') t""", one=True)["c"]
-@app.get("/v1/admin/metrics", dependencies=[Depends(admin)])
+from . import www
+@app.get("/v1/admin/metrics", dependencies=[Depends(www.require_admin)])
 def admin_metrics():
-    n = paid_customers(); goal = _plans.GPU_UNLOCK_PAID_CUSTOMERS
-    from . import offsite
-    return {"backups": offsite.status(), "paid_customers": n, "accounts": q("select count(*) as c from accounts", one=True)["c"],
-            "gpu_waitlist": q("select count(*) as c from kv where kind='gpu_waitlist'", one=True)["c"],
-            "gpu_enabled": _plans.GPU_ENABLED, "gpu_unlock_at_paid_customers": goal,
+    """Owner metrics (test accounts excluded). Legacy top-level keys kept; full dashboard data under "dashboard"."""
+    m = www.metrics(); n = m["paid_customers"]; goal = _plans.GPU_UNLOCK_PAID_CUSTOMERS
+    return {"backups": m["backups"], "paid_customers": n, "accounts": m["users"]["total"],
+            "gpu_waitlist": m["waitlist"]["gpu"], "gpu_enabled": _plans.GPU_ENABLED, "gpu_unlock_at_paid_customers": goal,
             "note": "GPUs enabled (phase 2)." if _plans.GPU_ENABLED else
                     (f"Phase 1 (CPU only). GPU unlocks at {goal} paid customers: {max(0, goal - n)} to go." if n < goal else
-                     f"{n} paid customers: GPU unlock reached. Set PAAS_GPU_ENABLED=1 plus HYPERSTACK_API_KEY / RUNPOD_API_KEY.")}
+                     f"{n} paid customers: GPU unlock reached. Set PAAS_GPU_ENABLED=1 plus HYPERSTACK_API_KEY / RUNPOD_API_KEY."),
+            "dashboard": m}
 @app.delete("/v1/admin/nodes/{node_id}", dependencies=[Depends(admin)])
 def admin_drop_node(node_id: str): remote.destroy_node(node_id, "admin"); return {"ok": True}
 @app.get("/healthz")
@@ -434,24 +445,22 @@ def mcp_manifest():
 def config(): return {"brand": BRAND, "base_domain": BASE_DOMAIN, "api": PUBLIC_API_URL, "mcp": PUBLIC_MCP_URL, "app_url_pattern": f"https://<app>.{URL_DOMAIN}/", "app_domains": APP_DOMAINS}
 from . import site
 @app.get("/", response_class=HTMLResponse)
-def landing(): return site.landing(BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
+def landing(): return www.at("/", "default", site.landing, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
 @app.get("/pricing", response_class=HTMLResponse)
-def pricing_page(): return site.pricing(BRAND)
+def pricing_page(): return www.at("/pricing", "default", site.pricing, BRAND)
 @app.get("/docs", response_class=HTMLResponse)
 @app.get("/docs/{page}", response_class=HTMLResponse)
 def docs_page(page: str = "quickstart"):
-    h = site.docs(page, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
+    h = www.at("/docs" if page == "quickstart" else f"/docs/{page}", "default", site.docs, page, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
     if h is None: raise HTTPException(404, "no such docs page")
     return h
 @app.get("/login", response_class=HTMLResponse)
-def login_page(): return site.login(BRAND)
+def login_page(): return www.at("/login", "default", site.login, BRAND)
 @app.get("/static/aloof.css", include_in_schema=False)
 def static_css(): return FileResponse(os.path.join(ROOT, "paas", "static", "aloof.css"), media_type="text/css", headers={"Cache-Control": "public, max-age=3600"})
-@app.get("/security", response_class=HTMLResponse)
 @app.get("/privacy", response_class=HTMLResponse)
 @app.get("/terms", response_class=HTMLResponse)
-@app.get("/status", response_class=HTMLResponse)
-def legal_page(request: Request): return site.legal(request.url.path.strip("/"), BRAND)
+def legal_page(request: Request): return www.at(request.url.path, "default", site.legal, request.url.path.strip("/"), BRAND)
 @app.get("/dashboard", response_class=HTMLResponse)
 def dash(): return open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND)
 
@@ -653,6 +662,7 @@ def admin_backups_run(verify: bool=False):
     return r
 from . import devx
 app.include_router(devx.R)
+app.include_router(www.R)
 # ---------------- edge proxy (port 8080): <app>.BASE_DOMAIN or /_app/<app>/ ----------------
 proxy = FastAPI(); _rr = {}; client = httpx.AsyncClient(timeout=60)
 EGRESS = billing.EGRESS   # app -> bytes sent to clients since last meter tick

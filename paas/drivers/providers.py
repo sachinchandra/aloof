@@ -204,15 +204,15 @@ class HetznerProvisioner(Provisioner):
     Nodes get a firewall that allows nothing inbound except ICMP (+ SSH from PAAS_SSH_ALLOW_CIDR): the agent is only reached
     over WireGuard, which the node dials out to the hub."""
     name = "hetzner"; supports_gpu = False; env = ["HCLOUD_TOKEN"]
-    regions = ["eu-de", "eu-fi"]
-    LOCATIONS = {"eu-de": ["fsn1", "nbg1"], "eu-fi": ["hel1"]}
+    regions = ["eu-de"]   # only Nuremberg is live; see /regions
+    LOCATIONS = {"eu-de": ["nbg1"]}
     docs = "https://docs.hetzner.cloud/reference/cloud#servers-create-a-server"
     DEFAULT_SIZES = {"cpu-node": "cx43"}
     base = property(lambda s: E("HCLOUD_API_BASE", "https://api.hetzner.cloud/v1"))
     def _h(self): return {"Authorization": f"Bearer {E('HCLOUD_TOKEN')}", "Content-Type": "application/json"}
     def locations(self, region=None):
         if E("HCLOUD_LOCATIONS"): return E("HCLOUD_LOCATIONS").split(",")
-        return self.LOCATIONS.get(region) or ["fsn1", "nbg1", "hel1"]
+        return self.LOCATIONS.get(region) or ["nbg1"]
     def firewall(self, c, name="aloof-node", rules=None):
         """Find or create the node firewall (idempotent by name)."""
         d = _raise(c.get(f"{self.base}/firewalls", params={"name": name}, headers=self._h()), "hetzner firewalls")
