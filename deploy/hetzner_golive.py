@@ -83,7 +83,8 @@ class Hetzner:
             time.sleep(sleep)
         raise RuntimeError("server did not reach running")
 def fill_env(text, ip):
-    return text.replace("<edge server public IPv4>", ip).replace("<edge public IPv4>", ip)
+    return (text.replace("<edge server public IPv4>", ip).replace("<edge public IPv4>", ip)
+            .replace("__EDGE_IP_DASHED__", ip.replace(".", "-")).replace("__EDGE_IP__", ip))
 def dns_records(env, ip, ipv6=None):
     d = env.get("PAAS_BASE_DOMAIN", "aloof.si"); recs = []
     for host in (d, f"www.{d}", env.get("PAAS_API_HOST", f"api.{d}"), env.get("PAAS_MCP_HOST", f"mcp.{d}"), f"*.{d}"):
@@ -118,7 +119,7 @@ def main(argv=None, client=None, run=subprocess.run, sleep=10):
         body = fill_env(open(a.env).read(), ip)
         p = run(ssh + ["umask 077 && cat > /workspace/paas/deploy/golive.env"], input=body.encode(), capture_output=True)
         if p.returncode: sys.exit(f"copy failed: {p.stderr[-300:]}")
-        p = run(ssh + ["cd /workspace/paas && git pull -q --ff-only && bash deploy/golive.sh"], capture_output=True)
+        p = run(ssh + ["cd /workspace/paas && git checkout -q -- deploy/supervisord.conf && git pull -q --ff-only && bash deploy/golive.sh"], capture_output=True)
         if p.returncode: sys.exit(f"golive.sh failed: {(p.stdout + p.stderr)[-500:]}")
     print("5/5 create these DNS records at your registrar (TTL 300):")
     for t, host, val in dns_records(env, ip, ip6): print(f"   {t:5} {host:28} {val}")

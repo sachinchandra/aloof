@@ -13,6 +13,10 @@ from .drivers.providers import PROVISIONERS
 BRAND = os.environ.get("PAAS_BRAND", "Aloof")
 BASE_DOMAIN = os.environ.get("PAAS_BASE_DOMAIN", "localhost")
 PUBLIC_PROXY = os.environ.get("PAAS_PROXY_URL", "http://localhost:8080")
+# Extra app domains served alongside BASE_DOMAIN (e.g. <ip>.sslip.io before DNS exists); URL_DOMAIN is the one shown in app URLs.
+ALT_DOMAINS = [d.strip().lower() for d in os.environ.get("PAAS_ALT_DOMAINS", "").split(",") if d.strip()]
+APP_DOMAINS = [BASE_DOMAIN] + [d for d in ALT_DOMAINS if d != BASE_DOMAIN]
+URL_DOMAIN = os.environ.get("PAAS_URL_DOMAIN") or BASE_DOMAIN
 # Public hostnames. Go-live: PAAS_BASE_DOMAIN=aloof.si -> <app>.aloof.si, api.aloof.si, mcp.aloof.si
 API_HOST = os.environ.get("PAAS_API_HOST", f"api.{BASE_DOMAIN}"); MCP_HOST = os.environ.get("PAAS_MCP_HOST", f"mcp.{BASE_DOMAIN}")
 PUBLIC_API_URL = os.environ.get("PAAS_PUBLIC_API_URL", f"https://{API_HOST}"); PUBLIC_MCP_URL = os.environ.get("PAAS_PUBLIC_MCP_URL", f"https://{MCP_HOST}/mcp")
@@ -35,7 +39,7 @@ def own(name, a):
     ap = engine.get_app(name)
     if not ap or ap["account_id"] != a["id"] or ap["status"]=="destroyed": raise HTTPException(404, "app not found")
     return ap
-def with_url(ap): ap["url"] = f"https://{ap['name']}.{BASE_DOMAIN}/"; ap["http_url"] = f"http://{ap['name']}.{BASE_DOMAIN}:8080/"; ap["path_url"] = f"{PUBLIC_PROXY}/_app/{ap['name']}/"; return ap
+def with_url(ap): ap["url"] = f"https://{ap['name']}.{URL_DOMAIN}/"; ap["http_url"] = f"http://{ap['name']}.{URL_DOMAIN}:8080/"; ap["path_url"] = f"{PUBLIC_PROXY}/_app/{ap['name']}/"; return ap
 class Signup(BaseModel): email: str
 class Source(BaseModel): image: str|None=None; git: str|None=None; ref: str|None=None; subdir: str|None=None; path: str|None=None
 class DeployReq(BaseModel):
@@ -164,13 +168,16 @@ def verify_domain(name: str, domain: str, a=Depends(acct)):
 def list_domains(name: str, a=Depends(acct)): own(name, a); return [_domain_view(d) for d in q("select * from domains where app=?", (name,))]
 @app.delete("/v1/apps/{name}/domains/{domain}")
 def del_domain(name: str, domain: str, a=Depends(acct)): own(name, a); q("delete from domains where domain=? and app=?", (domain, name)); return {"ok": True}
-SYSTEM_HOSTS = {API_HOST, MCP_HOST, BASE_DOMAIN, f"www.{BASE_DOMAIN}"}
+SYSTEM_HOSTS = {API_HOST, MCP_HOST} | {h for d in APP_DOMAINS for h in (d, f"www.{d}", f"api.{d}", f"mcp.{d}")}
+def _app_of(host):
+    for d in APP_DOMAINS:
+        if host.endswith("." + d) and host not in SYSTEM_HOSTS and "." not in host[:-len(d)-1]: return host[:-len(d)-1]
 @app.get("/v1/tls/ask")
 def tls_ask(domain: str):
     """Caddy on_demand_tls gate: only issue certs for our hosts, live app subdomains and verified custom domains."""
     d = domain.lower()
     if d in SYSTEM_HOSTS: return {"ok": True}
-    if d.endswith("." + BASE_DOMAIN) and q("select 1 from apps where name=? and status!='destroyed'", (d[:-len(BASE_DOMAIN)-1],), one=True): return {"ok": True}
+    if _app_of(d) and q("select 1 from apps where name=? and status!='destroyed'", (_app_of(d),), one=True): return {"ok": True}
     if q("select 1 from domains where domain=? and verified=1", (d,), one=True): return {"ok": True}
     raise HTTPException(403, "unknown domain")
 def _wallet(a): return {"credit_cents": round(a.get("credit_cents") or 0, 4), "credit_usd": billing.usd(a.get("credit_cents"))}
@@ -380,7 +387,7 @@ def _llms_gpu():
     return ("GPUs: COMING SOON (phase 2: " + ", ".join(k for k, v in PLANS.items() if v["kind"] == "gpu") + "). Not deployable yet; "
             "join the waitlist: POST {{API}}/v1/waitlist {\"email\":\"...\",\"gpu\":\"gpu-h100\"}")
 @app.get("/llms.txt", response_class=PlainTextResponse)
-def llms(): return open(os.path.join(ROOT,"llms.txt")).read().replace("{{GPU}}", _llms_gpu()).replace("{{API}}", PUBLIC_API_URL).replace("{{MCP}}", PUBLIC_MCP_URL).replace("{{DOMAIN}}", BASE_DOMAIN).replace("{{BRAND}}", BRAND)
+def llms(): return open(os.path.join(ROOT,"llms.txt")).read().replace("{{GPU}}", _llms_gpu()).replace("{{API}}", PUBLIC_API_URL).replace("{{MCP}}", PUBLIC_MCP_URL).replace("{{DOMAIN}}", URL_DOMAIN).replace("{{BRAND}}", BRAND)
 @app.get("/.well-known/mcp.json")
 def mcp_manifest():
     m = json.load(open(os.path.join(ROOT,"mcp_server","manifest.json")))
@@ -388,16 +395,16 @@ def mcp_manifest():
     m["auth"]["oauth_protected_resource"] = PUBLIC_MCP_URL.rsplit("/mcp",1)[0] + "/.well-known/oauth-protected-resource/mcp"
     return m
 @app.get("/v1/config")
-def config(): return {"brand": BRAND, "base_domain": BASE_DOMAIN, "api": PUBLIC_API_URL, "mcp": PUBLIC_MCP_URL, "app_url_pattern": f"https://<app>.{BASE_DOMAIN}/"}
+def config(): return {"brand": BRAND, "base_domain": BASE_DOMAIN, "api": PUBLIC_API_URL, "mcp": PUBLIC_MCP_URL, "app_url_pattern": f"https://<app>.{URL_DOMAIN}/", "app_domains": APP_DOMAINS}
 from . import site
 @app.get("/", response_class=HTMLResponse)
-def landing(): return site.landing(BRAND, BASE_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
+def landing(): return site.landing(BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing_page(): return site.pricing(BRAND)
 @app.get("/docs", response_class=HTMLResponse)
 @app.get("/docs/{page}", response_class=HTMLResponse)
 def docs_page(page: str = "quickstart"):
-    h = site.docs(page, BRAND, BASE_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
+    h = site.docs(page, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
     if h is None: raise HTTPException(404, "no such docs page")
     return h
 @app.get("/login", response_class=HTMLResponse)
@@ -410,7 +417,7 @@ proxy = FastAPI(); _rr = {}; client = httpx.AsyncClient(timeout=60)
 EGRESS = billing.EGRESS   # app -> bytes sent to clients since last meter tick
 HOP = {"connection","keep-alive","transfer-encoding","te","trailer","upgrade","proxy-authorization","proxy-authenticate","host","content-length"}
 def resolve_app(host, path):
-    if host.endswith("." + BASE_DOMAIN) and host not in SYSTEM_HOSTS: return host[:-len(BASE_DOMAIN)-1], path
+    if _app_of(host): return _app_of(host), path
     d = q("select app from domains where domain=? and verified=1", (host,), one=True)
     if d: return d["app"], path
     if path.startswith("_app/"):
@@ -419,7 +426,7 @@ def resolve_app(host, path):
 @proxy.api_route("/{path:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS","HEAD"])
 async def edge(path: str, request: Request):
     host = request.headers.get("host","").split(":")[0].lower(); name, path = resolve_app(host, path)
-    if not name: return PlainTextResponse(f"{BRAND} edge: use https://<app>.{BASE_DOMAIN}/, a verified custom domain, or /_app/<app>/", 404)
+    if not name: return PlainTextResponse(f"{BRAND} edge: use https://<app>.{URL_DOMAIN}/, a verified custom domain, or /_app/<app>/", 404)
     insts = q("select host,port from instances where app=? and status='running'", (name,))
     if not insts:
         ap = q("select spec,status from apps where name=?", (name,), one=True)
