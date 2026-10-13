@@ -20,7 +20,7 @@ with sync_playwright() as p:
     pg.click("text=Manage >> nth=0"); pg.wait_for_selector("#detail h3"); pg.wait_for_timeout(1500)
     print("detail:", pg.inner_text("#detail h3")[:40].replace("\n", " ")); pg.screenshot(path="/workspace/paas/data/ui-app.png", full_page=True)
     for t in ("volumes", "billing", "account"):
-        pg.click(f"header a[data-t={t}]"); pg.wait_for_timeout(1200); pg.screenshot(path=f"/workspace/paas/data/ui-{t}.png", full_page=True)
+        pg.click(f"a.nav[data-t={t}]"); pg.wait_for_timeout(1200); pg.screenshot(path=f"/workspace/paas/data/ui-{t}.png", full_page=True)
     print("balance:", pg.inner_text("#bal"), "|", pg.inner_text("#paynote"))
     bal = pg.text_content("#bal"); print("balance shown:", bal); assert bal.startswith("$") or bal.startswith("−$"), bal
     br.close()

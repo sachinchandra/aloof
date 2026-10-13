@@ -1,38 +1,41 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name=viewport content="width=device-width,initial-scale=1"><title>{{BRAND}} dashboard</title>
-<style>*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;color:#1d1d1f;background:#f7f7f6}
-header{display:flex;gap:18px;align-items:center;padding:12px 24px;background:#fff;border-bottom:1px solid #e8e8e8}header b{font-size:18px}
-header a{color:#444;text-decoration:none;padding:6px 10px;border-radius:6px;cursor:pointer}header a.on{background:#111;color:#fff}.sp{flex:1}
-main{max-width:1180px;margin:20px auto;padding:0 20px}.card{background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:16px;margin-bottom:16px}
-h3{margin:0 0 10px}table{width:100%;border-collapse:collapse}td,th{padding:7px;border-bottom:1px solid #eee;text-align:left;font-size:14px;vertical-align:top}
-input,select{padding:7px;border:1px solid #ccc;border-radius:6px;margin:2px;font-size:14px}button{padding:7px 12px;border:1px solid #bbb;background:#fff;border-radius:6px;cursor:pointer;margin:2px}
-button.p{background:#111;color:#fff;border-color:#111}pre{background:#111;color:#cfc;padding:10px;border-radius:8px;max-height:320px;overflow:auto;font-size:12px;white-space:pre-wrap}
-.s-running{color:#080}.s-failed,.s-suspended{color:#c00}.s-idle{color:#888}.muted{color:#777;font-size:13px}.ok{color:#080}.bad{color:#c00}code{background:#f0f0ef;padding:1px 4px;border-radius:4px}
-.row{display:flex;gap:16px;flex-wrap:wrap}.row>.card{flex:1;min-width:300px}#toast{position:fixed;bottom:20px;right:20px;background:#111;color:#fff;padding:10px 16px;border-radius:8px;display:none}</style>
-</head><body>
-<header><b>{{BRAND}}</b><a data-t=apps class=on>Apps</a><a data-t=volumes>Volumes</a><a data-t=billing>Billing &amp; usage</a><a data-t=account>Account</a><span class=sp></span><span id=who class=muted></span><a onclick="logout()">Log out</a></header>
-<main>
+<!doctype html><html lang=en><head><meta charset="utf-8"><meta name=viewport content="width=device-width,initial-scale=1"><title>{{BRAND}} dashboard</title>
+<link rel=icon href="/favicon.ico"><link rel=stylesheet href="/static/aloof.css?v=5">
+<script>(function(){var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t})();function toggleTheme(){var d=document.documentElement,c=d.dataset.theme||'dark',n=c=='dark'?'light':'dark';d.dataset.theme=n;localStorage.setItem('theme',n)}</script></head><body>
+<div class=app><aside class=side aria-label="Dashboard navigation"><a class=logo href="/"><i></i>{{BRAND}}</a>
+<a class="nav on" data-t=apps href="#" aria-current=page><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><rect x=3 y=3 width=7 height=7 rx=1.5 /><rect x=14 y=3 width=7 height=7 rx=1.5 /><rect x=3 y=14 width=7 height=7 rx=1.5 /><rect x=14 y=14 width=7 height=7 rx=1.5 /></svg>Apps</a>
+<a class=nav data-t=volumes href="#"><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><ellipse cx=12 cy=6 rx=8 ry=3 /><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/></svg>Volumes</a>
+<a class=nav data-t=billing href="#"><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><rect x=2 y=5 width=20 height=14 rx=2 /><path d="M2 10h20"/></svg>Billing &amp; usage</a>
+<a class=nav data-t=account href="#"><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><circle cx=12 cy=8 r=4 /><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Account</a>
+<a class=nav href="/docs" target=_blank><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.8 aria-hidden=true><path d="M4 4h10a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4V4Z"/></svg>Docs ↗</a>
+<div class=who><div id=who></div><p style="display:flex;gap:8px;margin:10px 0 0"><button class="btn ghost sm" onclick="toggleTheme()">Theme</button><button class="btn ghost sm" onclick="logout()">Log out</button></p></div></aside>
+<div class=mainx><div class=bar2><h2 id=ptitle>Apps</h2><span class=sp></span><button class="btn pri sm" onclick="document.querySelector('[data-t=apps]').click();$('deploybox').open=true;$('d_name').focus()">+ New app</button></div>
+<div class=content>
 <section id=t-apps>
- <div class=card><h3>Deploy</h3><input id=d_name placeholder="app-name" size=14> <input id=d_image placeholder="image, e.g. nginx:alpine" size=24> or <input id=d_git placeholder="git URL with Dockerfile" size=26>
-  <select id=d_plan></select> port <input id=d_port value=8080 size=5> <input id=d_env placeholder="K=V,K2=V2" size=16> <button class=p onclick="deploy()">Deploy</button></div>
- <div class=card><h3>Apps</h3><table id=apps></table></div>
- <div class=card id=detail style="display:none"></div>
+ <div class=stats><div class=stat><span>Apps</span><b id=stat_apps>–</b></div><div class=stat><span>Running</span><b id=stat_run>–</b></div><div class=stat><span>Instances</span><b id=stat_inst>–</b></div><div class=stat><span>Region</span><b style="font-size:18px">EU · Hetzner</b></div></div>
+ <details class=pnl id=deploybox><summary style="cursor:pointer;font-weight:650">Deploy a new app</summary>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:14px">
+  <label>Name<input id=d_name placeholder="my-api"></label><label>Image<input id=d_image placeholder="nginx:alpine"></label><label>or Git URL (Dockerfile)<input id=d_git placeholder="https://github.com/me/api.git"></label>
+  <label>Plan<select id=d_plan></select></label><label>Port<input id=d_port value=8080></label><label>Env (K=V,K2=V2)<input id=d_env placeholder="KEY=value"></label></div>
+  <p style="margin:14px 0 0"><button class="btn pri" onclick="deploy()">Deploy</button></p></details>
+ <div class=pnl><h3>Apps</h3><div class=scroll><table class=tbl id=apps></table></div><div class=empty id=apps_empty style="display:none"><b>No apps yet</b>Deploy an image or a git repo above, or run <code>aloof deploy</code>.</div></div>
+ <div id=detail style="display:none"></div>
 </section>
-<section id=t-volumes style="display:none"><div class=card><h3>Volumes</h3><input id=v_name placeholder="volume-name"> <input id=v_size value=1 size=3> GB <button class=p onclick="mkvol()">Create</button>
- <table id=vols></table></div></section>
-<section id=t-billing style="display:none"><div class=row>
- <div class=card><h3>Balance</h3><div style="font-size:32px;font-weight:700" id=bal></div><p class=muted>Prepaid USD credit. Usage is billed per second. Tax (VAT/GST/sales tax) is added at checkout where it applies.</p>
-  $ <input id=amt value=25 size=7> <button class=p onclick="topup()">Top up with Stripe</button> <button onclick="portal()">Billing portal</button> <span id=paynote class=muted></span></div>
- <div class=card><h3>Plan</h3><div id=tierinfo class=muted></div><select id=tiersel></select> <button class=p onclick="subscribe()">Subscribe (Stripe)</button> <button onclick="setTier()">Pay from wallet</button>
- <table id=month style="margin-top:8px"></table></div>
- <div class=card><h3>Billing profile</h3><input id=b_name placeholder="Legal / billing name" size=28><br><input id=b_country placeholder="Country (ISO, e.g. US)" size=12> <input id=b_tax placeholder="VAT / GST / tax ID (optional)" size=22><br><button onclick="saveProfile()">Save</button></div></div>
- <div class=card><h3>Usage</h3><table id=usage></table></div>
- <div class=row><div class=card><h3>Invoices</h3><table id=invoices></table></div><div class=card><h3>Payments</h3><table id=payments></table></div></div>
- <div class=card><h3>Ledger</h3><table id=ledger></table></div></section>
-<section id=t-account style="display:none"><div class=card><h3>Account</h3><div id=acct></div>
- <p><button onclick="rotate()">Rotate API key</button> <span class=muted>Use it for the CLI and MCP. It's shown only once.</span></p><pre id=newkey style="display:none"></pre>
- <p>Set password <input id=newpw type=password placeholder="min 10 chars"> <button onclick="setpw()">Save</button></p>
- <p class=muted>CLI: <code>~/.aloof.json</code> = <code>{"api": "<span class=origin></span>", "key": "pk_..."}</code> · MCP: <a href="/docs/mcp">connect an assistant</a></p></div></section>
-</main><div id=toast></div>
+<section id=t-volumes style="display:none"><div class=pnl><h3>Volumes</h3><div class=inline><input id=v_name placeholder="volume-name" aria-label="Volume name"> <input id=v_size value=1 type=number aria-label="Size GB" style="max-width:110px"> GB <button class="btn pri sm" onclick="mkvol()">Create</button></div>
+ <div class=scroll style="margin-top:14px"><table class=tbl id=vols></table></div></div></section>
+<section id=t-billing style="display:none"><div class="grid g3">
+ <div class=pnl><h3>Balance</h3><div style="font-weight:750;letter-spacing:-.02em" id=bal></div><p class=muted style="font-size:13px">Prepaid USD credit, billed per second. Tax is added at checkout where it applies.</p>
+  <div class=inline><span>$</span><input id=amt value=25 aria-label="Top-up amount" style="max-width:110px"> <button class="btn pri sm" onclick="topup()">Top up</button> <button class="btn ghost sm" onclick="portal()">Billing portal</button></div><p id=paynote class=muted style="font-size:13px"></p></div>
+ <div class=pnl><h3>Plan</h3><div id=tierinfo class=muted style="font-size:13px;margin-bottom:8px"></div><select id=tiersel aria-label=Tier></select><p class=inline style="margin-top:10px"><button class="btn pri sm" onclick="subscribe()">Subscribe (Stripe)</button> <button class="btn ghost sm" onclick="setTier()">Pay from wallet</button></p>
+  <table class=tbl id=month style="margin-top:8px"></table></div>
+ <div class=pnl><h3>Billing profile</h3><label>Legal / billing name<input id=b_name></label><label>Country (ISO)<input id=b_country placeholder="US"></label><label>VAT / GST / tax ID<input id=b_tax placeholder="optional"></label><p><button class="btn ghost sm" onclick="saveProfile()">Save</button></p></div></div>
+ <div class=pnl><h3>Usage</h3><div class=scroll><table class=tbl id=usage></table></div></div>
+ <div class="grid g2"><div class=pnl><h3>Invoices</h3><div class=scroll><table class=tbl id=invoices></table></div></div><div class=pnl><h3>Payments</h3><div class=scroll><table class=tbl id=payments></table></div></div></div>
+ <div class=pnl><h3>Ledger</h3><div class=scroll><table class=tbl id=ledger></table></div></div></section>
+<section id=t-account style="display:none"><div class=pnl><h3>Account</h3><div id=acct></div>
+ <p><button class="btn ghost sm" onclick="rotate()">Rotate API key</button> <span class=muted style="font-size:13px">Use it for the CLI and MCP. It's shown only once.</span></p><pre id=newkey style="display:none"></pre>
+ <div class=inline style="max-width:520px"><input id=newpw type=password placeholder="New password (min 10 chars)" aria-label="New password"> <button class="btn ghost sm" onclick="setpw()">Save password</button></div>
+ <p class=muted style="font-size:13px;margin-top:16px">CLI: <code>~/.aloof.json</code> = <code>{"api": "<span class=origin></span>", "key": "pk_..."}</code> · MCP: <a href="/docs/mcp">connect an assistant</a></p></div></section>
+</div></div></div><div id=toast role=status aria-live=polite></div>
 <script>
 const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 document.querySelectorAll('.origin').forEach(e=>e.textContent=location.origin);
@@ -41,31 +44,51 @@ async function api(m,p,b){const r=await fetch(p,{method:m,credentials:'same-orig
  if(r.status==401){location='/login';return new Promise(()=>{})} const t=await r.text(); let j; try{j=JSON.parse(t)}catch{j=t}
  if(!r.ok){toast(typeof j=='object'?(typeof j.detail=='string'?j.detail:JSON.stringify(j.detail)):t);throw j} return j}
 let tab='apps', open=null;
-document.querySelectorAll('header a[data-t]').forEach(a=>a.onclick=()=>{tab=a.dataset.t;document.querySelectorAll('header a[data-t]').forEach(x=>x.classList.toggle('on',x==a));
- document.querySelectorAll('main>section').forEach(s=>s.style.display=s.id=='t-'+tab?'':'none');refresh()});
+const TITLE={apps:'Apps',volumes:'Volumes',billing:'Billing & usage',account:'Account'};
+document.querySelectorAll('a.nav[data-t]').forEach(a=>a.onclick=e=>{e.preventDefault();tab=a.dataset.t;document.querySelectorAll('a.nav[data-t]').forEach(x=>{x.classList.toggle('on',x==a);x.toggleAttribute('aria-current',x==a)});
+ document.querySelectorAll('.content>section').forEach(s=>s.style.display=s.id=='t-'+tab?'':'none');$('ptitle').textContent=TITLE[tab];refresh()});
 async function refresh(){if(tab=='apps')await apps();if(tab=='volumes')await vols();if(tab=='billing')await bill();if(tab=='account')await account()}
 async function apps(){const a=await api('GET','/v1/apps');
+ $('stat_apps').textContent=a.length;$('stat_run').textContent=a.filter(x=>x.status=='running').length;$('stat_inst').textContent=a.reduce((n,x)=>n+x.instances.length,0);
+ $('apps_empty').style.display=a.length?'none':'';
  $('apps').innerHTML='<tr><th>App</th><th>Status</th><th>Plan</th><th>Where</th><th>Inst.</th><th>URL</th><th></th></tr>'+a.map(x=>`<tr><td><a href="#" onclick="show('${x.name}');return false"><b>${esc(x.name)}</b></a></td>
- <td class="s-${x.status}">${esc(x.status)} <span class=muted>${esc(x.error||'')}</span></td><td>${x.plan.id}</td><td>${esc(x.provider)}</td><td>${x.instances.length}${x.spec.autoscale?` <span class=muted>(${x.spec.autoscale.min}–${x.spec.autoscale.max})</span>`:''}</td>
- <td><a href="${x.url}" target=_blank>${esc(x.url)}</a>${(x.domains||[]).map(d=>`<br><a href="https://${esc(d)}/" target=_blank>${esc(d)}</a>`).join('')}</td><td><button onclick="show('${x.name}')">Manage</button></td></tr>`).join('');
+ <td><span class="status s-${x.status}">${esc(x.status)}</span> <span class=muted>${esc(x.error||'')}</span></td><td>${x.plan.id}</td><td>${esc(x.provider)}</td><td>${x.instances.length}${x.spec.autoscale?` <span class=muted>(${x.spec.autoscale.min}–${x.spec.autoscale.max})</span>`:''}</td>
+ <td><a href="${x.url}" target=_blank>${esc(x.url)}</a>${(x.domains||[]).map(d=>`<br><a href="https://${esc(d)}/" target=_blank>${esc(d)}</a>`).join('')}</td><td><button class="btn ghost sm" onclick="show('${x.name}')">Manage</button></td></tr>`).join('');
  if(open)show(open,true)}
-async function show(n,quiet){open=n;const a=await api('GET','/v1/apps/'+n), d=await api('GET','/v1/apps/'+n+'/domains'), v=await api('GET','/v1/volumes'), s=a.spec.autoscale||{}, h=a.spec.health||{};
+let dtab='overview', MS=[];
+async function show(n,quiet){if(open!=n)MS=[];open=n;const a=await api('GET','/v1/apps/'+n), d=await api('GET','/v1/apps/'+n+'/domains'), v=await api('GET','/v1/volumes'), s=a.spec.autoscale||{}, h=a.spec.health||{};
  const D=$('detail');D.style.display='';if(quiet&&D.dataset.app==n&&D.contains(document.activeElement))return;D.dataset.app=n;
- D.innerHTML=`<h3>${esc(n)} <span class="s-${a.status}">${a.status}</span> <button onclick="destroy('${n}')" style="float:right">Destroy</button></h3>
- <div class=row><div class=card><b>Scale</b><br>instances <input id=sc value=${a.instances.length} size=3> <button onclick="scale()">Apply</button>
-  <hr><b>Autoscale</b> ${a.spec.autoscale?'<span class=ok>on</span>':'<span class=muted>off</span>'}<br>min <input id=as_min value=${s.min??0} size=2> max <input id=as_max value=${s.max??3} size=2>
-  conc. <input id=as_c value=${s.target_concurrency??10} size=3> cpu% <input id=as_cpu value="${s.cpu_percent??''}" size=3> idle s <input id=as_idle value=${s.idle_seconds??60} size=4><br>
-  <button onclick="autoscale(true)">Enable / update</button> <button onclick="autoscale(false)">Disable</button>
-  <hr><b>Health check</b><br>path <input id=h_path value="${esc(h.path||'')}" placeholder="/healthz" size=12> failures <input id=h_f value=${h.failures||3} size=2> <button onclick="health()">Save</button></div>
- <div class=card><b>Environment</b> <span class=muted>(values are encrypted at rest and never shown)</span><br>${a.env_keys.map(k=>`<code>${esc(k)}</code> <a href="#" onclick="unset('${esc(k)}');return false">×</a>`).join(' ')||'<span class=muted>none</span>'}
-  <br><input id=e_k placeholder=KEY size=12> <input id=e_v placeholder=value size=18> <button onclick="setenv()">Set</button>
-  <hr><b>Volumes</b><br>${(a.spec.volumes||[]).map(x=>`<code>${esc(x.name)}</code> → ${esc(x.path)} <button onclick="detach('${x.name}')">Detach</button>`).join('<br>')||'<span class=muted>none</span>'}
-  <br><select id=va>${v.filter(x=>!x.app).map(x=>`<option>${esc(x.name)}</option>`).join('')}</select> at <input id=vp value=/data size=10> <button onclick="attach()">Attach</button></div></div>
- <div class=card><b>Custom domains</b><br><input id=dn placeholder="api.example.in" size=24> <button onclick="adddom()">Add</button>
-  <table>${d.map(x=>`<tr><td><b>${esc(x.domain)}</b><br>${x.verified?'<span class=ok>verified ✓ HTTPS on</span>':`<span class=bad>pending</span> ownership ${x.owned?'✓':'✗'} · routing ${x.routed?'✓':'✗'}`}</td>
+ const T=(k,l)=>`<button class="${dtab==k?'on':''}" onclick="dtab='${k}';show('${n}')">${l}</button>`;
+ const pane={
+ overview:`<div class=stats><div class=stat><span>Status</span><b><span class="status s-${a.status}">${esc(a.status)}</span></b></div><div class=stat><span>Instances</span><b id=m_inst>${a.instances.length}</b></div>
+  <div class=stat><span>Requests (since restart)</span><b id=m_req>–</b></div><div class=stat><span>In flight</span><b id=m_inf>–</b></div></div>
+  <div class="grid g2"><div class=pnl><h3>Requests / 5 s</h3><svg class=spark id=sp_req viewBox="0 0 300 56" preserveAspectRatio=none></svg></div><div class=pnl><h3>CPU % (avg per instance)</h3><svg class=spark id=sp_cpu viewBox="0 0 300 56" preserveAspectRatio=none></svg></div></div>
+  <div class=pnl><h3>Details</h3><table class=tbl><tr><td>URL</td><td><a href="${a.url}" target=_blank rel=noopener>${esc(a.url)}</a></td></tr><tr><td>Plan</td><td><code>${a.plan.id}</code> · ${a.plan.vcpu} vCPU · ${a.plan.memory_mb} MB</td></tr>
+  <tr><td>Runs on</td><td>${esc(a.provider)}</td></tr><tr><td>Source</td><td><code>${esc(a.spec.source.image||a.spec.source.git||'')}</code></td></tr><tr><td>Port</td><td>${a.spec.port}</td></tr></table></div>`,
+ logs:`<div class=pnl><h3>Logs <span class=sp></span><button class="btn ghost sm" onclick="logs()">Refresh</button></h3><pre id=lg class=logs>…</pre></div>`,
+ env:`<div class=pnl><h3>Environment <span class=muted style="font-weight:400;font-size:13px">values are encrypted at rest and never shown</span></h3><div class=chips>${a.env_keys.map(k=>`<code>${esc(k)} <a href="#" aria-label="remove ${esc(k)}" onclick="unset('${esc(k)}');return false">×</a></code>`).join('')||'<span class=muted>none</span>'}</div>
+  <div class=inline style="margin-top:12px"><input id=e_k placeholder=KEY aria-label=Key> <input id=e_v placeholder=value aria-label=Value> <button class="btn pri sm" onclick="setenv()">Set</button></div></div>`,
+ scale:`<div class="grid g2"><div class=pnl><h3>Instances</h3><div class=inline><input id=sc value=${a.instances.length} type=number min=0 max=10 aria-label=Instances> <button class="btn pri sm" onclick="scale()">Apply</button></div>
+  <h3 style="margin-top:22px">Health check</h3><div class=inline><input id=h_path value="${esc(h.path||'')}" placeholder="/healthz" aria-label="Health path"> <input id=h_f value=${h.failures||3} type=number aria-label=Failures style="max-width:90px"> <button class="btn ghost sm" onclick="health()">Save</button></div></div>
+  <div class=pnl><h3>Autoscale ${a.spec.autoscale?'<span class=tag>on</span>':'<span class=muted style="font-weight:400">off</span>'}</h3>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px"><label>min<input id=as_min value=${s.min??0}></label><label>max<input id=as_max value=${s.max??3}></label><label>concurrency<input id=as_c value=${s.target_concurrency??10}></label><label>cpu %<input id=as_cpu value="${s.cpu_percent??''}"></label><label>idle s<input id=as_idle value=${s.idle_seconds??60}></label></div>
+  <p class=inline style="margin-top:12px"><button class="btn pri sm" onclick="autoscale(true)">Enable / update</button> <button class="btn ghost sm" onclick="autoscale(false)">Disable</button></p></div></div>`,
+ domains:`<div class=pnl><h3>Custom domains</h3><div class=inline><input id=dn placeholder="api.example.com" aria-label=Domain> <button class="btn pri sm" onclick="adddom()">Add</button></div>
+  <div class=scroll style="margin-top:14px"><table class=tbl>${d.map(x=>`<tr><td><b>${esc(x.domain)}</b><br>${x.verified?'<span class=ok>verified · HTTPS on</span>':`<span class=warn>pending</span> <span class=muted>ownership ${x.owned?'✓':'✗'} · routing ${x.routed?'✓':'✗'}</span>`}</td>
   <td class=muted>TXT <code>${esc(x.dns_records.ownership.name)}</code> = <code>${esc(x.dns_records.ownership.value)}</code><br>CNAME <code>${esc(x.domain)}</code> → <code>${esc(x.dns_records.routing[0].value)}</code></td>
-  <td><button onclick="verifydom('${esc(x.domain)}')">Verify</button><button onclick="rmdom('${esc(x.domain)}')">Remove</button></td></tr>`).join('')}</table></div>
- <div class=card><b>Logs</b> <button onclick="logs()">Refresh</button><pre id=lg>…</pre></div>`;logs()}
+  <td><button class="btn ghost sm" onclick="verifydom('${esc(x.domain)}')">Verify</button> <button class="btn danger sm" onclick="rmdom('${esc(x.domain)}')">Remove</button></td></tr>`).join('')||'<tr><td class=muted>No custom domains yet.</td></tr>'}</table></div></div>`,
+ volumes:`<div class=pnl><h3>Volumes</h3>${(a.spec.volumes||[]).map(x=>`<p><code>${esc(x.name)}</code> → <code>${esc(x.path)}</code> <button class="btn ghost sm" onclick="detach('${x.name}')">Detach</button></p>`).join('')||'<p class=muted>No volumes attached.</p>'}
+  <div class=inline><select id=va aria-label=Volume>${v.filter(x=>!x.app).map(x=>`<option>${esc(x.name)}</option>`).join('')}</select> <input id=vp value=/data aria-label="Mount path"> <button class="btn pri sm" onclick="attach()">Attach</button></div></div>`};
+ D.innerHTML=`<div class=pnl style="padding-bottom:0"><h3 style="font-size:20px">${esc(n)} <span class="status s-${a.status}">${a.status}</span><span class=sp></span><a class="btn ghost sm" href="${a.url}" target=_blank rel=noopener>Open ↗</a> <button class="btn danger sm" onclick="destroy('${n}')">Destroy</button></h3>
+ <div class=dtabs role=tablist>${T('overview','Overview')}${T('logs','Logs')}${T('env','Environment')}${T('scale','Scale & health')}${T('domains','Domains')}${T('volumes','Volumes')}</div></div>${pane[dtab]}`;
+ if(!quiet)D.scrollIntoView({behavior:'smooth',block:'start'}); if(dtab=='logs')logs(); if(dtab=='overview')metrics()}
+function spark(id,vals){const el=$(id);if(!el)return;const mx=Math.max(1,...vals),w=300/Math.max(1,vals.length-1);const pts=vals.map((v,i)=>`${(i*w).toFixed(1)},${(54-v/mx*50).toFixed(1)}`).join(' ');
+ el.innerHTML=vals.length<2?'<text x=4 y=30 fill="currentColor" font-size=11 opacity=.5>collecting…</text>':`<polyline fill=none stroke="var(--acc)" stroke-width=2 points="${pts}"/><polyline fill="color-mix(in srgb,var(--acc) 15%,transparent)" stroke=none points="0,56 ${pts} 300,56"/>`}
+async function metrics(){if(!open||dtab!='overview')return;const m=await api('GET','/v1/apps/'+open+'/metrics');const prev=MS[MS.length-1];
+ MS.push({t:m.ts,r:m.requests_total,c:m.cpu_percent.filter(x=>x!=null)});MS=MS.slice(-60);
+ if($('m_req')){$('m_req').textContent=m.requests_total;$('m_inf').textContent=m.inflight;$('m_inst').textContent=m.instances}
+ spark('sp_req',MS.slice(1).map((x,i)=>Math.max(0,x.r-MS[i].r)));spark('sp_cpu',MS.map(x=>x.c.length?x.c.reduce((a,b)=>a+b,0)/x.c.length:0))}
+setInterval(metrics,5000);
 const A=()=>open;
 async function logs(){$('lg').textContent=await api('GET','/v1/apps/'+A()+'/logs?tail=100')}
 async function scale(){await api('POST','/v1/apps/'+A()+'/scale',{instances:+$('sc').value});toast('scaling');apps()}
@@ -86,7 +109,7 @@ async function vols(){const v=await api('GET','/v1/volumes');$('vols').innerHTML
 async function mkvol(){await api('POST','/v1/volumes',{name:$('v_name').value,size_gb:+$('v_size').value});vols()}
 async function rmvol(n){if(confirm('Delete volume '+n+' and its data?')){await api('DELETE','/v1/volumes/'+n);vols()}}
 const usd=x=>(+x<0?'−':'')+'$'+Math.abs(+x).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}), c2u=c=>usd((+c||0)/100), dt=t=>new Date(t*1000).toLocaleString();
-async function bill(){const b=await api('GET','/v1/billing'), u=await api('GET','/v1/usage');$('bal').textContent=usd(b.credit_usd);$('bal').className=b.credit_cents>0?'':'bad';
+async function bill(){const b=await api('GET','/v1/billing'), u=await api('GET','/v1/usage');$('bal').textContent=usd(b.credit_usd);$('bal').className=b.credit_cents>0?'':'bad';$('bal').style.fontSize='34px';
  $('paynote').textContent=b.stripe?(b.stripe_tax?'':'(tax collection off)'):'Stripe keys not configured on this server';renderMonth(b);
  $('b_name').value=b.profile.billing_name||'';$('b_country').value=b.profile.country||'';$('b_tax').value=b.profile.tax_id||'';
  $('usage').innerHTML='<tr><th>App</th><th>Plan</th><th>Instance-hours</th><th>Cost</th></tr>'+Object.entries(u.apps).map(([k,x])=>`<tr><td>${esc(k)}</td><td>${x.plan}</td><td>${x.hours}</td><td>${usd(x.cost_usd)}</td></tr>`).join('')+`<tr><td colspan=3><b>Total</b></td><td><b>${usd(u.total_usd)}</b></td></tr>`;

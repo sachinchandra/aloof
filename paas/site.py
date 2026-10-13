@@ -2,31 +2,54 @@
 import html
 from .plans import PLANS, TIERS, RATES, REGIONS, REGION_NOTE
 from . import plans as _plans
-CSS = """*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;color:#1d1d1f;background:#fbfbfa;line-height:1.55}
-a{color:#3b5bdb;text-decoration:none}a:hover{text-decoration:underline}
-nav{display:flex;align-items:center;gap:22px;padding:16px 32px;border-bottom:1px solid #eee;background:#fff;position:sticky;top:0}
-nav .logo{font-weight:800;font-size:20px;color:#111;letter-spacing:-.5px}nav .sp{flex:1}
-.btn{display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600}.btn:hover{text-decoration:none;background:#333}
-.btn.alt{background:#fff;color:#111;border:1px solid #ccc}
-.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-.hero{padding:80px 0 50px}.hero h1{font-size:52px;line-height:1.08;letter-spacing:-1.5px;margin:0 0 18px}.hero p{font-size:20px;color:#555;max-width:720px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px;margin:30px 0}
-.card{background:#fff;border:1px solid #eaeaea;border-radius:12px;padding:20px}.card h3{margin:0 0 6px}
-pre{background:#111;color:#e6e6e6;padding:16px;border-radius:10px;overflow:auto;font-size:13.5px}code{font-family:ui-monospace,Menlo,monospace;font-size:.92em}
-p code,li code,td code{background:#f0f0ef;padding:1px 5px;border-radius:4px}
-table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden}th,td{padding:10px 12px;border-bottom:1px solid #eee;text-align:left;font-size:14.5px}
-th{background:#f5f5f4}.muted{color:#777}.pill{display:inline-block;background:#eef2ff;color:#3b5bdb;border-radius:20px;padding:2px 10px;font-size:12px;font-weight:600}
-footer{padding:40px 0;color:#888;font-size:14px;border-top:1px solid #eee;margin-top:60px}
-.docs{display:grid;grid-template-columns:210px 1fr;gap:40px;padding:30px 0}.docs aside a{display:block;padding:4px 0;color:#444}.docs aside a.on{font-weight:700;color:#111}
-.docs h1{margin-top:0}@media(max-width:720px){.docs{grid-template-columns:1fr}.hero h1{font-size:36px}}
-input{padding:10px;border:1px solid #ccc;border-radius:8px;width:100%;margin:4px 0 12px;font-size:15px}"""
-def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(round(g))
-def page(title, body, brand="Aloof"):
+ICON = {
+ "bolt": '<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/>', "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+ "lock": '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>', "scale": '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+ "disk": '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+ "git": '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-4 3.5-10 5"/>',
+ "bot": '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 14h.01M15 14h.01"/>', "shield": '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/>',
+ "key": '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3"/>', "box": '<path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+ "card": '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>', "eu": '<circle cx="12" cy="12" r="9"/><path d="M12 6v.01M16 7.5v.01M18 12v.01M16 16.5v.01M12 18v.01M8 16.5v.01M6 12v.01M8 7.5v.01"/>',
+ "term": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>', "apps": '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+ "user": '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>', "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+ "menu": '<path d="M4 7h16M4 12h16M4 17h16"/>', "logout": '<path d="M15 4h4v16h-4M10 17l5-5-5-5M15 12H3"/>', "book": '<path d="M4 4h10a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4V4Z"/><path d="M18 20H8a4 4 0 0 1-4-4"/>',
+}
+def svg(name, cls=""): return f'<svg class="{cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{ICON[name]}</svg>'
+# generic, non-trademark glyphs for the "works with" row
+STACK = [("Docker images", '<path d="M3 13h18l-1 4a5 5 0 0 1-5 3H8a5 5 0 0 1-5-5v-2Z"/><path d="M6 13V9h3v4M9 13V9h3v4M12 13V9h3v4M9 9V6h3v3"/>'),
+ ("Node.js", '<path d="m12 2 9 5v10l-9 5-9-5V7l9-5Z"/>'), ("Python", '<path d="M8 3h6a3 3 0 0 1 3 3v4H9a3 3 0 0 0-3 3v2H5a2 2 0 0 1-2-2V9a3 3 0 0 1 3-3h2V3Z"/><path d="M16 21h-6a3 3 0 0 1-3-3v-4h8a3 3 0 0 0 3-3V9h1a2 2 0 0 1 2 2v4a3 3 0 0 1-3 3h-2v3Z"/>'),
+ ("Go", '<path d="M3 9h7M2 12h6M4 15h5"/><circle cx="16" cy="12" r="5"/>'), ("Rust", '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
+ ("Ruby", '<path d="M6 3h12l4 6-10 12L2 9l4-6Z"/><path d="M2 9h20M12 21 8 9l4-6 4 6-4 12"/>'), ("Java / JVM", '<path d="M6 18c2 2 10 2 12 0M8 14h8v-3H8v3ZM16 12.5h2a2 2 0 0 1 0 4h-2M10 3c2 2-2 3 0 6M13 4c2 2-2 3 0 5"/>'),
+ ("PHP", '<ellipse cx="12" cy="12" rx="10" ry="6"/><path d="M7 15l1-6h2a1.5 1.5 0 0 1 0 3H8M14 15l1-6h2a1.5 1.5 0 0 1 0 3h-2"/>'),
+ ("Static sites", '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01"/>')]
+def stack_row(): return "".join(f'<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{p}</svg>{n}</span>' for n, p in STACK)
+THEME_JS = """<script>(function(){var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t})();
+function toggleTheme(){var d=document.documentElement,cur=d.dataset.theme||'dark',n=cur=='dark'?'light':'dark';d.dataset.theme=n;localStorage.setItem('theme',n)}</script>"""
+COMMON_JS = """<script>document.querySelectorAll('pre').forEach(function(p){if(p.closest('.term'))return;var b=document.createElement('button');b.className='copy';b.type='button';b.textContent='Copy';b.setAttribute('aria-label','Copy code');
+b.onclick=function(){var t=p.cloneNode(true);t.querySelectorAll('.copy').forEach(function(x){x.remove()});navigator.clipboard.writeText(t.innerText.trim()).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1400)})};p.appendChild(b)});
+var io=window.IntersectionObserver&&new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.12});
+document.querySelectorAll('.reveal').forEach(function(el){io?io.observe(el):el.classList.add('in')});</script>"""
+def head(title, desc):
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>{html.escape(title)}</title><meta name=description content="{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants.">
-<style>{CSS}</style></head><body><nav><a class=logo href="/">{brand}</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/docs/mcp">MCP</a>
-<span class=sp></span><a href="/login">Log in</a><a class=btn href="/login#register">Start free</a></nav>{body}
-<footer><div class=wrap>{brand} · <a href="/pricing#regions">Regions</a> · <a href="/llms.txt">llms.txt</a> · <a href="/.well-known/mcp.json">MCP manifest</a> · <a href="/api/docs">API reference</a></div></footer></body></html>"""
+<title>{html.escape(title)}</title><meta name=description content="{html.escape(desc)}"><meta name=theme-color content="#07080c">
+<link rel=icon href="/favicon.ico"><link rel=stylesheet href="/static/aloof.css?v=5">{THEME_JS}</head>"""
+def nav(brand):
+    return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
+<nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/docs/mcp">AI agents</a><a href="/security">Security</a></nav>
+<span class=sp></span><button class=icon-btn onclick="toggleTheme()" aria-label="Toggle dark/light theme">{svg("sun")}</button>
+<a href="/login" class=hide-sm>Log in</a><a class="btn pri sm" href="/login#register">Start free</a>
+<button class="icon-btn menu-btn" aria-label="Menu" onclick="document.getElementById('nl').classList.toggle('open')">{svg("menu")}</button></div></header>"""
+def footer(brand):
+    return f"""<footer class=f><div class=wrap><div class=cols><div><a class=logo href="/"><i></i>{brand}</a><p class=muted style="max-width:300px;margin-top:12px">Cheap, per-second hosting for backends and APIs. Compute in the EU (Germany and Finland), billed in USD.</p></div>
+<div><h5>Product</h5><a href="/#features">Features</a><a href="/pricing">Pricing</a><a href="/pricing#regions">Regions</a><a href="/pricing#gpus">GPUs (soon)</a></div>
+<div><h5>Developers</h5><a href="/docs">Docs</a><a href="/docs/cli">CLI</a><a href="/api/docs">API reference</a><a href="/docs/mcp">MCP</a><a href="/llms.txt">llms.txt</a></div>
+<div><h5>Trust</h5><a href="/security">Security</a><a href="/status">Status</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
+<div><h5>Account</h5><a href="/login">Log in</a><a href="/login#register">Sign up</a><a href="/dashboard">Dashboard</a></div></div>
+<div class=base><span>© 2026 {brand}</span><span>Prices in USD, excluding tax.</span></div></div></footer>"""
+def page(title, body, brand="Aloof", desc=None):
+    d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
+    return f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}</body></html>"""
+def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(round(g))
 def _money(v, unit=""):
     return (f"${v:,.2f}" if v < 100 or v != int(v) else f"${v:,.0f}") + unit
 def _cmp(v): return f"${v:g}" if v else "<span class=muted>—</span>"
@@ -49,67 +72,100 @@ CPU_HEAD = "<tr><th>Plan</th><th>CPU</th><th>RAM</th><th>Always-on (30 days)</th
 GPU_HEAD = "<tr><th>Plan</th><th>GPU</th><th>Host</th><th>Per hour</th><th>Per second</th><th>Fly.io (last list price)</th></tr>"
 def _regions():
     rows = "".join(f"<tr><td><code>{k}</code></td><td>{v}</td></tr>" for k, v in REGIONS.items() if k != "local")
-    return f"<table id=regions><tr><th>Region</th><th>Location</th></tr>{rows}</table><p class=muted>{REGION_NOTE} More regions will be listed here only once they're live.</p>"
-WAITLIST_FORM = """<form id=wl onsubmit="event.preventDefault();fetch('/v1/waitlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:this.email.value,gpu:this.gpu.value||null})}).then(r=>r.json()).then(j=>{this.outerHTML='<p><b>'+(j.message||j.detail)+'</b></p>'})">
-<input name=email type=email required placeholder="you@example.com"> <select name=gpu><option value="">Any GPU</option>%s</select> <button class=btn>Join the GPU waitlist</button></form>"""
+    return f"<div class=scroll><table class=tbl id=regions><tr><th>Region</th><th>Location</th></tr>{rows}</table></div><p class=muted>{REGION_NOTE} More regions will be listed here only once they're live.</p>"
+WAITLIST_FORM = """<form id=wl class=inline style="max-width:640px" onsubmit="event.preventDefault();fetch('/v1/waitlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:this.email.value,gpu:this.gpu.value||null})}).then(r=>r.json()).then(j=>{this.outerHTML='<p class=ok><b>'+(j.message||j.detail)+'</b></p>'})">
+<input name=email type=email required placeholder="you@company.com" aria-label="Email"> <select name=gpu aria-label="GPU"><option value="">Any GPU</option>%s</select> <button class="btn pri">Join the GPU waitlist</button></form>"""
 def _gpu_section():
     if _plans.GPU_ENABLED:
-        return f"""<h2 id=gpus>GPUs</h2><p class=muted>Dedicated GPU per app, billed per second while running. With <code>min 0</code> autoscaling you pay only while serving. Render and Railway don't offer GPUs, and Fly.io retired its GPUs on 31 Jul 2026.</p><table>{GPU_HEAD}{_plan_rows("gpu")}</table>"""
+        return f"""<h2 class=t id=gpus>GPUs</h2><p class=t>Dedicated GPU per app, billed per second while running. With <code>min 0</code> autoscaling you pay only while serving.</p><div class=scroll><table class=tbl>{GPU_HEAD}{_plan_rows("gpu")}</table></div>"""
     opts = "".join(f"<option value={k}>{p['gpu']}</option>" for k, p in PLANS.items() if p["kind"] == "gpu" and k != "gpu-t4-spot")
-    return f"""<h2 id=gpus>GPUs <span class=pill>coming soon</span></h2><p class=muted>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. GPUs launch in our second phase; leave your email and we'll tell you when they're live.</p>{WAITLIST_FORM % opts}"""
+    return f"""<div class="card hl" id=gpus style="margin-top:40px"><span class=tag>coming soon</span><h3 style="font-size:22px">GPUs</h3><p>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. GPUs launch in our second phase; leave your email and we'll tell you when they're live.</p><div style="margin-top:16px">{WAITLIST_FORM % opts}</div></div>"""
+TERM = [("p", "$ ", "aloof deploy api --git https://github.com/acme/api.git"), ("m", "", "→ cloning acme/api@main"), ("m", "", "→ building Dockerfile (cached layers: 7/9)"),
+        ("m", "", "→ pushing image to registry"), ("c", "", "→ starting 2 instances in eu-de"), ("g", "✓ ", "health check passed /healthz (38 ms)"),
+        ("g", "✓ ", "live: https://api.{base}/"), ("p", "$ ", "aloof autoscale api --min 0 --max 6 --idle 300"), ("g", "✓ ", "scale to zero enabled · billed per second")]
+def _term(base):
+    import json as _j
+    lines = _j.dumps([[c, p, t.replace("{base}", base)] for c, p, t in TERM])
+    return f"""<div class=term role=img aria-label="Animated terminal showing a deploy with the aloof CLI"><div class=bar><i></i><i></i><i></i><b>~/acme/api — aloof</b></div><pre id=tt></pre></div>
+<script>(function(){{var L={lines},el=document.getElementById('tt'),i=0,j=0,out='';var R=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function esc(s){{return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')}}
+function line(k){{var l=L[k];return '<span class='+(l[0]=='p'?'p':l[0])+'>'+esc(l[1])+'</span>'+(l[0]=='p'?'<span>':'<span class='+l[0]+'>')+esc(l[2])+'</span>\\n'}}
+if(R){{el.innerHTML=L.map(function(_,k){{return line(k)}}).join('');return}}
+function tick(){{if(i>=L.length){{setTimeout(function(){{i=0;out='';tick()}},4000);return}}var l=L[i];
+ if(l[0]=='p'){{if(j<=l[2].length){{el.innerHTML=out+'<span class=p>'+esc(l[1])+'</span>'+esc(l[2].slice(0,j))+'<span class=cursor></span>';j++;setTimeout(tick,28);return}}}}
+ out+=line(i);el.innerHTML=out+'<span class=cursor></span>';i++;j=0;setTimeout(tick,l[0]=='p'?380:520)}}tick()}})();</script>"""
+def _feat(icon, title, body): return f'<div class="card reveal"><div class=ico>{svg(icon)}</div><h3>{title}</h3><p>{body}</p></div>'
 def landing(brand, base, api, mcp):
     g = {k: PLANS[k]["price_usd_hr"] for k in ("gpu-l4", "gpu-l40s", "gpu-a100", "gpu-h100")}
-    gpu_card = (f"{gpu_card}"
-                if _plans.GPU_ENABLED else "<div class=card><h3>GPUs: coming soon</h3>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist →</a></div>")
-    return page(f"{brand}: cheap backends, billed per second", f"""<div class=wrap><section class=hero><span class=pill>Pay per second in USD · compute in the EU (Germany · Finland)</span>
-<h1>Cheap backends,<br>for anyone, in one command.</h1>
-<p>{brand} runs your Docker image or git repo on low-cost CPU capacity in Europe. You get HTTPS at <code>&lt;app&gt;.{base}</code>, autoscaling down to zero, volumes, and simple USD billing with cards worldwide. AI assistants can deploy for you over MCP.</p>
-<p><a class=btn href="/login#register">Deploy your first app</a> &nbsp; <a class="btn alt" href="/docs">Read the docs</a></p></section>
-<pre>$ aloof deploy my-api --git https://github.com/me/api.git
-  building… running
-live: https://my-api.{base}/
+    gpu_card = (f"<div class=card><h3>GPUs by the second</h3><p>L4 ${g['gpu-l4']:.2f}/hr, A100 80GB ${g['gpu-a100']:.2f}/hr, H100 ${g['gpu-h100']:.2f}/hr on dedicated nodes.</p></div>"
+                if _plans.GPU_ENABLED else _feat("bolt", "GPUs: coming soon", "L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist →</a>"))
+    cpu = [k for k, p in PLANS.items() if p["kind"] == "cpu" and not p["legacy"] and p["cpu_class"] == "shared"]
+    pcards = "".join(f"<div class='card reveal{' hl' if k == 'shared-1x-1gb' else ''}'>{'<span class=tag>popular</span>' if k == 'shared-1x-1gb' else ''}<h3><code>{k}</code></h3><div class=price>{_money(PLANS[k]['price_usd_month'])}<small>/mo</small></div><p>{PLANS[k]['vcpu']:g} shared vCPU · {_gb(PLANS[k]['memory_mb'])} GB RAM · per second</p></div>" for k in cpu[:4])
+    body = f"""<section class=hero><div class=wrap><div><span class=badge><span class=dot></span>Compute in the EU · Germany &amp; Finland · billed per second in USD</span>
+<h1>Ship backends,<br><span class=grad>not infrastructure.</span></h1>
+<p class=lead>{brand} runs your Docker image or git repo with HTTPS at <code>&lt;app&gt;.{base}</code>, autoscaling down to zero, volumes and custom domains. One command, or let your AI assistant deploy over MCP.</p>
+<div class=cta><a class="btn pri" href="/login#register">Deploy your first app →</a><a class="btn ghost" href="/docs">Read the docs</a></div>
+<div class=trust><span>{svg("lock")} TLS on every app</span><span>{svg("key")} Secrets encrypted at rest</span><span>{svg("eu")} EU hosting</span></div></div>
+{_term(base)}</div></section>
+<div class=wrap><div class=works aria-label="Works with">{stack_row()}</div></div>
+<section class=s id=features><div class=wrap><div class=eyebrow>Platform</div><h2 class=t>Everything a backend needs. Nothing you have to babysit.</h2><p class=t>The essentials of Fly.io, Render and Railway, priced at or below their list prices, with an honest picture of where your code runs.</p>
+<div class="grid g3">{_feat("git", "Git or image deploys", "Push a repo with a Dockerfile or point at any image. Rolling redeploys only cut over after the new instance passes its health check.")}
+{_feat("scale", "Autoscaling to zero", "Scale on in-flight requests or CPU. Idle apps sleep and wake on the next request in about a second, so you pay only while serving.")}
+{_feat("disk", "Persistent volumes", "Attach volumes that survive restarts and redeploys, billed per provisioned GB-month.")}
+{_feat("globe", "Custom domains + TLS", "Verify with one TXT record and point a CNAME. Certificates are issued and renewed automatically.")}
+{_feat("term", "CLI, REST and dashboard", "A single-file CLI, an OpenAPI-documented REST API and a dashboard with logs, env, scaling and billing.")}
+{gpu_card}</div></div></section>
+<section class=s><div class="wrap split"><div class=reveal><div class=eyebrow>AI agents</div><h2 class=t>Your assistant can deploy for you.</h2>
+<p class=t style="margin-bottom:20px">{brand} ships a Model Context Protocol server with OAuth 2.1 (dynamic client registration and PKCE). Connect Claude, ChatGPT or Cursor and ask it to deploy, read logs, scale or add a domain.</p>
+<ul class=checks><li>Remote MCP at <code>{mcp}</code></li><li>Scoped tokens you can revoke from the dashboard</li><li><a href="/llms.txt">llms.txt</a> and an OpenAPI spec for agents that prefer REST</li></ul></div>
+<pre class=reveal><span class=muted># ask your assistant:</span>
+"Deploy github.com/acme/api on {brand}, 1 GB plan,
+ scale to zero after 5 minutes, and give me the URL."
 
-$ aloof autoscale my-api --min 0 --max 4 --idle 300   # pay only while serving</pre>
-<div class=grid>
-<div class=card><h3>CPU from {_money(PLANS['shared-1x-256mb']['price_usd_month'])}/mo</h3>Shared and dedicated (performance) vCPUs, priced at or below Fly.io and Render, billed per second.</div>
-{gpu_card}
-<div class=card><h3>Scale to zero</h3>Idle apps cost nothing. The first request wakes them in about a second (CPU) and you're billed per second.</div>
-<div class=card><h3>Built for AI agents</h3>An MCP server with OAuth lets Claude, ChatGPT and Cursor deploy and manage apps for your users. <a href="/docs/mcp">Connect →</a></div>
-<div class=card><h3>Simple global billing</h3>Prepaid USD wallet or a monthly plan via Stripe (cards, Apple Pay, Google Pay). Invoices with VAT/GST/sales tax handled at checkout.</div>
-<div class=card><h3>Honest about regions</h3>All compute runs in the EU today, on Hetzner in Germany and Finland, which keeps it cheap. Great for APIs and backends serving Europe; expect ~90–110 ms from US East. <a href="/pricing#regions">Regions →</a></div></div>
-<h2>Pricing</h2><table>{CPU_HEAD.replace("<th>Fly.io</th><th>Render</th><th>Railway*</th>","")}{_plan_rows("shared", False)}</table>
-<p class=muted>Free tier with $1/month of usage. Prices in USD excluding tax, billed per second. <a href="/pricing">Performance CPUs, GPUs, volumes and tiers →</a></p></div>""", brand)
+<span class=muted># it calls:</span>
+list_plans → deploy_app → set_autoscale → get_status
+<span class=muted>→ https://api.{base}/  (running)</span></pre></div></section>
+<section class=s id=security><div class=wrap><div class=eyebrow>Security</div><h2 class=t>Secure defaults, stated plainly.</h2><p class=t>We list only what the platform actually does today. No badges we haven't earned.</p>
+<div class="grid g3">{_feat("lock", "TLS everywhere", "Every app, API and MCP endpoint is served over HTTPS with automatically issued certificates. Certificates are only requested for hosts we know.")}
+{_feat("key", "Encrypted secrets", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes.")}
+{_feat("box", "Isolated containers", "Each app runs in its own container with CPU and memory limits. Nodes join over WireGuard and expose no inbound ports.")}
+{_feat("eu", "EU hosting", "Phase 1 compute and the control plane run on Hetzner Cloud in Germany and Finland.")}
+{_feat("shield", "Session hardening", "HttpOnly, SameSite cookies with a CSRF header requirement, single-use magic links, and OAuth 2.1 with PKCE for agents.")}
+{_feat("card", "Payments by Stripe", "Card data never touches our servers. Checkout, invoices and tax are handled by Stripe.")}</div>
+<p class=muted style="margin-top:22px">Read more on the <a href="/security">security page</a>. Found an issue? Email <a href="mailto:security@aloof.si">security@aloof.si</a>.</p></div></section>
+<section class=s><div class=wrap><div class=eyebrow>Pricing</div><h2 class=t>Per-second pricing that stays boring.</h2><p class=t>Free tier with $1/month of usage. Hobby $5 and Pro $20 include that much usage. Prices in USD, excluding tax.</p>
+<div class="grid">{pcards}</div><p style="margin-top:20px"><a href="/pricing">Performance CPUs, volumes, egress and tiers →</a></p></div></section>
+<section class=ctaband><h2>Deploy in the next five minutes.</h2><p class=sub style="margin:0 0 26px">$5 of starting credit. No card needed for the free tier.</p><div class=cta style="justify-content:center"><a class="btn pri" href="/login#register">Start free</a><a class="btn ghost" href="/docs/quickstart">Quickstart</a></div></section>"""
+    return page(f"{brand}: cheap backends, billed per second", body, brand)
 def pricing(brand):
     T = TIERS
-    def tier(k, name, blurb):
+    def tier(k, name, blurb, hl=False):
         t = T[k]; fee = f"${t['fee_usd']:g}"
-        return (f"<div class=card><h3>{name}</h3><div style='font-size:28px;font-weight:700'>{fee}<span class=muted style='font-size:14px'>/month"
-                f"{' per workspace' if k == 'pro' else ''}</span></div><p>{blurb}</p><ul>"
+        return (f"<div class='card{' hl' if hl else ''}'>{'<span class=tag>most popular</span>' if hl else ''}<h3 style='font-size:18px'>{name}</h3><div class=price>{fee}<small>/month{' per workspace' if k == 'pro' else ''}</small></div><p>{blurb}</p><ul>"
                 f"<li>${t['included_usage_usd']:g} of usage included</li>"
                 f"<li>{'Unlimited seats' if not t['seats'] else '1 seat'} · {'unlimited apps' if not t['max_apps'] else str(t['max_apps']) + ' apps'}</li></ul>"
-                f"<p class=muted>{t['compare']}</p></div>")
+                f"<p class=muted style='font-size:13px'>{t['compare']}</p><p style='margin-top:14px'><a class='btn {'pri' if hl else 'ghost'} sm' href='/login#register'>Get started</a></p></div>")
     R = RATES
-    return page(f"Pricing · {brand}", f"""<div class=wrap><section class=hero><h1>Pay per second, in dollars</h1>
-<p>Same model as Fly.io, Render and Railway: a workspace plan, then per-second compute, volumes per GB-month, and egress per GB.
-Prices are in USD and exclude VAT/GST/sales tax, which is added at checkout where it applies.</p></section>
-<div class=grid>{tier("free", "Free", "Prototypes and side projects. Up to 3 apps on shared-1x-256mb/512mb, 1 instance each, asleep after 5 min idle. Hard-capped at the included $1: apps pause instead of billing you, and wake next month or on upgrade.")}
-{tier("hobby", "Hobby", "Solo developers running always-on apps.")}
+    return page(f"Pricing · {brand}", f"""<section class=hero style="padding:72px 0 48px"><div class=wrap style="display:block"><span class=badge>Pricing · USD · per second</span><h1>Pay per second, <span class=grad>in dollars.</span></h1>
+<p class=lead>Same model as Fly.io, Render and Railway: a workspace plan, then per-second compute, volumes per GB-month and egress per GB. Prices exclude VAT/GST/sales tax, which is added at checkout where it applies.</p></div></section>
+<section class=s style="border:0;padding-top:48px"><div class=wrap><div class=grid>{tier("free", "Free", "Prototypes and side projects. Up to 3 apps on shared-1x-256mb/512mb, 1 instance each, asleep after 5 min idle. Hard-capped at the included $1: apps pause instead of billing you.")}
+{tier("hobby", "Hobby", "Solo developers running always-on apps.", True)}
 {tier("pro", "Pro", "Teams shipping to production.")}
-<div class=card><h3>Enterprise</h3><div style='font-size:28px;font-weight:700'>Custom</div><p>Committed GPU capacity, dedicated nodes, SLAs, invoicing.</p><p><a href="mailto:sales@aloof.si">Contact us</a></p></div></div>
-<h2>Shared CPU</h2><p class=muted>Burstable vCPUs with a guaranteed 1/8-core baseline. Good for APIs, bots and workers.</p><table>{CPU_HEAD}{_plan_rows("shared")}</table>
-<h2>Performance CPU</h2><p class=muted>A full vCPU reserved per vCPU of the plan (no 1/8 baseline sharing).</p><table>{CPU_HEAD}{_plan_rows("performance")}</table>
-<p class=muted>*Railway bills actual use at $20/vCPU and $10/GB per month; the figure shown assumes full utilisation of the same size. Competitor prices are list prices in USD, read 12 Oct 2026: fly.io/docs/about/pricing (iad), render.com/pricing, railway.com/pricing.</p>
+<div class=card><h3 style='font-size:18px'>Enterprise</h3><div class=price>Custom</div><p>Committed capacity, dedicated nodes, invoicing.</p><p style='margin-top:14px'><a class="btn ghost sm" href="mailto:sales@aloof.si">Contact us</a></p></div></div>
+<h2 class=t style="margin-top:64px">Shared CPU</h2><p class=t>Burstable vCPUs with a guaranteed 1/8-core baseline. Good for APIs, bots and workers.</p><div class=scroll><table class=tbl>{CPU_HEAD}{_plan_rows("shared")}</table></div>
+<h2 class=t style="margin-top:48px">Performance CPU</h2><p class=t>A full vCPU reserved per vCPU of the plan (no 1/8 baseline sharing).</p><div class=scroll><table class=tbl>{CPU_HEAD}{_plan_rows("performance")}</table></div>
+<p class=muted style="font-size:13px">*Railway bills actual use at $20/vCPU and $10/GB per month; the figure shown assumes full utilisation of the same size. Competitor prices are list prices in USD, read 12 Oct 2026: fly.io/docs/about/pricing (iad), render.com/pricing, railway.com/pricing.</p>
 {_gpu_section()}
-<h2>Storage &amp; network</h2><table><tr><th>Resource</th><th>{brand}</th><th>Fly.io</th><th>Render</th><th>Railway</th></tr>
+<h2 class=t style="margin-top:48px">Storage &amp; network</h2><div class=scroll><table class=tbl><tr><th>Resource</th><th>{brand}</th><th>Fly.io</th><th>Render</th><th>Railway</th></tr>
 <tr><td>Volumes (provisioned GB-month)</td><td><b>${R['volume_usd_gb_month']:.2f}</b></td><td>$0.15</td><td>$0.25</td><td>$0.15</td></tr>
 <tr><td>Egress per GB (counts toward included usage)</td><td><b>${R['egress_usd_gb']:.2f}</b></td><td>$0.02 (NA/EU)</td><td>$0.15 beyond allowance</td><td>$0.05</td></tr>
 <tr><td>Extra RAM (GB-month)</td><td>${R['extra_ram_usd_gb_month']:.2f}</td><td>$5–6</td><td>—</td><td>$10</td></tr>
 <tr><td>Free tier limits</td><td colspan=4>3 apps · shared-1x-256mb / 512mb · 1 instance · sleeps after 5 min idle · 1 GB volumes · hard cap at $1 usage per month (never charged)</td></tr>
-<tr><td>Inbound data, custom domains, TLS</td><td>Free</td><td>Free (10 certs)</td><td>2–25 domains</td><td>2–20 domains</td></tr></table>
-<h2>Regions</h2>{_regions()}
-<div class=grid><div class=card><h3>Top-ups</h3>$10 to $5,000 via Stripe Checkout (cards, Apple Pay, Google Pay). Every payment gets an invoice; VAT/GST IDs supported.</div>
-<div class=card><h3>Included usage</h3>Like Railway, each plan's fee comes back as usage credit, and you pay extra only beyond it.</div>
-<div class=card><h3>No idle charges</h3>Stopped and scaled-to-zero apps cost nothing; volumes are still billed.</div></div></div>""", brand)
+<tr><td>Inbound data, custom domains, TLS</td><td>Free</td><td>Free (10 certs)</td><td>2–25 domains</td><td>2–20 domains</td></tr></table></div>
+<h2 class=t style="margin-top:48px">Regions</h2>{_regions()}
+<div class="grid g3" style="margin-top:40px"><div class=card><h3>Top-ups</h3><p>$10 to $5,000 via Stripe Checkout (cards, Apple Pay, Google Pay). Every payment gets an invoice; VAT/GST IDs supported.</p></div>
+<div class=card><h3>Included usage</h3><p>Like Railway, each plan's fee comes back as usage credit, and you pay extra only beyond it.</p></div>
+<div class=card><h3>No idle charges</h3><p>Stopped and scaled-to-zero apps cost nothing; volumes are still billed.</p></div></div></div></section>""", brand)
 DOCS = ["quickstart", "cli", "deploy", "gpu", "volumes", "autoscaling", "domains", "billing", "mcp", "api", "nodes"]
 TITLES = {"quickstart": "Quickstart", "cli": "CLI", "deploy": "Deploying apps", "gpu": "GPU workloads", "volumes": "Volumes", "autoscaling": "Autoscaling & scale to zero",
           "domains": "Custom domains", "billing": "Billing, invoices & tax", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes"}
@@ -177,20 +233,46 @@ Usage up to your tier's included amount (Free $1, Hobby $5, Pro $20) isn't deduc
 # run the returned one-liner on the server:
 curl -fsSL '{api}/v1/nodes/bootstrap.sh?node=n-…&token=jt_…' | sudo bash</pre>
 <p>The bootstrap installs Docker, the NVIDIA container toolkit (on GPU nodes) and WireGuard, registers the node and starts <code>aloof-agent</code> under systemd.</p>"""}[pg]
-    nav = "".join(f'<a href="/docs/{d}" class="{"on" if d == pg else ""}">{TITLES[d]}</a>' for d in DOCS)
-    return page(f"{TITLES[pg]} · {brand} docs", f"<div class='wrap docs'><aside>{nav}</aside><main>{c}</main></div>", brand)
+    groups = [("Getting started", ["quickstart", "cli", "deploy"]), ("Platform", ["autoscaling", "volumes", "domains", "gpu"]), ("Account", ["billing"]), ("Integrations", ["mcp", "api", "nodes"])]
+    navh = "".join(f"<h4>{g}</h4>" + "".join(f'<a href="/docs/{d}" class="{"on" if d == pg else ""}"{" aria-current=page" if d == pg else ""}>{TITLES[d]}</a>' for d in ds) for g, ds in groups)
+    c = c.replace("<table>", "<div class=scroll><table class=tbl>").replace("</table>", "</table></div>")
+    return page(f"{TITLES[pg]} · {brand} docs", f"<div class='wrap docs'><aside aria-label='Docs navigation'>{navh}</aside><article class=docmain style='min-width:0;max-width:780px'>{c}</article></div>", brand)
 def login(brand):
-    return page(f"Log in · {brand}", """<div class=wrap style="max-width:420px;padding:50px 24px"><div class=card>
-<h2 id=title>Log in</h2><div id=msg class=muted></div>
-<label>Email<input id=email type=email autocomplete=email></label>
-<label id=pwl>Password<input id=pw type=password autocomplete=current-password></label>
-<p><button class=btn onclick="go('login')" id=lb>Log in</button> <button class="btn alt" onclick="go('register')" id=rb>Create account</button></p>
-<p class=muted>or <a href="#" onclick="magic();return false">email me a sign-in link</a></p></div></div>
+    return page(f"Log in · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
+<h1 id=title>Welcome back</h1><p class=muted id=subt style="margin:0">Log in to deploy and manage your apps.</p>
+<div class=tabs role=tablist><button type=button role=tab id=tl class=on onclick="mode('login')">Log in</button><button type=button role=tab id=tr onclick="mode('register')">Create account</button></div>
+<form onsubmit="event.preventDefault();go(M)"><div id=msg role=status aria-live=polite class=muted style="min-height:20px;font-size:14px"></div>
+<label for=email>Email</label><input id=email type=email autocomplete=email required placeholder="you@company.com">
+<label for=pw id=pwl>Password</label><input id=pw type=password autocomplete=current-password placeholder="At least 10 characters">
+<p style="margin-top:18px"><button class="btn pri" style="width:100%;justify-content:center" id=lb>Log in</button></p></form>
+<p class=muted style="text-align:center;font-size:14px">or <a href="#" onclick="magic();return false">email me a sign-in link</a></p>
+<p class=muted style="font-size:12.5px;text-align:center;margin-top:18px">{svg("lock")}</p><p class=muted style="font-size:12.5px;text-align:center;margin-top:-8px">Sessions use HttpOnly cookies. By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy policy</a>.</p></div></div>
 <script>
-if(location.hash=='#register'){title.textContent='Create your account';pw.autocomplete='new-password'}
-async function go(kind){const r=await fetch('/v1/auth/'+kind,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email.value,password:pw.value})});
- const j=await r.json(); if(!r.ok){msg.style.color='#c00';msg.textContent=j.detail||'error';return}
- if(j.api_key) sessionStorage.newKey=j.api_key; location='/dashboard'}
-async function magic(){const r=await fetch('/v1/auth/magic',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email.value})});
- const j=await r.json(); msg.style.color=r.ok?'#080':'#c00'; msg.textContent=j.detail}
+var M='login';function mode(m){{M=m;tl.classList.toggle('on',m=='login');tr.classList.toggle('on',m=='register');title.textContent=m=='login'?'Welcome back':'Create your account';
+subt.textContent=m=='login'?'Log in to deploy and manage your apps.':'$5 of starting credit. Free tier with $1/month of usage.';lb.textContent=m=='login'?'Log in':'Create account';pw.autocomplete=m=='login'?'current-password':'new-password'}}
+if(location.hash=='#register')mode('register');
+async function go(kind){{const r=await fetch('/v1/auth/'+kind,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,password:pw.value}})}});
+ const j=await r.json(); if(!r.ok){{msg.className='bad';msg.textContent=j.detail||'error';return}}
+ if(j.api_key) sessionStorage.newKey=j.api_key; location='/dashboard'}}
+async function magic(){{const r=await fetch('/v1/auth/magic',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value}})}});
+ const j=await r.json(); msg.className=r.ok?'ok':'bad'; msg.textContent=j.detail}}
 </script>""", brand)
+LEGAL = {
+"security": ("Security", """<p>This page lists what the platform does today. We don't claim certifications we don't hold.</p>
+<h3>Transport</h3><ul><li>All public endpoints (site, API, MCP, apps) are served over HTTPS; certificates are issued automatically and only for known hosts.</li><li>Nodes connect to the control plane over WireGuard and expose no inbound ports.</li></ul>
+<h3>Data at rest</h3><ul><li>App environment variables are encrypted at rest (Fernet) and never returned by the API.</li><li>API keys and session tokens are stored as SHA-256 hashes.</li></ul>
+<h3>Isolation</h3><ul><li>Each app instance runs in its own container with CPU and memory limits.</li></ul>
+<h3>Accounts</h3><ul><li>HttpOnly, SameSite session cookies; state-changing cookie requests require a CSRF header.</li><li>Single-use, expiring magic links. OAuth 2.1 with PKCE for MCP clients; tokens are scoped and revocable.</li></ul>
+<h3>Infrastructure</h3><ul><li>Phase 1 compute and the control plane run on Hetzner Cloud in Germany and Finland.</li><li>Payments are processed by Stripe; card data never reaches our servers.</li></ul>
+<h3>Reporting</h3><p>Email <a href="mailto:security@aloof.si">security@aloof.si</a>. Please give us reasonable time to fix an issue before disclosing it.</p>"""),
+"privacy": ("Privacy policy", """<p><b>Draft.</b> A full policy will be published before general availability.</p><p>We collect your email, billing details you provide, and operational data needed to run and bill your apps (logs, usage). Payments are handled by Stripe. We don't sell personal data. Data is hosted in the EU. Contact: <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>"""),
+"terms": ("Terms of service", """<p><b>Draft.</b> Full terms will be published before general availability.</p><p>Don't use the service for illegal content, abuse, spam or cryptocurrency mining. Prepaid credit is consumed per second of usage; the free tier is hard-capped. Contact: <a href="mailto:legal@aloof.si">legal@aloof.si</a>.</p>"""),
+"status": ("Status", """<p id=st class=muted>Checking…</p><div class=scroll><table class=tbl id=stt><tr><th>Component</th><th>Status</th></tr></table></div>
+<script>(async()=>{const rows=[['API','/healthz'],['Plans','/v1/plans'],['Docs','/llms.txt']];let ok=0;for(const [n,u] of rows){let s='down';try{const t=performance.now();const r=await fetch(u);s=r.ok?'operational ('+Math.round(performance.now()-t)+' ms)':'degraded';if(r.ok)ok++}catch(e){}
+stt.insertAdjacentHTML('beforeend','<tr><td>'+n+'</td><td><span class="status '+(s.startsWith('op')?'s-running':'s-failed')+'">'+s+'</span></td></tr>')}st.textContent=ok==rows.length?'All systems operational.':'Some checks failed.';st.className=ok==rows.length?'ok':'bad'})()</script>
+<p class=muted>Live checks from your browser. A hosted status page with history is planned.</p>"""),
+}
+def legal(name, brand):
+    if name not in LEGAL: return None
+    t, b = LEGAL[name]
+    return page(f"{t} · {brand}", f"<div class=wrap style='max-width:820px;padding:64px 24px 80px'><div class=eyebrow>{brand}</div><h1 style='font-size:40px;letter-spacing:-.03em;margin:8px 0 18px'>{t}</h1><div class=sub>{b}</div></div>", brand)

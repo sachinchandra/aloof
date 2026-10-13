@@ -93,6 +93,16 @@ def get_app(name: str, a=Depends(acct)): return with_url(own(name, a))
 @app.get("/v1/apps/{name}/logs", response_class=PlainTextResponse)
 def logs(name: str, tail: int=200, a=Depends(acct)): own(name, a); return engine.logs(name, tail)
 class Scale(BaseModel): instances: int
+@app.get("/v1/apps/{name}/metrics")
+def app_metrics(name: str, a=Depends(acct)):
+    """Live counters for the dashboard: total requests since process start, in-flight, instance CPU %, egress bytes pending billing."""
+    ap = own(name, a); M = controller.M; d = get_drivers(); cpu = []
+    for i in ap.get("instances") or []:
+        drv = d.get(i["provider"])
+        try: cpu.append(round(float(drv.cpu_percent(i["id"])), 1) if drv and hasattr(drv, "cpu_percent") else None)
+        except Exception: cpu.append(None)
+    return {"ts": time.time(), "requests_total": M.reqs.get(name, 0), "inflight": M.inflight.get(name, 0), "instances": len(ap.get("instances") or []),
+            "cpu_percent": cpu, "egress_bytes_unbilled": EGRESS.get(name, 0), "last_request": M.last.get(name)}
 @app.post("/v1/apps/{name}/scale")
 def scale(name: str, s: Scale, a=Depends(acct)): own(name, a); return with_url(engine.scale(name, s.instances))
 class Env(BaseModel): env: dict[str, str|None]
@@ -413,6 +423,13 @@ def docs_page(page: str = "quickstart"):
     return h
 @app.get("/login", response_class=HTMLResponse)
 def login_page(): return site.login(BRAND)
+@app.get("/static/aloof.css", include_in_schema=False)
+def static_css(): return FileResponse(os.path.join(ROOT, "paas", "static", "aloof.css"), media_type="text/css", headers={"Cache-Control": "public, max-age=3600"})
+@app.get("/security", response_class=HTMLResponse)
+@app.get("/privacy", response_class=HTMLResponse)
+@app.get("/terms", response_class=HTMLResponse)
+@app.get("/status", response_class=HTMLResponse)
+def legal_page(request: Request): return site.legal(request.url.path.strip("/"), BRAND)
 @app.get("/dashboard", response_class=HTMLResponse)
 def dash(): return open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND)
 
