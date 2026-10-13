@@ -34,7 +34,9 @@ def _call(method, path, data=None, idem=None, client=None):
          "Content-Type": "application/x-www-form-urlencoded"}
     if idem: h["Idempotency-Key"] = idem
     r = c.request(method, f"{API()}{path}", content=urlencode(_flat(data or {})), headers=h)
-    if r.status_code >= 400: raise RuntimeError(f"stripe {path} failed: {r.status_code} {r.text[:200]}")
+    if r.status_code >= 400:   # full Stripe error goes to the log (and /admin), not to the customer
+        logging.getLogger("paas.stripe").error("stripe %s %s failed: %s %s", method, path, r.status_code, r.text[:500])
+        raise RuntimeError("Card payments are temporarily unavailable. Nothing was charged; please try again later.")
     return r.json()
 def _urls():
     base = E("PAAS_PUBLIC_API_URL", "http://localhost:8000").rstrip("/")
