@@ -107,42 +107,45 @@ def landing(brand, base, api, mcp):
                 if _plans.GPU_ENABLED else _feat("bolt", "GPUs: coming soon", "L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist →</a>"))
     cpu = [k for k, p in PLANS.items() if p["kind"] == "cpu" and not p["legacy"] and p["cpu_class"] == "shared"]
     pcards = "".join(f"<div class='card reveal{' hl' if k == 'shared-1x-1gb' else ''}'>{'<span class=tag>popular</span>' if k == 'shared-1x-1gb' else ''}<h3><code>{k}</code></h3><div class=price>{_money(PLANS[k]['price_usd_month'])}<small>/mo</small></div><p>{PLANS[k]['vcpu']:g} shared vCPU · {_gb(PLANS[k]['memory_mb'])} GB RAM · per second</p></div>" for k in cpu[:4])
+    T = TIERS; p0 = PLANS["shared-1x-256mb"]["price_usd_month"]
+    faq = [("Where does my code run?", "On Hetzner Cloud in Nuremberg, Germany. The control plane runs there too, and encrypted off-site backups are stored in Helsinki, Finland."),
+           ("What can I deploy?", "Any Docker image, or a git repo with a Dockerfile. This covers Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP and static sites."),
+           ("How does scale-to-zero affect latency?", "Idle apps sleep and wake on the next request in about a second."),
+           ("How are secrets handled?", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes."),
+           ("Can an AI agent deploy for me safely?", "Yes. Agents use OAuth 2.1 with PKCE and get scoped tokens that you can revoke at any time."),
+           ("Do you support GPUs?", "GPUs are coming soon: L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist</a>." if not _plans.GPU_ENABLED else "Yes: L4, L40, A100 80GB and H100 on dedicated nodes, billed per second. See <a href='/pricing#gpus'>GPU pricing</a>.")]
+    faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq)
+    tier = lambda k, name, who: f"<div class='card reveal{' hl' if k == 'pro' else ''}'><h3>{name}</h3><div class=price>${T[k]['fee_usd']}<small>/mo{' per workspace' if k == 'pro' else ''}</small></div><p>{'Includes $' + str(T[k]['included_usage_usd']) + '/month of usage.' if k == 'free' else 'Includes $' + str(T[k]['included_usage_usd']) + ' of usage.'} {who}</p></div>"
     body = f"""<section class=hero><div class=wrap><div><span class=badge><span class=dot></span>Compute in the EU · Nuremberg, Germany · billed per second in USD</span>
-<h1>Ship backends,<br><span class=grad>not infrastructure.</span></h1>
-<p class=lead>{brand} runs your Docker image or git repo with HTTPS at <code>&lt;app&gt;.{base}</code>, autoscaling down to zero, volumes and custom domains. One command, or let your AI assistant deploy over MCP.</p>
-<div class=cta><a class="btn pri" href="/login#register">Deploy your first app →</a><a class="btn ghost" href="/docs">Read the docs</a></div>
-<div class=trust><span>{svg("lock")} TLS on every app</span><span>{svg("key")} Secrets encrypted at rest</span><span>{svg("eu")} EU hosting</span></div></div>
+<h1>Infrastructure for the age of <span class=grad>superintelligence.</span></h1>
+<p class=lead>Let Claude, ChatGPT or Cursor deploy, scale and monitor your backends over MCP. They run in the EU, scale to zero, are billed per second, and GPUs are coming soon.</p>
+<div class=cta><a class="btn pri" href="/login#register">Deploy free</a><a class="btn ghost" href="/docs/mcp">Connect your AI assistant (MCP)</a></div>
+<div class=trust><span>{svg("lock")} TLS on every app</span><span>{svg("key")} Secrets encrypted at rest</span><span>{svg("eu")} EU hosting</span><span>{svg("bolt")} Per-second billing in USD</span></div></div>
 {_term(base)}</div></section>
 <div class=wrap><div class=works aria-label="Works with">{stack_row()}</div></div>
-<section class=s id=features><div class=wrap><div class=eyebrow>Platform</div><h2 class=t>Everything a backend needs. Nothing you have to&nbsp;babysit.</h2><p class=t>The essentials of Fly.io, Render and Railway, priced at or below their list prices, with an honest picture of where your code runs.</p>
-<div class="grid g3">{_feat("git", "Git or image deploys", "Push a repo with a Dockerfile or point at any image. Rolling redeploys only cut over after the new instance passes its health check.")}
-{_feat("scale", "Autoscaling to zero", "Scale on in-flight requests or CPU. Idle apps sleep and wake on the next request in about a second, so you pay only while serving.")}
-{_feat("disk", "Persistent volumes", "Attach volumes that survive restarts and redeploys, billed per provisioned GB-month.")}
-{_feat("globe", "Custom domains + TLS", "Verify with one TXT record and point a CNAME. Certificates are issued and renewed automatically.")}
-{_feat("term", "CLI, REST and dashboard", "A single-file CLI, an OpenAPI-documented REST API and a dashboard with logs, env, scaling and billing.")}
+<section class=s id=features><div class=wrap><div class=eyebrow>Platform</div><h2 class=t>Everything a backend needs. Nothing you have to&nbsp;babysit.</h2>
+<div class="grid g3">{_feat("git", "Deploy from git or an image", "Push a repo with a Dockerfile or point at any image: Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP or static sites. Redeploys only switch over after the new instance passes its health check.")}
+{_feat("scale", "Pay nothing while it's idle", "Scale on in-flight requests or CPU. Idle apps sleep and wake on the next request in about a second.")}
+{_feat("disk", "State that survives", "Persistent volumes survive restarts and redeploys, billed per provisioned GB-month.")}
+{_feat("globe", "Your domain, with TLS handled", "Add one TXT record and a CNAME. We issue and renew certificates for you.")}
+{_feat("bot", "Let your AI assistant run deploys", "A remote MCP server with OAuth 2.1 lets Claude, ChatGPT or Cursor deploy, read logs, scale and add domains. You get scoped tokens you can revoke at any time, plus <a href='/llms.txt'>llms.txt</a> and an OpenAPI spec.")}
 {gpu_card}</div></div></section>
-<section class=s><div class="wrap split"><div class=reveal><div class=eyebrow>AI agents</div><h2 class=t>Your assistant can deploy for you.</h2>
-<p class=t style="margin-bottom:20px">{brand} ships a Model Context Protocol server with OAuth 2.1 (dynamic client registration and PKCE). Connect Claude, ChatGPT or Cursor and ask it to deploy, read logs, scale or add a domain.</p>
-<ul class=checks><li>Remote MCP at <code>{mcp}</code></li><li>Scoped tokens you can revoke from the dashboard</li><li><a href="/llms.txt">llms.txt</a> and an OpenAPI spec for agents that prefer REST</li></ul></div>
-<pre class=reveal><span class=muted># ask your assistant:</span>
-"Deploy github.com/acme/api on {brand}, 1 GB plan,
- scale to zero after 5 minutes, and give me the URL."
-
-<span class=muted># it calls:</span>
-list_plans → deploy_app → set_autoscale → get_status
-<span class=muted>→ https://api.{base}/  (running)</span></pre></div></section>
+<section class=s id=how><div class=wrap><div class=eyebrow>How it works</div><h2 class=t>From code to a live URL in three steps.</h2>
+<div class="grid g3"><div class="card reveal"><div class=ico>1</div><h3>Bring your code.</h3><p>Use a git repo with a Dockerfile or any container image.</p></div>
+<div class="card reveal"><div class=ico>2</div><h3>Deploy.</h3><p>Run one CLI command, use the dashboard or REST API, or ask your assistant over MCP.</p></div>
+<div class="card reveal"><div class=ico>3</div><h3>Go live.</h3><p>You get an HTTPS URL on <code>.{base}</code> (or your own domain), autoscaling and logs, billed per second.</p></div></div></div></section>
 <section class=s id=security><div class=wrap><div class=eyebrow>Security</div><h2 class=t>Secure defaults, stated plainly.</h2><p class=t>We list only what the platform actually does today. No badges we haven't earned.</p>
 <div class="grid g3">{_feat("lock", "TLS everywhere", "Every app, API and MCP endpoint is served over HTTPS with automatically issued certificates. Certificates are only requested for hosts we know.")}
 {_feat("key", "Encrypted secrets", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes.")}
-{_feat("box", "Isolated containers", "Each app runs in its own container with CPU and memory limits. Nodes join over WireGuard and expose no inbound ports.")}
-{_feat("eu", "EU hosting", "Compute and the control plane run on Hetzner Cloud in Nuremberg, Germany. Off-site backups are stored in Helsinki, Finland.")}
-{_feat("shield", "Session hardening", "HttpOnly, SameSite cookies with a CSRF header requirement, single-use magic links, and OAuth 2.1 with PKCE for agents.")}
-{_feat("card", "Payments by Stripe", "Card data never touches our servers. Checkout, invoices and tax are handled by Stripe.")}</div>
+{_feat("box", "Isolated containers", "Each app runs in its own container with CPU and memory limits. Nodes join over WireGuard and expose no inbound ports.")}</div>
 <p class=muted style="margin-top:22px">Read more on the <a href="/security">security page</a>. Found an issue? Email <a href="mailto:security@aloof.si">security@aloof.si</a>.</p></div></section>
-<section class=s><div class=wrap><div class=eyebrow>Pricing</div><h2 class=t>Per-second pricing that stays boring.</h2><p class=t>Free tier with $1/month of usage. Hobby $5 and Pro $20 include that much usage. Prices in USD, excluding tax.</p>
+<section class=s id=pricing><div class=wrap><div class=eyebrow>Pricing</div><h2 class=t>Per-second pricing that stays boring.</h2>
+<div class="grid g3">{tier("free", "Free", "Good for side projects and trying Aloof.")}{tier("hobby", "Hobby", "For personal apps that need to stay on.")}{tier("pro", "Pro", "For teams shipping production backends.")}</div>
+<p class=t style="margin-top:20px">Usage beyond that is billed per second. Instance sizes start at <code>shared-1x-256mb</code> ({_money(p0)}/mo if run all month). Prices are in USD and exclude tax. Payments are handled by Stripe.</p>
 <div class="grid">{pcards}</div><p style="margin-top:20px"><a href="/pricing">Performance CPUs, volumes, egress and tiers →</a></p></div></section>
-<section class=ctaband><h2>Deploy in the next five minutes.</h2><p class=sub style="margin:0 0 26px">$5 of starting credit. No card needed for the free tier.</p><div class=cta style="justify-content:center"><a class="btn pri" href="/login#register">Start free</a><a class="btn ghost" href="/docs/quickstart">Quickstart</a></div></section>"""
-    return page(f"{brand}: cheap backends, billed per second", body, brand)
+<section class=s id=faq><div class=wrap style="max-width:820px"><div class=eyebrow>FAQ</div><h2 class=t>Questions, answered.</h2>{faqh}</div></section>
+<section class=ctaband><h2>Stop babysitting servers.</h2><p class=sub style="margin:0 0 26px">Deploy your first backend free in one command.</p><div class=cta style="justify-content:center"><a class="btn pri" href="/login#register">Deploy free</a><a class="btn ghost" href="/docs">Read the docs</a></div></section>"""
+    return page(f"{brand}: infrastructure for the age of superintelligence", body, brand)
 def _pg_rows():
     from .plans import PG_PLANS
     return "".join(f"<tr><td><code>{k}</code> <span class=muted>{p['note']}</span></td><td>{p['vcpu']:g} vCPU / {p['memory_mb'] if p['memory_mb'] < 1024 else p['memory_mb'] // 1024}{' MB' if p['memory_mb'] < 1024 else ' GB'}</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items())
