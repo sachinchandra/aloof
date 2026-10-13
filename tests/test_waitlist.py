@@ -70,7 +70,7 @@ def test_test_entries_excluded_and_admin():
     assert o.delete(f"/v1/admin/waitlist/{rid}").status_code == 200 and o.delete(f"/v1/admin/waitlist/{rid}").status_code == 404
     assert c.delete(f"/v1/admin/waitlist/{rid}").status_code == 401
 def test_no_admin_recipients_is_recorded(monkeypatch):
-    _reset(); monkeypatch.delenv("PAAS_WAITLIST_NOTIFY", raising=False); monkeypatch.delenv("PAAS_ADMIN_EMAIL", raising=False)
+    _reset(); monkeypatch.delenv("PAAS_WAITLIST_NOTIFY", raising=False); monkeypatch.setattr(www, "ADMIN_EMAIL", "")
     e = f"na{time.time_ns()}@acme.dev"; c.post("/v1/waitlist", json={"email": e})
     assert q("select mail_admin from waitlist where email=?", (e,), one=True)["mail_admin"].startswith("skipped")
 def test_mail_failure_recorded(monkeypatch):

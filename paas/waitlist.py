@@ -16,8 +16,9 @@ _hits = {}; _hl = threading.Lock()
 
 def is_test_email(e): return bool(TEST_RE.search(e or ""))
 def notify_recipients():
-    """PAAS_WAITLIST_NOTIFY (comma list), else PAAS_ADMIN_EMAIL (the owner email that also gates /admin)."""
-    raw = os.environ.get("PAAS_WAITLIST_NOTIFY") or os.environ.get("PAAS_ADMIN_EMAIL") or ""
+    """PAAS_WAITLIST_NOTIFY (comma list), else the owner email that gates /admin (www.ADMIN_EMAIL: PAAS_ADMIN_EMAIL, default sachin@aloof.si)."""
+    from . import www
+    raw = os.environ.get("PAAS_WAITLIST_NOTIFY") or www.ADMIN_EMAIL or ""
     return [x.strip().lower() for x in raw.split(",") if x.strip()]
 def _secret():
     from . import crypto
