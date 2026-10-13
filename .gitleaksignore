@@ -1,3 +1,5 @@
 deploy/golive.env.example:generic-api-key:60
 deploy/golive.env.example:generic-api-key:81
 c83c36c4f9c8c465a55b5a39f9e9d31de2aee5a7:deploy/golive.env.example:generic-api-key:46
+# False positive from accidental gitleaks tarball extraction that overwrote README.md (fixed in subsequent commit)
+21e9d6e3a5015f6bb3bdf806b4248a323bf9f770:README.md:sidekiq-secret:42
