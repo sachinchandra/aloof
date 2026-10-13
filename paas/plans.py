@@ -18,7 +18,7 @@ GPU_UNLOCK_PAID_CUSTOMERS = int(E("PAAS_GPU_UNLOCK_PAID_CUSTOMERS", "10"))
 def gpu_status():
     return {"enabled": GPU_ENABLED, "status": "available" if GPU_ENABLED else "coming_soon",
             "waitlist": "POST /v1/waitlist {\"email\": \"...\", \"gpu\": \"gpu-h100\"}",
-            "note": "" if GPU_ENABLED else f"GPUs (L4, RTX 4090, L40, A100 80GB, H100) launch in phase 2. Join the waitlist to be notified."}
+            "note": "" if GPU_ENABLED else "GPUs (L4, RTX 4090, L40, A100 80GB, H100) launch in phase 2. Join the waitlist to be notified."}
 HOURS_MONTH = 720
 # ---------------- payment fees (Stripe) ----------------
 FEES = {"pct": float(E("PAAS_FEE_PCT", "0.029")), "intl_pct": float(E("PAAS_FEE_INTL_PCT", "0.015")),
