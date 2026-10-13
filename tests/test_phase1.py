@@ -76,7 +76,7 @@ def test_admin_metrics_paid_customers(monkeypatch):
     monkeypatch.setattr(api, "ADMIN", "adm"); c = TestClient(api.app); h = {"Authorization": "Bearer adm"}
     assert c.get("/v1/admin/metrics").status_code == 401
     base = c.get("/v1/admin/metrics", headers=h).json()["paid_customers"]
-    a = engine.create_account("payer1@example.com"); b = engine.create_account("payer2@example.com")
+    a = engine.create_account("payer1@payer.dev"); b = engine.create_account("payer2@payer.dev")
     q("insert into stripe_sessions(id,account_id,kind,status,created,updated) values(?,?,?,?,?,?)", ("cs_m1", a["id"], "topup", "paid", 0, 0))
     q("insert into stripe_sessions(id,account_id,kind,status,created,updated) values(?,?,?,?,?,?)", ("cs_m2", a["id"], "topup", "paid", 0, 0))
     q("update accounts set stripe_subscription='sub_metrics_test' where id=?", (b["id"],))

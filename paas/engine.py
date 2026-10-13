@@ -344,11 +344,15 @@ def usage(account_id):
     for t in tot.values(): t["hours"]=round(t["hours"],4); t["cost_usd"]=round(t["cost_usd"],2)
     return {"apps": tot, "total_usd": round(sum(t["cost_usd"] for t in tot.values()),2)}
 def new_api_key(): return "pk_" + secrets.token_urlsafe(24)
+TEST_EMAIL_PATTERNS = ("%@example.com", "%@example.org", "%@example.net", "%.test", "%.invalid", "%@localhost")   # SQL LIKE; also used by www.mark_flags
+def is_test_email(email):
+    e = (email or "").strip().lower()
+    return any(e.endswith(p[1:]) for p in TEST_EMAIL_PATTERNS)
 def create_account(email, password_hash=None, verified=False):
-    """API keys are stored only as SHA-256 hashes; the plaintext key is returned once."""
+    """API keys are stored only as SHA-256 hashes; the plaintext key is returned once. Reserved test domains get is_test=1 at creation."""
     key = new_api_key()
-    q("insert into accounts(email,api_key_hash,api_key_prefix,password_hash,email_verified,created) values(?,?,?,?,?,?)",
-      (email.lower(), sha256(key), key[:10], password_hash, int(verified), time.time()))
+    q("insert into accounts(email,api_key_hash,api_key_prefix,password_hash,email_verified,created,is_test) values(?,?,?,?,?,?,?)",
+      (email.lower(), sha256(key), key[:10], password_hash, int(verified), time.time(), int(is_test_email(email))))
     a = q("select * from accounts where email=?", (email.lower(),), one=True); a["api_key"] = key; return a
 def rotate_api_key(account_id):
     key = new_api_key(); q("update accounts set api_key_hash=?, api_key_prefix=? where id=?", (sha256(key), key[:10], account_id)); return key

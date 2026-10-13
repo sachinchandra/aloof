@@ -22,6 +22,20 @@ API_HOST = os.environ.get("PAAS_API_HOST", f"api.{BASE_DOMAIN}"); MCP_HOST = os.
 PUBLIC_API_URL = os.environ.get("PAAS_PUBLIC_API_URL", f"https://{API_HOST}"); PUBLIC_MCP_URL = os.environ.get("PAAS_PUBLIC_MCP_URL", f"https://{MCP_HOST}/mcp")
 ROOT = os.path.dirname(os.path.dirname(__file__))
 app = FastAPI(title=f"{BRAND} control plane", version="0.3", docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
+# Security headers on control-plane responses (www/api/dashboard). Caddy sets the same non-CSP headers at the edge; setdefault keeps
+# any per-route override. CSP only on HTML: our pages use inline <script>/<style> and same-origin fetch/WebSocket, nothing third-party.
+SEC_HEADERS = {"Strict-Transport-Security": "max-age=31536000; includeSubDomains", "X-Content-Type-Options": "nosniff",
+               "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin"}
+HTML_CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+            "font-src 'self' data:; connect-src 'self' wss: https:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; "
+            "form-action 'self' https://checkout.stripe.com https://billing.stripe.com")
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    r = await call_next(request)
+    for k, v in SEC_HEADERS.items(): r.headers.setdefault(k, v)
+    if r.headers.get("content-type", "").startswith("text/html"): r.headers.setdefault("Content-Security-Policy", HTML_CSP)
+    else: r.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    return r
 SECURE_COOKIES = PUBLIC_API_URL.startswith("https://") and os.environ.get("PAAS_INSECURE_COOKIES") != "1"
 def acct(request: Request, authorization: str = Header(None)):
     """Bearer API key (CLI/MCP/automation) or session cookie (dashboard). Cookie-authenticated writes need the
@@ -332,8 +346,28 @@ def auth_register(c: Creds):
     except ValueError as e: raise HTTPException(400, str(e))
     except PermissionError as e: raise HTTPException(409, str(e))
     return _login_response(a, {"ok": True, "email": a["email"], "api_key": a["api_key"]})
+# Soft login rate limit (in-memory, per process): LOGIN_LIMIT attempts per LOGIN_WINDOW s per client IP and per email -> 429 + Retry-After.
+LOGIN_LIMIT = int(os.environ.get("PAAS_LOGIN_LIMIT", "10")); LOGIN_WINDOW = 60.0
+TRUSTED_PROXIES = {x.strip() for x in os.environ.get("PAAS_TRUSTED_PROXIES", "127.0.0.1,::1").split(",") if x.strip()}
+_login_hits = {}
+def client_ip(request: Request):
+    """Peer address; X-Forwarded-For is honoured only when the peer is our own proxy (Caddy appends the real client last)."""
+    peer = request.client.host if request.client else ""
+    if peer in TRUSTED_PROXIES:
+        xff = [x.strip() for x in request.headers.get("x-forwarded-for", "").split(",") if x.strip()]
+        if xff: return xff[-1]
+    return peer
+def _rate_check(keys, now=None):
+    now = now or time.time(); retry = 0
+    if len(_login_hits) > 50000: _login_hits.clear()   # memory bound; worst case resets the window
+    for k in keys:
+        h = [t for t in _login_hits.get(k, []) if now - t < LOGIN_WINDOW]; _login_hits[k] = h
+        if len(h) >= LOGIN_LIMIT: retry = max(retry, int(LOGIN_WINDOW - (now - h[0])) + 1)
+    if retry: raise HTTPException(429, "too many login attempts; try again later", headers={"Retry-After": str(retry)})
+    for k in keys: _login_hits[k].append(now)
 @app.post("/v1/auth/login")
-def auth_login(c: Creds):
+def auth_login(c: Creds, request: Request):
+    _rate_check(("ip:" + client_ip(request), "email:" + (c.email or "").strip().lower()))
     try: return _login_response(auth.login(c.email, c.password))
     except PermissionError as e: raise HTTPException(401, str(e))
 @app.post("/v1/auth/magic")

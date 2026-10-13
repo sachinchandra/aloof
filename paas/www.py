@@ -163,10 +163,11 @@ def og(name: str):
     if not os.path.exists(f): f = os.path.join(ROOT, "paas", "static", "og", "default.png")
     return FileResponse(f, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 # ---------------- admin ----------------
+from .engine import TEST_EMAIL_PATTERNS
 def mark_flags():
     q("update accounts set is_admin=1 where lower(email)=?", (ADMIN_EMAIL,))
     q("update accounts set is_admin=0 where lower(email)!=? and is_admin=1", (ADMIN_EMAIL,))
-    for pat in ("%@example.com", "%@example.org", "%@example.net", "%.test", "%.invalid", "%@localhost"):
+    for pat in TEST_EMAIL_PATTERNS:
         q("update accounts set is_test=1 where email like ? and (is_test is null or is_test=0)", (pat,))
 def _session(request):
     from . import auth

@@ -9,17 +9,31 @@
 		ask http://127.0.0.1:8000/v1/tls/ask
 	}
 }
+# Security headers for the platform hosts only (never user apps on the https:// catch-all). CSP for HTML is set by the app.
+(aloof_sec) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
 # __SITE__ begin
 __D__ {
+	import aloof_sec
 	reverse_proxy 127.0.0.1:8000
 }
 www.__D__ {
+	import aloof_sec
 	redir https://__D__{uri} permanent
 }
 api.__D__ {
+	import aloof_sec
 	reverse_proxy 127.0.0.1:8000
 }
 mcp.__D__ {
+	import aloof_sec
 	reverse_proxy 127.0.0.1:8001
 }
 # __SITE__ end
