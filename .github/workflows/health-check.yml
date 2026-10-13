@@ -1,0 +1,58 @@
+name: Production Health Check
+
+on:
+  schedule:
+    # Run every 15 minutes
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: "API health URL to check"
+        required: false
+        default: "https://api.aloof.si/healthz"
+      mcp_url:
+        description: "MCP health URL to check"
+        required: false
+        default: "https://mcp.aloof.si/healthz"
+
+env:
+  # Production URLs from deploy/Caddyfile.prod (api.__D__ and mcp.__D__ where __D__=aloof.si)
+  API_HEALTH_URL: ${{ inputs.api_url || 'https://api.aloof.si/healthz' }}
+  MCP_HEALTH_URL: ${{ inputs.mcp_url || 'https://mcp.aloof.si/healthz' }}
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check API health
+        run: |
+          echo "Checking API: $API_HEALTH_URL"
+          response=$(curl -sSf -w "\n%{http_code}" --max-time 30 "$API_HEALTH_URL" 2>&1) || {
+            echo "::error::API health check failed: $response"
+            exit 1
+          }
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "API response: HTTP $http_code - $body"
+          if [ "$http_code" != "200" ]; then
+            echo "::error::API returned HTTP $http_code"
+            exit 1
+          fi
+
+      - name: Check MCP health
+        run: |
+          echo "Checking MCP: $MCP_HEALTH_URL"
+          response=$(curl -sSf -w "\n%{http_code}" --max-time 30 "$MCP_HEALTH_URL" 2>&1) || {
+            echo "::error::MCP health check failed: $response"
+            exit 1
+          }
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "MCP response: HTTP $http_code - $body"
+          if [ "$http_code" != "200" ]; then
+            echo "::error::MCP returned HTTP $http_code"
+            exit 1
+          fi
+
+      - name: Report success
+        run: echo "All health checks passed at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
