@@ -69,3 +69,4 @@ service-account*.json
 .DS_Store
 Thumbs.db
 PLAN.md
+!paas/static/icons/*.png
