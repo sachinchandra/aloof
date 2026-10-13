@@ -1,5 +1,6 @@
-import os, json, itertools, httpx, time, asyncio, socket
-from fastapi import FastAPI, Header, HTTPException, Request, Depends, Cookie, WebSocket
+import os, json, itertools, httpx, time, asyncio, socket, logging
+from fastapi import FastAPI, Header, HTTPException, Request, Depends, Cookie, WebSocket, BackgroundTasks
+log = logging.getLogger("paas.api")
 from fastapi.responses import PlainTextResponse, HTMLResponse, FileResponse, StreamingResponse, Response, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from . import engine
@@ -95,26 +96,33 @@ def plans(legacy: bool = False):
     gpu = _plans.gpu_status() | ({} if _plans.GPU_ENABLED else {"coming_soon": [{"id": k, "gpu": v["gpu"]} for k, v in PLANS.items() if v["kind"] == "gpu"]})
     return {"currency": "USD", "tax": "excluded; VAT/GST/sales tax added at checkout where applicable", "billing": "per second while running; volumes per provisioned GB-month; egress per GB (counts toward included usage)",
             "plans": out, "gpu": gpu, "rates": RATES, "tiers": TIERS, "regions": REGIONS, "region_note": REGION_NOTE}
-class WaitlistReq(BaseModel): email: str; gpu: str | None = None; note: str | None = None; kind: str = "gpu"; region: str | None = None; company: str | None = None
+class WaitlistReq(BaseModel):
+    email: str; gpu: str | None = None; note: str | None = None; kind: str = "gpu"; region: str | None = None; company: str | None = None
+    source: str | None = None; website: str | None = None   # website = honeypot (hidden field; humans leave it empty)
 @app.post("/v1/waitlist")
-def waitlist(w: WaitlistReq):
-    """Waitlists: kind=gpu (phase 2 GPUs), kind=region (a coming-soon region), kind=design_partner. Idempotent per email (and region)."""
+def waitlist(w: WaitlistReq, request: Request, bg: BackgroundTasks):
+    """Waitlists: kind=gpu (phase 2 GPUs), kind=region (a coming-soon region), kind=design_partner. One entry per email (and region);
+    signing up again keeps the first signup date and updates the choice. Sends a confirmation (with a removal link) and notifies the admin."""
+    from . import waitlist as W
+    if w.kind not in W.KINDS: raise HTTPException(400, "kind must be gpu, region or design_partner")
+    ip = client_ip(request)
     try: e = auth._check_email(w.email)
     except ValueError as x: raise HTTPException(400, str(x))
-    from .db import kv_put
     from .www_content import SOON_REGIONS
-    if w.kind == "region":
-        codes = {c: l for c, l, _, _ in SOON_REGIONS}
-        if w.region not in codes: raise HTTPException(400, f"region must be one of {list(codes)}")
-        kv_put("region_waitlist", f"{e}|{w.region}", json.dumps({"region": w.region, "ts": time.time()}))
-        return {"ok": True, "message": f"You're on the waitlist for {codes[w.region]}. We'll email you once, when it's live."}
-    if w.kind == "design_partner":
-        kv_put("design_partner", e, json.dumps({"company": (w.company or "")[:200], "note": (w.note or "")[:1000], "ts": time.time()}))
-        return {"ok": True, "message": "Thanks. We read every application and will reply by email."}
-    if w.kind != "gpu": raise HTTPException(400, "kind must be gpu, region or design_partner")
-    if w.gpu and (w.gpu not in PLANS or PLANS[w.gpu]["kind"] != "gpu"): raise HTTPException(400, "gpu must be a GPU plan id")
-    kv_put("gpu_waitlist", e, json.dumps({"gpu": w.gpu, "note": (w.note or "")[:500], "ts": time.time()}))
-    return {"ok": True, "message": "You're on the GPU waitlist. We'll email you when GPUs launch."}
+    codes = {c: l for c, l, _, _ in SOON_REGIONS}
+    if w.kind == "region" and w.region not in codes: raise HTTPException(400, f"region must be one of {list(codes)}")
+    if w.kind == "gpu" and w.gpu and (w.gpu not in PLANS or PLANS[w.gpu]["kind"] != "gpu"): raise HTTPException(400, "gpu must be a GPU plan id")
+    msgs = {"gpu": "You're on the GPU waitlist. We'll email you when GPUs launch.", "region": f"You're on the waitlist for {codes.get(w.region, '')}. We'll email you once, when it's live.",
+            "design_partner": "Thanks. We read every application and will reply by email."}
+    W.rate_check(ip)   # counts well-formed submissions only, so a typo doesn't burn the allowance
+    if w.website:   # honeypot tripped: look successful, store and send nothing
+        log.info("waitlist honeypot ip=%s", ip); return {"ok": True, "message": msgs[w.kind], "duplicate": False}
+    note = (w.note or "")[:1000 if w.kind == "design_partner" else 500] or None
+    r, created = W.upsert(w.kind, e, gpu=w.gpu if w.kind == "gpu" else None, region=w.region if w.kind == "region" else None,
+                          company=(w.company or "")[:200] or None if w.kind == "design_partner" else None, note=note,
+                          source=W._source(w.source, request.headers.get("referer")), ip=ip)
+    if created: bg.add_task(W.send_emails, r["id"]); return {"ok": True, "message": msgs[w.kind], "duplicate": False}
+    return {"ok": True, "message": "You're already on the list, we updated your choice." if w.kind != "design_partner" else "You're already on the list, we updated your application.", "duplicate": True}
 @app.get("/v1/providers")
 def providers():
     out = []
@@ -738,6 +746,9 @@ def admin_backups_run(verify: bool=False):
 from . import devx
 app.include_router(devx.R)
 app.include_router(www.R)
+from . import waitlist as _wl; app.include_router(_wl.R)
+try: _wl.migrate_kv()
+except Exception as _e: logging.getLogger('paas').error('waitlist kv migration failed: %s', _e)
 # ---------------- edge proxy (port 8080): <app>.BASE_DOMAIN or /_app/<app>/ ----------------
 proxy = FastAPI(); _rr = {}; client = httpx.AsyncClient(timeout=60)
 EGRESS = billing.EGRESS   # app -> bytes sent to clients since last meter tick

@@ -256,17 +256,9 @@ def metrics():
     email = {a["id"]: a["email"] for a in accts}
     top = [{"account_id": r["account_id"], "email": email[r["account_id"]], "tier": acct_tier[r["account_id"]], "usage_usd": round((r["c"] or 0) / 100, 4),
             "apps": sum(1 for a in apps if a["account_id"] == r["account_id"])} for r in usage if r["account_id"] in real][:15]
-    wl = lambda k: q("select count(*) n from kv where kind=?", (k,), one=True)["n"]
-    reg = {}
-    for r in q("select v from kv where kind='region_waitlist'"):
-        try: x = json.loads(r["v"])["region"]; reg[x] = reg.get(x, 0) + 1
-        except Exception: pass
-    partners = []
-    for r in q("select k, v from kv where kind='design_partner'"):
-        try: v = json.loads(r["v"])
-        except Exception: v = {}
-        partners.append({"email": r["k"], "company": v.get("company"), "note": v.get("note"), "ts": v.get("ts")})
-    partners.sort(key=lambda x: -(x["ts"] or 0))
+    from . import waitlist as W
+    wlc = W.counts()
+    partners = [{"email": r["email"], "company": r["company"], "note": r["note"], "ts": r["created"]} for r in W.rows("design_partner", include_test=False)]
     failed = [r for r in q("select app,version,status,reason,created from releases where status='failed' order by created desc limit 40") if r["app"] in app_names][:20]
     errs = q("select name as app, status, error, updated from apps where error is not null and error != '' order by updated desc limit 15")
     st_fail = q("select component, ts, code, error from status_checks where ok=0 order by ts desc limit 10")
@@ -283,7 +275,7 @@ def metrics():
                         "deploys_per_day": _series([r["created"] for r in rels]), "deploys_30d": len(rels), "failed_30d": sum(1 for r in rels if r["status"] == "failed")},
         "data": {"postgres_dbs": q("select count(*) n from pg_dbs", one=True)["n"], "volumes": q("select count(*) n from volumes", one=True)["n"],
                  "volume_gb": q("select coalesce(sum(size_gb),0) n from volumes", one=True)["n"]},
-        "waitlist": {"gpu": wl("gpu_waitlist"), "regions": wl("region_waitlist"), "by_region": reg, "design_partners": len(partners)},
+        "waitlist": wlc, "mail": W.mail_health(),
         "design_partners": partners[:50], "top_users": top, "server": server_health(), "backups": offsite.status(),
         "certs": [cert_expiry(h) for h in hosts], "errors": {"failed_deploys": failed, "app_errors": errs, "status_failures": st_fail}, "audit": aud,
         "accounts": [{"id": a["id"], "email": a["email"], "tier": a["tier"] or "free", "created": a["created"], "credit_usd": round((a["credit_cents"] or 0) / 100, 2)} for a in sorted(accts, key=lambda a: -(a["created"] or 0))][:200],
@@ -291,7 +283,7 @@ def metrics():
 @R.get("/v1/admin/dashboard")
 def admin_dashboard_json(_=Depends(require_admin)): return metrics()
 EXPORTS = {"users": lambda m: m["accounts"], "top_users": lambda m: m["top_users"], "signups": lambda m: m["users"]["signups_per_day"], "deploys": lambda m: m["deployments"]["deploys_per_day"],
-           "audit": lambda m: m["audit"], "failed_deploys": lambda m: m["errors"]["failed_deploys"], "design_partners": lambda m: m["design_partners"],
+           "audit": lambda m: m["audit"], "failed_deploys": lambda m: m["errors"]["failed_deploys"], "design_partners": lambda m: m["design_partners"], "waitlist": lambda m: __import__("paas.waitlist", fromlist=["rows"]).rows(include_test=False),
            "summary": lambda m: [{"metric": k, "value": v} for k, v in _flat(m).items()]}
 def _flat(m):
     out = {"users_total": m["users"]["total"], "paid_customers": m["paid_customers"], "mrr_usd": m["revenue"]["mrr_usd"], "revenue_this_month_usd": m["revenue"]["revenue_this_month_usd"],

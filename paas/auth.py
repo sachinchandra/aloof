@@ -13,10 +13,12 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 log = logging.getLogger("paas.mail")
 class MailError(RuntimeError): pass
 def _production(): return (E("PAAS_PUBLIC_API_URL") or "").startswith("https://") and E("PAAS_DEV_OUTBOX") != "1"
-def send_mail(to, subject, body):
+def send_mail(to, subject, body, html=None, headers=None):
     """SMTP when SMTP_HOST is set. Without it: dev appends to the outbox; production refuses (the outbox would hold live
     sign-in links and API keys) and raises MailError. SMTP failures are logged (never the body) and raise MailError."""
     msg = EmailMessage(); msg["From"] = E("MAIL_FROM", "Aloof <no-reply@aloof.si>"); msg["To"] = to; msg["Subject"] = subject; msg.set_content(body, cte="8bit")
+    if html: msg.add_alternative(html, subtype="html")
+    for k, v in (headers or {}).items(): msg[k] = v
     if E("SMTP_HOST"):
         try:
             with smtplib.SMTP(E("SMTP_HOST"), int(E("SMTP_PORT", "587")), timeout=20) as s:

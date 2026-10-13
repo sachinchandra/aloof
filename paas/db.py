@@ -85,6 +85,11 @@ alter table sessions add column mfa_verified int default 0;
 create table if not exists status_checks(id AUTOPK, ts REAL, component TEXT, ok int, ms REAL, code int, error TEXT);
 create index if not exists status_checks_c on status_checks(component, ts);
 """)
+    ,(8, """
+create table if not exists waitlist(id AUTOPK, kind TEXT, email TEXT, item TEXT default '', gpu TEXT, region TEXT, company TEXT, note TEXT, source TEXT,
+  consent_ts REAL, created REAL, updated REAL, ip TEXT, is_test int default 0, mail_user TEXT, mail_admin TEXT, unique(kind, email, item));
+create index if not exists waitlist_kind on waitlist(kind, created);
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
