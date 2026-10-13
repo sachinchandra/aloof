@@ -144,8 +144,14 @@ def bundle_secrets(path):
              "golive.env": os.path.join(ROOT, "deploy", "golive.env"), "wg-hub.key": os.path.join(ROOT, "data", "wg-hub.key"),
              "database_url": os.path.join(ROOT, "data", "database_url")}
     with tarfile.open(path, "w:gz") as t:
+        skipped = []
         for n, p in files.items():
-            if os.path.exists(p): t.add(p, arcname=n)
+            if not os.path.exists(p): continue
+            if os.access(p, os.R_OK): t.add(p, arcname=n)
+            else: skipped.append(n)   # e.g. root-owned wg-hub.key: back it up out of band
+        if skipped:
+            b = ("not readable by the control plane, back up separately: " + ", ".join(skipped) + "\n").encode()
+            ti = tarfile.TarInfo("SKIPPED.txt"); ti.size = len(b); t.addfile(ti, io.BytesIO(b)); log.warning("secrets bundle skipped %s", skipped)
         if E("PAAS_SECRET_KEY"):
             b = E("PAAS_SECRET_KEY").encode(); ti = tarfile.TarInfo("PAAS_SECRET_KEY.env"); ti.size = len(b); t.addfile(ti, io.BytesIO(b))
 def _due(kind, owner, every=86400):
