@@ -68,7 +68,7 @@ def test_gpu_hidden_when_disabled_and_waitlist():
     txt = c.get("/llms.txt").text
     assert "COMING SOON" in txt and "$5.49" not in txt and "/v1/waitlist" in txt and "India" not in txt and "Hetzner" in txt
     html = c.get("/pricing").text; assert "coming soon" in html and "id=wl" in html and "$5.49" not in html
-    assert "compute in the eu" in c.get("/").text.lower() and "India" not in c.get("/").text
+    h = c.get("/").text; assert "compute in the eu" not in h.lower() and "run in the EU" in h and "India" not in h
     for prov in ("hyperstack",): assert P.PROVISIONERS[prov].available()[0] is False
     assert RunpodDriver().available()[0] is False
 

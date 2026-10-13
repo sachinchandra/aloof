@@ -539,7 +539,7 @@ def api_docs():
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>API reference · {BRAND}</title>
 <meta name=description content="Interactive reference for the {BRAND} REST API: apps, deploys, volumes, Postgres, domains, billing and keys. Authenticate with Authorization: Bearer.">
 <link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3">
-<link rel=stylesheet href="/static/swagger/swagger-ui.css?v={SWAGGER_V}" integrity="{SWAGGER_SRI['css']}" crossorigin=anonymous><link rel=stylesheet href="/static/aloof.css?v=13">
+<link rel=stylesheet href="/static/swagger/swagger-ui.css?v={SWAGGER_V}" integrity="{SWAGGER_SRI['css']}" crossorigin=anonymous><link rel=stylesheet href="/static/aloof.css?v=14">
 <style>body{{margin:0;background:#fff}}.topbar{{display:none}}.abar{{display:flex;align-items:center;gap:14px;padding:14px 24px;background:#0a0807;color:#f6f1ec}}.abar .logo{{color:#f6f1ec!important}}.abar a{{color:#a9b0c3}}.abar .sp{{flex:1}}</style></head>
 <body><div class=abar><a class=logo href="/"><i></i>{BRAND}</a><span style="color:#998b7e">API reference</span><span class=sp></span><a href="/docs/api">Guide</a><a href="/dashboard">Dashboard</a></div><div id=swagger-ui></div>
 <script src="/static/swagger/swagger-ui-bundle.js?v={SWAGGER_V}" integrity="{SWAGGER_SRI['js']}" crossorigin=anonymous></script>
