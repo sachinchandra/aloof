@@ -212,3 +212,12 @@ input,select{transition:border-color .15s,box-shadow .15s}input:focus,select:foc
 .uses{gap:12px;margin-top:12px}.use{border:1px solid var(--line);border-radius:var(--r-md);padding:14px;background:var(--panel2);font-size:13px;color:var(--fg2)}.use b{display:block;color:var(--fg);font-size:14px;margin-bottom:4px}
 pre .copy{position:absolute;top:8px;right:8px}pre{position:relative}
 .modal label{display:block}
+/* ---- logo sizing v4: confident brand anchor ---- */
+a.logo,.top a.logo{display:inline-flex;align-items:center;gap:10px;font-size:21px;font-weight:700;letter-spacing:-.04em;line-height:1;color:var(--fg)!important;text-decoration:none!important}
+a.logo i{width:28px;height:28px;flex:none}
+.top a.logo{margin-right:10px}
+.f a.logo{font-size:21px}
+.side a.logo{font-size:20px;gap:9px;padding:6px 10px 20px}.side a.logo i{width:26px;height:26px}
+.auth a.logo{font-size:24px;gap:11px}.auth a.logo i{width:32px;height:32px}
+.abar a.logo{color:#eef0f6!important;font-size:19px}.abar a.logo i{width:26px;height:26px}
+@media(max-width:640px){a.logo,.top a.logo{font-size:19px;gap:9px}a.logo i{width:26px;height:26px}}
