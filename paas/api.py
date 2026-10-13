@@ -275,7 +275,7 @@ async def billing_webhook(request: Request):
 @app.get("/v1/billing")
 def billing_summary(a=Depends(acct)):
     a = q("select * from accounts where id=?", (a["id"],), one=True)
-    return _wallet(a) | {"currency": "USD", "stripe": stripe_billing.configured(), "stripe_tax": stripe_billing.tax_enabled(), "razorpay": rzp.enabled(),
+    return _wallet(a) | {"currency": "USD", "stripe": stripe_billing.configured(), "stripe_tax": stripe_billing.tax_enabled(), "topup_min_usd": stripe_billing.MIN_TOPUP, "topup_max_usd": stripe_billing.MAX_TOPUP, "rates": RATES, "razorpay": rzp.enabled(),
             "subscription": a.get("stripe_subscription"), "month": billing.month_summary(a["id"]), "tiers": TIERS,
             "profile": {k: a.get(k) for k in ("billing_name", "country", "tax_id")},
             "payments": q("select id,kind,credit_cents,amount_cents,tier,status,invoice_url,created from stripe_sessions where account_id=? order by created desc limit 50", (a["id"],)),
@@ -360,9 +360,13 @@ def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id
 def auth_mcp_key(a=Depends(acct)):
     """Key bound to the MCP OAuth connector; doesn't revoke the CLI key. Re-login rotates only this one."""
     return {"api_key": engine.create_named_key(a["id"], "mcp-oauth")}
-@app.get("/favicon.ico", include_in_schema=False)
-def favicon():
-    return Response('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#111"/><text x="16" y="23" font-size="20" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="700">a</text></svg>', media_type="image/svg+xml")
+ICONS = {"/favicon.ico": ("favicon.ico", "image/x-icon"), "/icon.svg": ("icon.svg", "image/svg+xml"), "/favicon-16x16.png": ("favicon-16x16.png", "image/png"),
+         "/favicon-32x32.png": ("favicon-32x32.png", "image/png"), "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
+         "/icon-192.png": ("icon-192.png", "image/png"), "/icon-512.png": ("icon-512.png", "image/png"), "/site.webmanifest": ("site.webmanifest", "application/manifest+json")}
+def _icon_route(path, fn, mt):
+    @app.get(path, include_in_schema=False)
+    def _icon(): return FileResponse(os.path.join(ROOT, "paas", "static", "icons", fn), media_type=mt, headers={"Cache-Control": "public, max-age=86400"})
+for _p, (_f, _m) in ICONS.items(): _icon_route(_p, _f, _m)
 @app.get("/cli/aloof", response_class=PlainTextResponse)
 def cli_download():
     return open(os.path.join(os.path.dirname(__file__), "..", "cli", "aloof")).read()
@@ -462,7 +466,9 @@ def static_css(): return FileResponse(os.path.join(ROOT, "paas", "static", "aloo
 @app.get("/terms", response_class=HTMLResponse)
 def legal_page(request: Request): return www.at(request.url.path, "default", site.legal, request.url.path.strip("/"), BRAND)
 @app.get("/dashboard", response_class=HTMLResponse)
-def dash(): return open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND)
+def dash(request: Request):
+    if not auth.session_account(request.cookies.get(auth.COOKIE)): return RedirectResponse("/login?next=/dashboard", 303)
+    return open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND)
 
 
 # ---------------- Fly parity: releases/rollback, managed Postgres, snapshots, exec/console, log drains/history, audit ----------------
@@ -716,3 +722,13 @@ async def edge(path: str, request: Request):
         finally:
             await r.aclose(); controller.M.end(name)
     return StreamingResponse(body(), status_code=r.status_code, headers={k:v for k,v in r.headers.items() if k.lower() not in HOP} | {"x-paas-instance": str(i["port"])})
+
+# Branded 404 for browsers; API/JSON clients keep {"detail": ...}
+from starlette.exceptions import HTTPException as _StarHTTP
+from fastapi.exception_handlers import http_exception_handler as _default_http
+@app.exception_handler(_StarHTTP)
+async def _http_exc(request: Request, exc):
+    p = request.url.path
+    if exc.status_code == 404 and "text/html" in request.headers.get("accept", "") and not p.startswith(("/v1/", "/api/", "/mcp", "/.well-known", "/_app/")):
+        return HTMLResponse(site.not_found(BRAND), 404)
+    return await _default_http(request, exc)

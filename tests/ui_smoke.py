@@ -11,7 +11,7 @@ with sync_playwright() as p:
     pg.on("response", lambda r: r.status >= 400 and not any(e in r.url for e in EXPECTED) and bad.append(f"{r.status} {r.url}"))
     for path, shot in (("/", "landing"), ("/pricing", "pricing"), ("/docs/gpu", "docs")):
         pg.goto(B + path); assert "Aloof" in pg.title(); pg.screenshot(path=f"/workspace/paas/data/ui-{shot}.png", full_page=True)
-    pg.goto(B + "/dashboard"); pg.wait_for_url("**/login", timeout=10000); print("unauthenticated /dashboard -> /login: ok")
+    pg.goto(B + "/dashboard"); pg.wait_for_url("**/login*", timeout=10000); print("unauthenticated /dashboard -> /login: ok")
     n0 = open(OUT).read().count("token=ml_") if __import__("os").path.exists(OUT) else 0
     pg.fill("#email", "sachin@example.com"); pg.click("text=email me a sign-in link"); pg.wait_for_timeout(1500)
     txt = open(OUT).read(); assert txt.count("token=ml_") == n0 + 1, "magic link not written to outbox"

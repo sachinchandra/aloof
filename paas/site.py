@@ -38,7 +38,7 @@ def head(title, desc):
 <meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
 <link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
-<link rel=icon href="/favicon.ico"><link rel=stylesheet href="/static/aloof.css?v=6">{THEME_JS}</head>"""
+<link rel=icon href="/favicon.ico" sizes="any"><link rel=icon href="/icon.svg" type="image/svg+xml"><link rel=apple-touch-icon href="/apple-touch-icon.png"><link rel=manifest href="/site.webmanifest"><link rel=stylesheet href="/static/aloof.css?v=7">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/changelog">Changelog</a></nav>
@@ -107,14 +107,14 @@ def landing(brand, base, api, mcp):
                 if _plans.GPU_ENABLED else _feat("bolt", "GPUs: coming soon", "L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist →</a>"))
     cpu = [k for k, p in PLANS.items() if p["kind"] == "cpu" and not p["legacy"] and p["cpu_class"] == "shared"]
     pcards = "".join(f"<div class='card reveal{' hl' if k == 'shared-1x-1gb' else ''}'>{'<span class=tag>popular</span>' if k == 'shared-1x-1gb' else ''}<h3><code>{k}</code></h3><div class=price>{_money(PLANS[k]['price_usd_month'])}<small>/mo</small></div><p>{PLANS[k]['vcpu']:g} shared vCPU · {_gb(PLANS[k]['memory_mb'])} GB RAM · per second</p></div>" for k in cpu[:4])
-    body = f"""<section class=hero><div class=wrap><div><span class=badge><span class=dot></span>Compute in the EU · Germany &amp; Finland · billed per second in USD</span>
+    body = f"""<section class=hero><div class=wrap><div><span class=badge><span class=dot></span>Compute in the EU · Nuremberg, Germany · billed per second in USD</span>
 <h1>Ship backends,<br><span class=grad>not infrastructure.</span></h1>
 <p class=lead>{brand} runs your Docker image or git repo with HTTPS at <code>&lt;app&gt;.{base}</code>, autoscaling down to zero, volumes and custom domains. One command, or let your AI assistant deploy over MCP.</p>
 <div class=cta><a class="btn pri" href="/login#register">Deploy your first app →</a><a class="btn ghost" href="/docs">Read the docs</a></div>
 <div class=trust><span>{svg("lock")} TLS on every app</span><span>{svg("key")} Secrets encrypted at rest</span><span>{svg("eu")} EU hosting</span></div></div>
 {_term(base)}</div></section>
 <div class=wrap><div class=works aria-label="Works with">{stack_row()}</div></div>
-<section class=s id=features><div class=wrap><div class=eyebrow>Platform</div><h2 class=t>Everything a backend needs. Nothing you have to babysit.</h2><p class=t>The essentials of Fly.io, Render and Railway, priced at or below their list prices, with an honest picture of where your code runs.</p>
+<section class=s id=features><div class=wrap><div class=eyebrow>Platform</div><h2 class=t>Everything a backend needs. Nothing you have to&nbsp;babysit.</h2><p class=t>The essentials of Fly.io, Render and Railway, priced at or below their list prices, with an honest picture of where your code runs.</p>
 <div class="grid g3">{_feat("git", "Git or image deploys", "Push a repo with a Dockerfile or point at any image. Rolling redeploys only cut over after the new instance passes its health check.")}
 {_feat("scale", "Autoscaling to zero", "Scale on in-flight requests or CPU. Idle apps sleep and wake on the next request in about a second, so you pay only while serving.")}
 {_feat("disk", "Persistent volumes", "Attach volumes that survive restarts and redeploys, billed per provisioned GB-month.")}
@@ -298,13 +298,13 @@ def login(brand):
 <div class=tabs role=tablist><button type=button role=tab id=tl class=on onclick="mode('login')">Log in</button><button type=button role=tab id=tr onclick="mode('register')">Create account</button></div>
 <form onsubmit="event.preventDefault();go(M)"><div id=msg role=status aria-live=polite class=muted style="min-height:20px;font-size:14px"></div>
 <label for=email>Email</label><input id=email type=email autocomplete=email required placeholder="you@company.com">
-<label for=pw id=pwl>Password</label><input id=pw type=password autocomplete=current-password placeholder="At least 10 characters">
+<label for=pw id=pwl>Password</label><input id=pw type=password autocomplete=current-password placeholder="Your password" aria-describedby=pwh><small id=pwh class="muted helper" style="display:none">At least 10 characters.</small>
 <p style="margin-top:18px"><button class="btn pri" style="width:100%;justify-content:center" id=lb>Log in</button></p></form>
 <p class=muted style="text-align:center;font-size:14px">or <a href="#" onclick="magic();return false">email me a sign-in link</a></p>
-<p class=muted style="font-size:12.5px;text-align:center;margin-top:18px">{svg("lock")}</p><p class=muted style="font-size:12.5px;text-align:center;margin-top:-8px">Sessions use HttpOnly cookies. By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy policy</a>.</p></div></div>
+<p class="muted secure-note">{svg("lock")}<span>Sessions use HttpOnly cookies. By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy policy</a>.</span></p></div></div>
 <script>
 var M='login';function mode(m){{M=m;tl.classList.toggle('on',m=='login');tr.classList.toggle('on',m=='register');title.textContent=m=='login'?'Welcome back':'Create your account';
-subt.textContent=m=='login'?'Log in to deploy and manage your apps.':'$5 of starting credit. Free tier with $1/month of usage.';lb.textContent=m=='login'?'Log in':'Create account';pw.autocomplete=m=='login'?'current-password':'new-password'}}
+subt.textContent=m=='login'?'Log in to deploy and manage your apps.':'$5 of starting credit. Free tier with $1/month of usage.';lb.textContent=m=='login'?'Log in':'Create account';pwh.style.display=m=='login'?'none':'block';pw.placeholder=m=='login'?'Your password':'Choose a password';pw.autocomplete=m=='login'?'current-password':'new-password'}}
 if(location.hash=='#register')mode('register');
 async function go(kind){{const r=await fetch('/v1/auth/'+kind,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,password:pw.value}})}});
  const j=await r.json(); if(!r.ok){{msg.className='bad';msg.textContent=j.detail||'error';return}}
@@ -331,3 +331,9 @@ def legal(name, brand):
     if name not in LEGAL: return None
     t, b = LEGAL[name]
     return page(f"{t} · {brand}", f"<div class=wrap style='max-width:820px;padding:64px 24px 80px'><div class=eyebrow>{brand}</div><h1 style='font-size:40px;letter-spacing:-.03em;margin:8px 0 18px'>{t}</h1><div class=sub>{b}</div></div>", brand)
+
+def not_found(brand="Aloof"):
+    return page(f"Page not found · {brand}", """<section class="hero nf"><div class=wrap style="display:block;text-align:center;max-width:620px">
+<div class=nf-code aria-hidden=true>404</div><h1 style="font-size:40px">This page wandered off.</h1>
+<p class=lead style="margin:14px auto 28px">The page you asked for doesn't exist or has moved. Your apps are fine.</p>
+<div class=cta style="justify-content:center"><a class="btn pri" href="/">Back to home</a><a class="btn ghost" href="/dashboard">Open dashboard</a><a class="btn ghost" href="/docs">Docs</a></div></div></section>""", brand)
