@@ -1,0 +1,5 @@
+/* Voltage: cyan to lime on blue-black. Load after aloof.css to switch. */
+:root{--bg:#05080b;--bg2:#091017;--panel:#0d151d;--panel2:#121c26;--line:#1a2734;--line2:#253646;--fg:#eaf3f8;--fg2:#a3b5c2;--fg3:#7f93a2;
+--acc:#22d3ee;--acc2:#a3e635;--acc3:#38bdf8;--grad:linear-gradient(135deg,#22d3ee,#a3e635);--ok:#4ade80;--warn:#fbbf24;--bad:#fb7185;--code:#060a0e}
+[data-theme=light]{--bg:#f6fafc;--bg2:#edf4f8;--panel:#fff;--panel2:#f2f7fa;--line:#dde8ee;--line2:#c8d8e2;--fg:#08131b;--fg2:#3b5060;--fg3:#566b7a;
+--acc:#0891b2;--acc2:#65a30d;--acc3:#0284c7;--grad:linear-gradient(135deg,#0891b2,#65a30d);--code:#08131b}

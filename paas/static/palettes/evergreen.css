@@ -1,0 +1,5 @@
+/* Evergreen: emerald + teal on graphite. Load after aloof.css to switch. */
+:root{--bg:#060908;--bg2:#0a0f0d;--panel:#0e1513;--panel2:#131c19;--line:#1c2925;--line2:#27372f;--fg:#ecf3ef;--fg2:#a6b8af;--fg3:#82958c;
+--acc:#34d399;--acc2:#2dd4bf;--acc3:#a3e635;--grad:linear-gradient(135deg,#34d399,#14b8a6);--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--code:#070b0a}
+[data-theme=light]{--bg:#f7faf8;--bg2:#eef4f1;--panel:#fff;--panel2:#f3f8f5;--line:#dfe9e4;--line2:#cbdad2;--fg:#0b1612;--fg2:#3f544b;--fg3:#5a6e65;
+--acc:#059669;--acc2:#0d9488;--acc3:#65a30d;--grad:linear-gradient(135deg,#059669,#0d9488);--code:#0b1612}

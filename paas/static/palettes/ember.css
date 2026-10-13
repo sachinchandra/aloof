@@ -1,0 +1,5 @@
+/* Ember: electric orange + amber on warm charcoal. Load after aloof.css to switch. */
+:root{--bg:#0a0807;--bg2:#100d0b;--panel:#16120f;--panel2:#1c1713;--line:#2a221c;--line2:#382d24;--fg:#f6f1ec;--fg2:#bcafa3;--fg3:#998b7e;
+--acc:#ff7a1a;--acc2:#ffb020;--acc3:#ff4d4d;--grad:linear-gradient(135deg,#ff6a00,#ffb020);--ok:#4ade80;--warn:#facc15;--bad:#f87171;--code:#0c0a08}
+[data-theme=light]{--bg:#fcfaf7;--bg2:#f6f1ea;--panel:#fff;--panel2:#faf5ef;--line:#ece3d8;--line2:#ddd0c0;--fg:#1a120b;--fg2:#5a4a3c;--fg3:#75604e;
+--acc:#e85d00;--acc2:#c98a00;--acc3:#dc2626;--grad:linear-gradient(135deg,#ea580c,#d97706);--code:#1a120b}

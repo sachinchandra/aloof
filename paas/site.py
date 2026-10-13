@@ -34,11 +34,11 @@ CUR = {"path": "/", "og": "default", "type": "website"}
 def head(title, desc):
     t, d = html.escape(title), html.escape(desc); u = SITE + CUR["path"]; og = f"{SITE}/static/og/{CUR['og']}.png"
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>{t}</title><meta name=description content="{d}"><meta name=theme-color content="#07080c"><link rel=canonical href="{u}">
+<title>{t}</title><meta name=description content="{d}"><meta name=theme-color content="#0a0807"><link rel=canonical href="{u}">
 <meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
 <link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
-<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=10">{THEME_JS}</head>"""
+<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=11">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/changelog">Changelog</a></nav>
