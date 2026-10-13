@@ -40,7 +40,7 @@ runcmd:
   - [mkdir, -p, /workspace]
   - [git, clone, --depth, "1", {json.dumps(repo)}, /workspace/paas]
   - [chown, -R, "box:box", /workspace]
-  - [su, -, box, -c, "cd /workspace/paas && bash deploy/setup-box.sh > /workspace/paas/data/setup-box.log 2>&1 && sudo touch /var/lib/aloof-ready"]
+  - [su, -, box, -c, "cd /workspace/paas && mkdir -p data && bash deploy/setup-box.sh > /workspace/paas/data/setup-box.log 2>&1 && sudo touch /var/lib/aloof-ready"]
 """
 class Hetzner:
     def __init__(self, token, client=None):
@@ -107,7 +107,7 @@ def main(argv=None, client=None, run=subprocess.run, sleep=10):
     print(f"2/5 server {NAME} ({stype})"); s, new = h.server(stype, locs, cloud_init(pubkey), kid, fw)
     s = h.wait_running(s["id"], sleep=sleep if client is None else 0)
     ip = s["public_net"]["ipv4"]["ip"]; ip6 = ((s["public_net"].get("ipv6") or {}).get("ip") or "").replace("::/64", "::1") or None
-    print(f"   {'created' if new else 'found'} {NAME} {ip} in {s.get('datacenter', {}).get('location', {}).get('name', '?')}")
+    print(f"   {'created' if new else 'found'} {NAME} {ip} in {(s.get('location') or s.get('datacenter', {}).get('location') or {}).get('name', '?')}")
     if not a.no_ssh:
         ssh = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", f"box@{ip}"]
         print("3/5 waiting for cloud-init + setup-box.sh (5-10 min)")
