@@ -174,6 +174,9 @@ def _run_deploy(name, image=None, reason=None):
             if bad and old and not single:
                 raise RuntimeError(f"{len(bad)} new instance(s) failed readiness")
             for o in old if not single else []: _stop(o)   # roll: new up before old down
+            if (q("select status from apps where name=?", (name,), one=True) or {}).get("status") == "destroyed":
+                for n in new: _stop({"id": n.id, "provider": drv.name})
+                _set_release(name, ver, "failed"); log("deploy aborted: app destroyed"); return
             q("update apps set status=?, updated=?, error=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(),
               (f"{len(bad)} instance(s) not ready" if bad else None), name))
             _set_release(name, ver, "active"); log(f"deploy complete (v{ver} live)")
@@ -254,8 +257,10 @@ def delete_volume(vol):
         except Exception: pass
     q("delete from volumes where name=?", (vol,))
 def destroy(name):
+    q("update apps set status='destroyed' where name=?", (name,))   # first, so an in-flight deploy aborts instead of resurrecting it
     q("update volumes set app=null, mount_path=null where app=?", (name,)); q("delete from domains where app=?", (name,))
-    for o in q("select * from instances where app=? and status='running'", (name,)): _stop(o)
+    with _lock(name):
+        for o in q("select * from instances where app=? and status='running'", (name,)): _stop(o)
     q("update apps set status='destroyed' where name=?", (name,)); event(name, "destroyed")
 def get_app(name):
     a = q("select * from apps where name=?", (name,), one=True)

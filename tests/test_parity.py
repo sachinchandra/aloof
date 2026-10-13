@@ -184,3 +184,12 @@ def test_docs_pricing_llms_list_new_features():
     assert "pg-basic" in c.get("/docs/postgres").text and "Managed Postgres" in c.get("/pricing").text
     t = c.get("/llms.txt").text; assert "/rollback" in t and "/v1/pg" in t and "/drains" in t and "/console" in t
     tools = set(c.get("/.well-known/mcp.json").json()["tools"]); assert {"rollback_app", "create_postgres", "exec_command", "add_log_drain", "snapshot_volume"} <= tools
+
+def test_destroy_during_redeploy_leaves_nothing_running(fake, user, monkeypatch):
+    deploy(user, "racer", "good:r1"); orig = fake.start_instance
+    def slow(*a, **k): time.sleep(0.6); return orig(*a, **k)
+    monkeypatch.setattr(fake, "start_instance", slow)
+    user.post("/v1/apps/racer/env", json={"env": {"A": "1"}}); time.sleep(0.2)
+    assert user.delete("/v1/apps/racer").status_code == 200; time.sleep(1.5)
+    assert q("select status from apps where name='racer'", one=True)["status"] == "destroyed"
+    assert not q("select 1 from instances where app='racer' and status='running'")

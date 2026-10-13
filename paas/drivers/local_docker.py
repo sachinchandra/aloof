@@ -128,6 +128,8 @@ class LocalDockerDriver(Driver):
     def stop_instance(self, iid):
         try: self.c.containers.get(iid).remove(force=True)
         except docker.errors.NotFound: pass
+        except docker.errors.APIError as e:
+            if "already in progress" not in str(e): raise   # concurrent stop of the same container
     def logs(self, iid, tail=200):
         try: return self.c.containers.get(iid).logs(tail=tail, timestamps=True).decode(errors="replace")
         except docker.errors.NotFound: return "(instance gone)\n"
