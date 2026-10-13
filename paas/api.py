@@ -333,7 +333,11 @@ def auth_password(p: PwReq, a=Depends(acct)):
 # ---- nodes: agent registration, bootstrap, admin ----
 def _admin_token():
     f = os.path.join(ROOT, "data", "admin_token")
-    return os.environ.get("PAAS_ADMIN_TOKEN") or (open(f).read().strip() if os.path.exists(f) else None)
+    if os.environ.get("PAAS_ADMIN_TOKEN"): return os.environ["PAAS_ADMIN_TOKEN"]
+    if not os.path.exists(f):   # first start: create one (0600) so admin endpoints work out of the box
+        import secrets as _s; os.makedirs(os.path.dirname(f), exist_ok=True)
+        fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(fd, ("adm_" + _s.token_urlsafe(32)).encode()); os.close(fd)
+    return open(f).read().strip()
 ADMIN = _admin_token()
 def admin(authorization: str = Header(None)):
     import hmac as _h

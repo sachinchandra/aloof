@@ -87,7 +87,7 @@ def fill_env(text, ip):
             .replace("__EDGE_IP_DASHED__", ip.replace(".", "-")).replace("__EDGE_IP__", ip))
 def dns_records(env, ip, ipv6=None):
     d = env.get("PAAS_BASE_DOMAIN", "aloof.si"); recs = []
-    for host in (d, f"www.{d}", env.get("PAAS_API_HOST", f"api.{d}"), env.get("PAAS_MCP_HOST", f"mcp.{d}"), f"*.{d}"):
+    for host in (d, f"www.{d}", f"api.{d}", f"mcp.{d}", f"*.{d}"):   # PAAS_API_HOST may point at an alt domain (sslip.io) pre-DNS
         recs.append(("A", host, ip))
         if ipv6: recs.append(("AAAA", host, ipv6))
     return recs
@@ -122,7 +122,8 @@ def main(argv=None, client=None, run=subprocess.run, sleep=10):
         p = run(ssh + ["cd /workspace/paas && git checkout -q -- deploy/supervisord.conf && git pull -q --ff-only && bash deploy/golive.sh"], capture_output=True)
         if p.returncode: sys.exit(f"golive.sh failed: {(p.stdout + p.stderr)[-500:]}")
     print("5/5 create these DNS records at your registrar (TTL 300):")
-    for t, host, val in dns_records(env, ip, ip6): print(f"   {t:5} {host:28} {val}")
+    filled = {k: fill_env(v, ip) for k, v in env.items()}
+    for t, host, val in dns_records(filled, ip, ip6): print(f"   {t:5} {host:28} {val}")
     print(f"Then open https://{env.get('PAAS_BASE_DOMAIN', 'aloof.si')}/ (certificates are issued on first request).")
     return {"ip": ip, "ipv6": ip6, "created": new}
 if __name__ == "__main__": main()
