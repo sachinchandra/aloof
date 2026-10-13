@@ -114,12 +114,23 @@ def validate_cimd(url, doc):
     if not isinstance(ru, list) or not ru or not all(isinstance(r, str) for r in ru) or len(ru) > 20: raise CIMDError("redirect_uris must be a non-empty list of strings")
     bad = [r for r in ru if not _ok_redirect(r)]
     if bad: raise CIMDError(f"redirect_uri not allowed: {bad[0][:200]}")
-    if not set(doc.get("grant_types") or ["authorization_code"]) <= {"authorization_code", "refresh_token"}: raise CIMDError("unsupported grant_types")
-    if not set(doc.get("response_types") or ["code"]) <= {"code"}: raise CIMDError("unsupported response_types")
+    if "authorization_code" not in (doc.get("grant_types") or ["authorization_code"]): raise CIMDError("grant_types must include authorization_code")
+    if "code" not in (doc.get("response_types") or ["code"]): raise CIMDError("response_types must include code")   # extra grants (e.g. device_code) are ignored, never granted
     host = urlsplit(url).hostname; name = str(doc.get("client_name") or host)[:100]
-    return OAuthClientInformationFull.model_validate({"client_id": url, "client_name": f"{name} ({host})" if host not in name else name,
+    return LoopbackClient.model_validate({"client_id": url, "client_name": f"{name} ({host})" if host not in name else name,
         "redirect_uris": ru, "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"], "scope": "paas", **({"client_uri": doc["client_uri"]} if isinstance(doc.get("client_uri"), str) and doc["client_uri"].startswith("https://") else {})})
+def _loopback(u): return u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1", "::1")
+class LoopbackClient(OAuthClientInformationFull):
+    """RFC 8252 s7.3: for http loopback redirect URIs the port is chosen at runtime, so it is ignored when matching."""
+    def validate_redirect_uri(self, redirect_uri):
+        if redirect_uri is not None and self.redirect_uris:
+            r = urlsplit(str(redirect_uri))
+            if _loopback(r):
+                for reg in self.redirect_uris:
+                    g = urlsplit(str(reg))
+                    if _loopback(g) and g.hostname == r.hostname and (g.path or "/") == (r.path or "/") and g.query == r.query: return redirect_uri
+        return super().validate_redirect_uri(redirect_uri)
 def resolve_cimd_client(url, now=None):
     now = now or time.time(); hit = _cimd_cache.get(url)
     if hit and hit[0] > now: return hit[1]

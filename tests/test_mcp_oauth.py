@@ -88,7 +88,7 @@ def test_cimd_ssrf_private_ips(srv, monkeypatch, ips):
     with pytest.raises(oauth.CIMDError, match="non-public"): oauth._fetch(CID, oauth.check_cimd_url(CID))
     assert oauth.resolve_cimd_client(CID) is None
 @pytest.mark.parametrize("doc", [_doc(client_id="https://other.example.com/c.json"), _doc(client_secret="s"), _doc(token_endpoint_auth_method="client_secret_post"),
-    _doc(redirect_uris=[]), _doc(redirect_uris=["javascript:alert(1)"]), _doc(redirect_uris=["http://evil.example.net/cb"]), _doc(grant_types=["client_credentials"]), ["x"]])
+    _doc(redirect_uris=[]), _doc(redirect_uris=["javascript:alert(1)"]), _doc(redirect_uris=["http://evil.example.net/cb"]), _doc(grant_types=["client_credentials"]), ["x"], _doc(redirect_uris=["https://ok.example.com/cb#frag"])])
 def test_cimd_doc_validation(srv, doc):
     _, oauth, _ = srv
     with pytest.raises(oauth.CIMDError): oauth.validate_cimd(CID, doc)
@@ -100,3 +100,17 @@ def test_cimd_size_and_cache(srv, monkeypatch):
     assert oauth.resolve_cimd_client(CID, now=1000) is None and oauth.resolve_cimd_client(CID, now=1030) is None and len(n) == 1   # negative cache
     assert oauth.resolve_cimd_client(CID, now=1000 + oauth.CIMD_NEG_TTL + 1) is None and len(n) == 2
     assert oauth._ttl("max-age=999999") == oauth.CIMD_TTL_MAX and oauth._ttl("no-store") == oauth.CIMD_TTL_MIN and oauth._ttl("") == oauth.CIMD_TTL
+
+def test_cimd_real_world_docs(srv):
+    _, oauth, _ = srv
+    vs = {"client_name": "Visual Studio Code", "grant_types": ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"],
+          "response_types": ["code"], "token_endpoint_auth_method": "none", "application_type": "native", "client_id": "https://vscode.dev/oauth/client-metadata.json",
+          "redirect_uris": ["http://127.0.0.1:33418/", "https://vscode.dev/redirect"]}
+    c = oauth.validate_cimd(vs["client_id"], vs); assert c.grant_types == ["authorization_code", "refresh_token"]
+    cc = {"client_id": "https://claude.ai/oauth/claude-code-client-metadata", "client_name": "Claude Code", "redirect_uris": ["http://localhost/callback", "http://127.0.0.1/callback"],
+          "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"], "token_endpoint_auth_method": "none"}
+    c = oauth.validate_cimd(cc["client_id"], cc)
+    from pydantic import AnyUrl
+    assert str(c.validate_redirect_uri(AnyUrl("http://localhost:54321/callback"))) == "http://localhost:54321/callback"   # any loopback port
+    for bad in ["http://localhost:54321/other", "http://evil.example.com/callback", "https://localhost/callback"]:
+        with pytest.raises(Exception): c.validate_redirect_uri(AnyUrl(bad))
