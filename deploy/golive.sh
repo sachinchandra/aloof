@@ -3,13 +3,17 @@
 # Rewrites supervisord.conf environment from golive.env, renders data/Caddyfile.live (ACME, base + alt domains) and reloads.
 set -e; cd "$(dirname "$0")"; [ -f golive.env ] || { echo "cp golive.env.example golive.env and fill it in"; exit 1; }; set -a; . ./golive.env; set +a
 grep -v '^\s*#' golive.env | grep -qE '=\s*"?<' && { echo "fill in golive.env placeholders first (or blank them)"; exit 1; }
-E="PAAS_BRAND=\"$PAAS_BRAND\",PAAS_BASE_DOMAIN=\"$PAAS_BASE_DOMAIN\",PAAS_ALT_DOMAINS=\"$PAAS_ALT_DOMAINS\",PAAS_URL_DOMAIN=\"$PAAS_URL_DOMAIN\",PAAS_API_HOST=\"$PAAS_API_HOST\",PAAS_MCP_HOST=\"$PAAS_MCP_HOST\",PAAS_PUBLIC_API_URL=\"$PAAS_PUBLIC_API_URL\",PAAS_PUBLIC_MCP_URL=\"$PAAS_PUBLIC_MCP_URL\",PAAS_PROXY_URL=\"$PAAS_PROXY_URL\",PAAS_EDGE_IPS=\"$PAAS_EDGE_IPS\",PAAS_WG_ENDPOINT=\"$PAAS_WG_ENDPOINT\",PAAS_NODE_API_URL=\"$PAAS_NODE_API_URL\",PAAS_REGISTRY=\"127.0.0.1:5000\",PAAS_REGISTRY_NODE=\"$PAAS_REGISTRY_NODE\",PAAS_ENV_FILE=\"$PWD/golive.env\""
+E="PAAS_BRAND=\"$PAAS_BRAND\",PAAS_BASE_DOMAIN=\"$PAAS_BASE_DOMAIN\",PAAS_ALT_DOMAINS=\"$PAAS_ALT_DOMAINS\",PAAS_URL_DOMAIN=\"$PAAS_URL_DOMAIN\",PAAS_API_HOST=\"$PAAS_API_HOST\",PAAS_MCP_HOST=\"$PAAS_MCP_HOST\",PAAS_PUBLIC_API_URL=\"$PAAS_PUBLIC_API_URL\",PAAS_PUBLIC_MCP_URL=\"$PAAS_PUBLIC_MCP_URL\",PAAS_PROXY_URL=\"$PAAS_PROXY_URL\",PAAS_SITE_URL=\"$PAAS_SITE_URL\",PAAS_EDGE_IPS=\"$PAAS_EDGE_IPS\",PAAS_WG_ENDPOINT=\"$PAAS_WG_ENDPOINT\",PAAS_NODE_API_URL=\"$PAAS_NODE_API_URL\",PAAS_REGISTRY=\"127.0.0.1:5000\",PAAS_REGISTRY_NODE=\"$PAAS_REGISTRY_NODE\",PAAS_ENV_FILE=\"$PWD/golive.env\""
 # Caddyfile: global email only if set; one site block per domain
 LIVE=../data/Caddyfile.live; mkdir -p ../data
 G=""; [ -n "$ACME_EMAIL" ] && G="email $ACME_EMAIL"
 SITE=$(sed -n '/# __SITE__ begin/,/# __SITE__ end/p' Caddyfile.prod)
 { sed -n '1,/# __SITE__ begin/p' Caddyfile.prod | sed '$d' | sed "s|__GLOBAL__|$G|"
-  for d in $PAAS_BASE_DOMAIN ${PAAS_ALT_DOMAINS//,/ }; do echo "$SITE" | sed "s|__D__|$d|g"; done
+  for d in $PAAS_BASE_DOMAIN ${PAAS_ALT_DOMAINS//,/ }; do
+    if [ "$d" = "$PAAS_BASE_DOMAIN" ] && [ "${PAAS_CANONICAL_WWW:-0}" = 1 ]; then
+      # www.<base> is canonical; the apex (if its DNS exists) redirects to www
+      printf 'www.%s {\n\treverse_proxy 127.0.0.1:8000\n}\n%s {\n\tredir https://www.%s{uri} permanent\n}\napi.%s {\n\treverse_proxy 127.0.0.1:8000\n}\nmcp.%s {\n\treverse_proxy 127.0.0.1:8001\n}\n' "$d" "$d" "$d" "$d" "$d"
+    else echo "$SITE" | sed "s|__D__|$d|g"; fi; done
   sed -n '/# __SITE__ end/,$p' Caddyfile.prod | sed '1d'; } > "$LIVE"
 /usr/local/bin/caddy validate --config "$LIVE" --adapter caddyfile >/dev/null 2>&1 || { /usr/local/bin/caddy validate --config "$LIVE" --adapter caddyfile; exit 1; }
 LIVE_ABS=$(cd ../data && pwd)/Caddyfile.live
