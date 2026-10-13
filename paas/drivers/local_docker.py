@@ -50,8 +50,15 @@ class LocalDockerDriver(Driver):
         except docker.errors.NotFound: pass
         ct = self.c.containers.run(image, **kw)
         for n in nets: self._join(ct, n, spec.get("net_alias"), first=(n == nets[0]))
-        ct.reload()
-        hp = int(ct.attrs["NetworkSettings"]["Ports"][f"{port}/tcp"][0]["HostPort"])
+        try:
+            ct.reload(); hp = int(ct.attrs["NetworkSettings"]["Ports"][f"{port}/tcp"][0]["HostPort"])
+        except Exception:   # exited immediately (no port mapping): don't leave it restarting forever
+            tail = ""
+            try: tail = ct.logs(tail=5).decode(errors="replace").strip().replace("\n", " | ")[-300:]
+            except Exception: pass
+            try: ct.remove(force=True)
+            except Exception: pass
+            raise RuntimeError(f"container exited at start ({ct.status})" + (f": {tail}" if tail else ""))
         return Instance(id=ct.id[:12], host="127.0.0.1", port=hp)
     # ---- private networks (managed Postgres <-> attached apps) ----
     def _ensure_network(self, n):
