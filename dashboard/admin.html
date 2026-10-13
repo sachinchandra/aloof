@@ -19,7 +19,7 @@
 <main class="wrap adm" id=main>
 <div id=app style="display:none">
 <div class=ah><div><h1>Owner dashboard</h1><p class=muted id=gen style="margin:4px 0 0"></p></div><span class=sp></span>
-<div class=exp><button class="btn sm" onclick="load()">Refresh</button><select id=ex aria-label="CSV table"><option>summary</option><option>users</option><option>top_users</option><option>signups</option><option>deploys</option><option>failed_deploys</option><option>design_partners</option><option>audit</option></select><button class="btn pri sm" onclick="exportCsv()">Export CSV</button><button class="btn ghost sm" onclick="fetch('/v1/auth/logout',{method:'POST',headers:H()}).then(()=>location='/login')">Log out</button></div></div>
+<div class=exp><button class="btn sm" onclick="load()">Refresh</button><select id=ex aria-label="CSV table"><option>summary</option><option>users</option><option>top_users</option><option>signups</option><option>deploys</option><option>failed_deploys</option><option>design_partners</option><option>waitlist</option><option>audit</option></select><button class="btn pri sm" onclick="exportCsv()">Export CSV</button><button class="btn ghost sm" onclick="fetch('/v1/auth/logout',{method:'POST',headers:H()}).then(()=>location='/login')">Log out</button></div></div>
 <div id=alerts></div>
 <h2>Users &amp; revenue</h2><div class=k id=k1></div>
 <div class=two style="margin-top:14px"><div class=card><h3>GPU unlock</h3><p id=gpu class=muted></p><div class=prog><b id=gpub></b></div><p class=muted id=gpun style="font-size:13px"></p></div>
@@ -28,7 +28,10 @@
 <div class=two style="margin-top:14px"><div class=card><h3>Deploys per day <span class=muted style="font-weight:400">(30 days)</span></h3><div class="chart c2" id=ch2></div><div class=axis><span>30 days ago</span><span>today</span></div></div>
 <div class=card><h3>Apps by plan</h3><div class=pills id=byplan></div><h3 style="margin-top:18px">Apps by account tier</h3><div class=pills id=bytier></div></div></div>
 <h2>Top users by usage (this month)</h2><div class=scroll><table class=tbl id=top></table></div>
-<h2>Waitlists &amp; design partners</h2><div class=k id=k3></div><div class=scroll style="margin-top:14px"><table class=tbl id=dp></table></div>
+<h2 id=waitlist>Waitlists &amp; design partners</h2><div class=k id=k3></div><div id=wlmail></div>
+<div class=exp style="margin:14px 0 10px;flex-wrap:wrap"><select id=wlk aria-label="Kind" onchange="loadWl()"><option value="">All kinds</option><option value=gpu>GPU</option><option value=region>Region</option><option value=design_partner>Design partner</option></select><select id=wlg aria-label="GPU" onchange="loadWl()"><option value="">Any GPU</option></select><label class=muted style="font-size:13px;display:flex;gap:6px;align-items:center"><input type=checkbox id=wlt onchange="loadWl()"> Show test entries</label><span class=sp></span><button class="btn pri sm" onclick="wlCsv()">Export waitlist CSV</button></div>
+<div class=scroll><table class=tbl id=wlt2></table></div>
+<h3 style="margin-top:22px">Design partners</h3><div class=scroll><table class=tbl id=dp></table></div>
 <h2>Infrastructure</h2><div class=k id=k4></div>
 <div class=two style="margin-top:14px"><div class=card><h3>Backups</h3><div id=bk></div></div><div class=card><h3>Certificates</h3><div class=scroll><table class=tbl id=certs></table></div></div></div>
 <h2>Recent errors &amp; failed deploys</h2><div class=two><div class=scroll><table class=tbl id=fd></table></div><div class=scroll><table class=tbl id=ae></table></div></div>
@@ -61,7 +64,7 @@ async function load(){
   $('k2').innerHTML=stat('Apps',d.apps_total)+stat('Active apps',d.apps_active,'with a running instance')+stat('Running instances',d.running_instances)+stat('Deploys (30 d)',d.deploys_30d,d.failed_30d+' failed')+stat('Postgres DBs',m.data.postgres_dbs)+stat('Volumes',m.data.volumes,m.data.volume_gb+' GB');
   pills('byplan',d.apps_by_plan);pills('bytier',d.apps_by_tier);
   tbl('top',[['User',r=>E(r.email)],['Tier',r=>`<span class=tag>${E(r.tier)}</span>`],['Apps',r=>r.apps],['Usage',r=>usd(r.usage_usd)]],m.top_users,'No usage this month');
-  const w=m.waitlist;$('k3').innerHTML=stat('GPU waitlist',w.gpu)+stat('Region waitlist',w.regions,Object.entries(w.by_region).map(([k,v])=>k+' '+v).join(' · ')||'—')+stat('Design partners',w.design_partners);
+  loadWl();const w=m.waitlist;$('k3').innerHTML=stat('GPU waitlist',w.gpu,w.test_entries?w.test_entries+' test entr'+(w.test_entries==1?'y':'ies')+' excluded':'')+stat('Region waitlist',w.regions,Object.entries(w.by_region).map(([k,v])=>k+' '+v).join(' · ')||'—')+stat('Design partners',w.design_partners);
   tbl('dp',[['Design partner',r=>E(r.email)],['Company',r=>E(r.company)],['What they would run',r=>E(r.note)],['When',r=>T(r.ts)]],m.design_partners,'No applications yet');
   const s=m.server;$('k4').innerHTML=stat('CPU',(s.cpu_pct??'—')+'%',`${s.cpus} vCPU · load ${(s.load||[]).join(' / ')}`+meter(s.cpu_pct))+stat('Memory',(s.mem_pct??'—')+'%',`${s.mem_used_mb} / ${s.mem_total_mb} MB`+meter(s.mem_pct))+stat('Disk',s.disk_pct+'%',`${s.disk_used_gb} / ${s.disk_total_gb} GB`+meter(s.disk_pct))+stat('Uptime',dur(s.uptime_seconds),(s.nodes||[]).length+' remote node(s)');
   const b=m.backups;$('bk').innerHTML=`<p>${b.enabled?'<span class="status s-running">enabled</span>':'<span class="status s-failed">disabled</span>'}</p><p class=muted style="font-size:14px">Last off-site backup: <b>${T(b.last_offsite_backup)}</b> (${b.last_offsite_age_hours??'—'} h ago)<br>Last verify: ${T(b.last_verify)} · objects: ${b.objects??0} · bucket <code>${E(b.bucket)}</code></p>`;
@@ -72,6 +75,20 @@ async function load(){
   const rows=[...m.test_accounts.map(a=>({...a,t:1})),...m.accounts.slice(0,30)];
   tbl('acc',[['Account',r=>E(r.email)],['Created',r=>T(r.created)],['Flag',r=>r.t?'<span class=tag>is_test</span>':`<span class=tag>${E(r.tier)}</span>`],['',r=>`<button class="btn ghost sm" onclick="flag(${r.id},${r.t?'false':'true'})">${r.t?'Unflag':'Mark test'}</button>`]],rows);
 }
+const wq=()=>{const p=new URLSearchParams();if($('wlk').value)p.set('kind',$('wlk').value);if($('wlg').value)p.set('gpu',$('wlg').value);p.set('include_test',$('wlt').checked);return p.toString()};
+const ms=v=>!v?'<span class=muted>pending</span>':v.startsWith('sent')?'<span class=ok>sent</span>':`<span class="${v.startsWith('skipped')?'warn':'bad'}" title="${E(v)}">${E(v.split(':')[0])}</span>`;
+async function loadWl(){const r=await fetch('/v1/admin/waitlist?'+wq(),{headers:H()});if(!r.ok)return;const j=await r.json(),g=$('wlg');
+  if(g.options.length<2){[...new Set(j.entries.map(x=>x.gpu).filter(Boolean))].sort().forEach(x=>g.add(new Option(x,x)))}
+  const mh=j.mail,al=[];if(!mh.smtp_configured)al.push('SMTP is not configured on the server (SMTP_HOST unset): waitlist confirmations and admin notifications are not being delivered.');
+  if(!mh.admin_recipients.length)al.push('No admin recipients for waitlist notifications: set PAAS_WAITLIST_NOTIFY or PAAS_ADMIN_EMAIL.');
+  if(mh.last_error)al.push(`Last mail error (${T(mh.last_error.ts)}, ${mh.last_error.where}): ${mh.last_error.error}`);
+  $('wlmail').innerHTML=al.map(a=>`<div class=alert>⚠ ${E(a)}</div>`).join('')+(mh.admin_recipients.length?`<p class=muted style="font-size:13px;margin:8px 0 0">Signup notifications go to ${mh.admin_recipients.map(E).join(', ')}.</p>`:'');
+  tbl('wlt2',[['Email',r=>E(r.email)+(r.is_test?' <span class=tag>test</span>':'')],['Kind',r=>`<span class=tag>${E(r.kind)}</span>`],['GPU / region',r=>E(r.gpu||r.region||'—')],['Note',r=>`<span class=muted>${E((r.company?r.company+': ':'')+(r.note||''))}</span>`],['First signed up',r=>T(r.created)],['Updated',r=>T(r.updated)],['Source',r=>`<code>${E(r.source||'—')}</code>`],['Emails',r=>'user '+ms(r.mail_user)+' · admin '+ms(r.mail_admin)],
+    ['',r=>`<button class="btn ghost sm" onclick="wlFlag(${r.id},${r.is_test?'false':'true'})">${r.is_test?'Unmark':'Mark test'}</button> <button class="btn ghost sm" onclick="wlDel(${r.id},'${E(r.email)}')">Delete</button>`]],j.entries,'No entries');
+}
+async function wlDel(id,e){if(!confirm('Delete waitlist entry '+e+'?'))return;const r=await fetch('/v1/admin/waitlist/'+id,{method:'DELETE',headers:H()});if(r.ok)load();else alert('delete failed: '+r.status)}
+async function wlFlag(id,v){const r=await fetch(`/v1/admin/waitlist/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:v})});if(r.ok)load();else alert('failed: '+r.status)}
+async function wlCsv(){const r=await fetch('/v1/admin/waitlist.csv?'+wq(),{headers:H()});if(!r.ok)return alert('export failed: '+r.status);const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='aloof-waitlist.csv';a.click()}
 async function flag(id,v){const r=await fetch(`/v1/admin/accounts/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:v})});if(r.ok)load();else alert('failed: '+r.status)}
 async function exportCsv(){const t=$('ex').value,r=await fetch('/v1/admin/export.csv?table='+t,{headers:H()});if(!r.ok)return alert('export failed: '+r.status);const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`aloof-${t}.csv`;a.click()}
 load();
