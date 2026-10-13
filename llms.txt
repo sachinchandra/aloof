@@ -31,6 +31,8 @@
 - Managed Postgres 16: GET /v1/pg/plans (pg-dev $2.99/mo, pg-basic $9.99, pg-standard $28.99, pg-perf $60.99); POST /v1/pg {"name","plan"};
   POST /v1/pg/{name}/attach {"app","var":"DATABASE_URL"} (injects the URL, private network); POST/GET /v1/pg/{name}/backups (daily, 7 kept, $0.22/GB-month);
   POST /v1/pg/{name}/restore {"backup_id"}; GET /v1/pg/{name}?reveal=true -> database_url; DELETE /v1/pg/{name}
+- Off-site encrypted backups (daily 7/weekly 4/monthly 3, weekly test-restore): GET /v1/pg/{name}/offsite, POST /v1/pg/{name}/offsite-restore {"backup_id"};
+  GET /v1/volumes/{vol}/offsite, POST /v1/volumes/{vol}/offsite-restore {"backup_id"}
 - Volume snapshots: POST/GET /v1/volumes/{vol}/snapshots; POST /v1/volumes/{vol}/restore {"snapshot_id"} (app restarts); DELETE /v1/volumes/{vol}/snapshots/{id}
 - Exec/console (audited): POST /v1/apps/{name}/exec {"command":"ls /"}; WebSocket /v1/apps/{name}/console (Bearer key; CLI `aloof ssh <app>`); GET /v1/audit
 - Logs: GET /v1/apps/{name}/logs/history?since=&contains= (retention 1/7/30 days on free/hobby/pro);

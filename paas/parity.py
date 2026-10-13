@@ -91,7 +91,7 @@ def pg_destroy(name, keep_backups=False):
     q("delete from pg_dbs where name=?", (name,))
 def pg_backup(name, note="manual"):
     db = q("select * from pg_dbs where name=?", (name,), one=True); i, d = _inst(db["app"])
-    code, out = d.exec_run(i["id"], ["pg_dump", "-U", "aloof", "-Fc", _dbname(name)])
+    code, out = d.exec_run(i["id"], ["pg_dump", "-U", "aloof", "-Fc", _dbname(name)], stdout_only=True)
     if code: raise RuntimeError(f"pg_dump failed: {out[-500:].decode(errors='replace')}")
     aid = "pgb_" + time.strftime("%Y%m%d%H%M%S") + "_" + secrets.token_hex(3); path = _arc_path("pg", name, aid, "dump")
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

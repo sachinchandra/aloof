@@ -79,8 +79,12 @@ class LocalDockerDriver(Driver):
     def remove_image(self, ref):
         if ref.startswith("paas/"): self.c.images.remove(ref, noprune=False)
     # ---- exec / console ----
-    def exec_run(self, iid, cmd, timeout=60):
-        ct = self.c.containers.get(iid); r = ct.exec_run(cmd, demux=False, stdout=True, stderr=True)
+    def exec_run(self, iid, cmd, timeout=60, stdout_only=False):
+        ct = self.c.containers.get(iid)
+        if stdout_only:   # binary output (pg_dump): never mix stderr into it
+            r = ct.exec_run(cmd, demux=True); out, err = r.output or (None, None)
+            return r.exit_code, (out or b"") if r.exit_code == 0 else (err or out or b"")
+        r = ct.exec_run(cmd, demux=False, stdout=True, stderr=True)
         return r.exit_code, (r.output or b"")
     def exec_socket(self, iid, cmd=None):
         """Interactive TTY exec; returns (exec_id, raw socket)."""

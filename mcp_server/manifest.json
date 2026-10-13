@@ -53,7 +53,9 @@
     "snapshot_volume",
     "restore_volume",
     "exec_command",
-    "add_log_drain"
+    "add_log_drain",
+    "list_offsite_backups",
+    "restore_offsite_backup"
   ],
   "docs": "http://localhost:8000/llms.txt"
 }

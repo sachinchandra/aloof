@@ -386,7 +386,8 @@ def paid_customers():
 @app.get("/v1/admin/metrics", dependencies=[Depends(admin)])
 def admin_metrics():
     n = paid_customers(); goal = _plans.GPU_UNLOCK_PAID_CUSTOMERS
-    return {"paid_customers": n, "accounts": q("select count(*) as c from accounts", one=True)["c"],
+    from . import offsite
+    return {"backups": offsite.status(), "paid_customers": n, "accounts": q("select count(*) as c from accounts", one=True)["c"],
             "gpu_waitlist": q("select count(*) as c from kv where kind='gpu_waitlist'", one=True)["c"],
             "gpu_enabled": _plans.GPU_ENABLED, "gpu_unlock_at_paid_customers": goal,
             "note": "GPUs enabled (phase 2)." if _plans.GPU_ENABLED else
@@ -601,6 +602,35 @@ def drain_add(name: str, b: DrainReq, request: Request, a=Depends(acct)):
 def drain_list(name: str, a=Depends(acct)): own(name, a); return [parity.drain_view(d) for d in q("select * from drains where app=?", (name,))]
 @app.delete("/v1/apps/{name}/drains/{did}")
 def drain_del(name: str, did: str, a=Depends(acct)): own(name, a); q("delete from drains where id=? and app=?", (did, name)); return {"ok": True}
+
+# ---- off-site backups (S3, client-side encrypted) ----
+from . import offsite
+def _need_offsite():
+    if not offsite.enabled(): raise HTTPException(503, "off-site backups are not configured on this server yet")
+@app.get("/v1/pg/{name}/offsite")
+def pg_offsite_list(name: str, a=Depends(acct)): own_pg(name, a); return offsite.list_("pg", name)
+class OffsiteReq(BaseModel): backup_id: str
+@app.post("/v1/pg/{name}/offsite-restore")
+def pg_offsite_restore(name: str, b: OffsiteReq, request: Request, a=Depends(acct)):
+    own_pg(name, a); _need_offsite()
+    try: r = offsite.restore_pg(name, b.backup_id)
+    except (ValueError, RuntimeError) as e: raise HTTPException(409, str(e))
+    _audit(a["id"], f"pg-{name}", "pg.offsite_restore", b.backup_id, _ip(request)); return r
+@app.get("/v1/volumes/{vol}/offsite")
+def vol_offsite_list(vol: str, a=Depends(acct)): own_vol(vol, a); return offsite.list_("vol", vol)
+@app.post("/v1/volumes/{vol}/offsite-restore")
+def vol_offsite_restore(vol: str, b: OffsiteReq, request: Request, a=Depends(acct)):
+    own_vol(vol, a); _need_offsite()
+    try: r = offsite.restore_vol(vol, b.backup_id)
+    except (ValueError, RuntimeError) as e: raise HTTPException(409, str(e))
+    _audit(a["id"], None, "snapshot.offsite_restore", f"{vol} {b.backup_id}", _ip(request)); return r
+@app.get("/v1/admin/backups", dependencies=[Depends(admin)])
+def admin_backups(): return offsite.status() | {"objects_list": [offsite.view(r) | {"owner": r["owner"]} for r in q("select * from offsite order by created desc limit 200")]}
+@app.post("/v1/admin/backups/run", dependencies=[Depends(admin)])
+def admin_backups_run(verify: bool=False):
+    _need_offsite(); r = offsite.backup_all(force=True)
+    if verify: r["verify"] = offsite.verify_all(force=True)
+    return r
 # ---------------- edge proxy (port 8080): <app>.BASE_DOMAIN or /_app/<app>/ ----------------
 proxy = FastAPI(); _rr = {}; client = httpx.AsyncClient(timeout=60)
 EGRESS = billing.EGRESS   # app -> bytes sent to clients since last meter tick

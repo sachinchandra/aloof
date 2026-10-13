@@ -214,7 +214,7 @@ aloof volumes delete pgdata         # must be detached first</pre><p>A volume li
 <h2>Snapshots</h2><pre>aloof snapshots create pgdata
 aloof snapshots list pgdata
 aloof snapshots restore pgdata snap_20261013080000_ab12cd   # stops the attached app, restores, starts it again</pre>
-<p>A snapshot is a compressed archive of the whole volume, kept on the edge host's disk (10 per volume, oldest pruned first) and billed at $0.22 per GB-month of archive size. Snapshots of volumes on remote nodes aren't supported yet. They aren't off-site backups yet: keep a copy elsewhere for disaster recovery.</p>""",
+<p>A snapshot is a compressed archive of the whole volume, kept on the edge host's disk (10 per volume, oldest pruned first) and billed at $0.22 per GB-month of archive size. Snapshots of volumes on remote nodes aren't supported yet. Once a day each volume is also snapshotted, encrypted (AES-256-GCM) and copied off-site (7 daily, 4 weekly, 3 monthly): <code>aloof snapshots offsite &lt;volume&gt;</code>, <code>aloof snapshots offsite-restore &lt;volume&gt; &lt;id&gt;</code>.</p>""",
 "releases": """<h1>Releases &amp; rollback</h1><p>Every deploy, env change, volume or database attach, and rollback creates a numbered release with the exact image and config it ran.</p>
 <pre>aloof releases api
 v4   failed      2026-10-13 09:12  deploy         ghcr.io/me/api:1.5
@@ -229,7 +229,8 @@ aloof pg attach shop-db api            # injects DATABASE_URL into api and redep
 aloof pg backup shop-db ; aloof pg backups shop-db ; aloof pg restore shop-db pgb_…
 aloof pg url shop-db                   # prints the connection URL (audited)</pre>
 <p>Postgres 16 runs next to your apps in the EU and is reachable only over a private network that its attached apps join (hostname <code>pg-&lt;name&gt;</code>). It's never exposed on the public edge. Data lives on a volume.</p>
-<p><b>Backups</b>: a <code>pg_dump</code> runs daily; the last 7 are kept on the edge host's disk, with on-demand backups and restore whenever you need them. Backup storage costs $0.22 per GB-month. These are logical backups on the same host, not point-in-time recovery or off-site copies, so export important data elsewhere too.</p>
+<p><b>Backups</b>: a <code>pg_dump</code> runs daily; the last 7 are kept on the edge host's disk, with on-demand backups and restore whenever you need them. Backup storage costs $0.22 per GB-month. These local copies are logical backups, not point-in-time recovery.</p>
+<p><b>Off-site</b>: once a day each database is also encrypted on our side (AES-256-GCM) and uploaded to S3-compatible object storage in a different location. Retention is 7 daily, 4 weekly and 3 monthly copies, and the newest copy is test-restored into a scratch Postgres every week. List and restore with <code>aloof pg offsite shop-db</code> and <code>aloof pg offsite-restore shop-db &lt;id&gt;</code>, or from Dashboard → Postgres.</p>
 <table><tr><th>Plan</th><th>CPU / RAM</th><th>Disk</th><th>Price</th></tr>{PGROWS}</table>
 <p>Not yet: high availability/replicas, point-in-time recovery, extensions beyond the official image, or attaching to apps on remote nodes.</p>""",
 "console": """<h1>SSH &amp; exec console</h1><pre>aloof ssh api                 # interactive shell (bash or sh) in a running instance

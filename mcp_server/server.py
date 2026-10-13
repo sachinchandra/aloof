@@ -154,6 +154,14 @@ def exec_command(name: str, command: str, api_key: str = "") -> dict:
 def add_log_drain(name: str, url: str, api_key: str = "") -> dict:
     """Forward the app's logs to https:// (JSON array POST) or syslog+tls://host:port / syslog+tcp:// / syslog+udp:// (RFC 5424)."""
     return _r("POST", f"/v1/apps/{name}/drains", api_key, json={"url": url})
+@mcp.tool()
+def list_offsite_backups(kind: str, name: str, api_key: str = "") -> list | dict:
+    """List encrypted off-site (S3) backups. kind='pg' (database name) or 'vol' (volume name). Daily 7, weekly 4, monthly 3 kept."""
+    return _r("GET", f"/v1/{'pg' if kind == 'pg' else 'volumes'}/{name}/offsite", api_key)
+@mcp.tool()
+def restore_offsite_backup(kind: str, name: str, backup_id: str, api_key: str = "") -> dict:
+    """Restore a database (kind='pg') or volume (kind='vol') from an off-site backup. Destructive: confirm with the user first."""
+    return _r("POST", f"/v1/{'pg' if kind == 'pg' else 'volumes'}/{name}/offsite-restore", api_key, json={"backup_id": backup_id})
 mcp.custom_route("/oauth/login", methods=["GET","POST"])(login_page)
 if __name__ == "__main__":
     mcp.run("streamable-http" if HTTP_MODE else "stdio")

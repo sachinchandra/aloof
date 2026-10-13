@@ -39,10 +39,14 @@ for c in ("status", "destroy", "backup", "backups", "url"): ps.add_parser(c).add
 x = ps.add_parser("attach"); x.add_argument("name"); x.add_argument("app"); x.add_argument("--var", default="DATABASE_URL")
 x = ps.add_parser("detach"); x.add_argument("name"); x.add_argument("app")
 x = ps.add_parser("restore"); x.add_argument("name"); x.add_argument("backup_id")
+ps.add_parser("offsite", help="list off-site (S3) backups").add_argument("name")
+x = ps.add_parser("offsite-restore"); x.add_argument("name"); x.add_argument("backup_id")
 a = s.add_parser("snapshots", help="volume snapshots"); ss = a.add_subparsers(dest="scmd", required=True)
 for c in ("create", "list"): ss.add_parser(c).add_argument("volume")
 x = ss.add_parser("restore"); x.add_argument("volume"); x.add_argument("snapshot_id")
 x = ss.add_parser("delete"); x.add_argument("volume"); x.add_argument("snapshot_id")
+ss.add_parser("offsite").add_argument("volume")
+x = ss.add_parser("offsite-restore"); x.add_argument("volume"); x.add_argument("backup_id")
 a = s.add_parser("ssh", help="interactive shell in a running instance"); a.add_argument("name"); a.add_argument("--instance")
 a = s.add_parser("exec", help="run one command"); a.add_argument("name"); a.add_argument("command", nargs=argparse.REMAINDER)
 a = s.add_parser("drains", help="log forwarding"); a.add_argument("name"); a.add_argument("action", choices=["add", "list", "remove"]); a.add_argument("target", nargs="?")
@@ -120,11 +124,17 @@ elif o.cmd == "pg":
         for b in call("GET", f"/v1/pg/{o.name}/backups"): print(f"{b['id']}  {b['size_bytes']:>10} B  {time.strftime('%Y-%m-%d %H:%M', time.localtime(b['created']))}  {b['note']}")
     elif o.pcmd == "restore": pj(call("POST", f"/v1/pg/{o.name}/restore", {"backup_id": o.backup_id}))
     elif o.pcmd == "destroy": pj(call("DELETE", f"/v1/pg/{o.name}"))
+    elif o.pcmd == "offsite":
+        for b in call("GET", f"/v1/pg/{o.name}/offsite"): print(f"{b['id']}  {b['size_bytes']:>10} B  {time.strftime('%Y-%m-%d %H:%M', time.localtime(b['created']))}  {b['verify_result'] or ''}")
+    elif o.pcmd == "offsite-restore": pj(call("POST", f"/v1/pg/{o.name}/offsite-restore", {"backup_id": o.backup_id}))
 elif o.cmd == "snapshots":
     if o.scmd == "create": pj(call("POST", f"/v1/volumes/{o.volume}/snapshots"))
     elif o.scmd == "list":
         for b in call("GET", f"/v1/volumes/{o.volume}/snapshots"): print(f"{b['id']}  {b['size_bytes']:>10} B  {time.strftime('%Y-%m-%d %H:%M', time.localtime(b['created']))}")
     elif o.scmd == "restore": pj(call("POST", f"/v1/volumes/{o.volume}/restore", {"snapshot_id": o.snapshot_id}))
+    elif o.scmd == "offsite":
+        for b in call("GET", f"/v1/volumes/{o.volume}/offsite"): print(f"{b['id']}  {b['size_bytes']:>10} B  {time.strftime('%Y-%m-%d %H:%M', time.localtime(b['created']))}  {b['verify_result'] or ''}")
+    elif o.scmd == "offsite-restore": pj(call("POST", f"/v1/volumes/{o.volume}/offsite-restore", {"backup_id": o.backup_id}))
     else: pj(call("DELETE", f"/v1/volumes/{o.volume}/snapshots/{o.snapshot_id}"))
 elif o.cmd == "exec":
     r = call("POST", f"/v1/apps/{o.name}/exec", {"command": o.command}); sys.stdout.write(r["output"]); sys.exit(r["exit_code"])

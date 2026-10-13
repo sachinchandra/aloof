@@ -27,7 +27,7 @@ class Fake:
     def stop_instance(self, iid): self.stopped.append(iid)
     def logs(self, iid, tail=200): return ""
     def inspect(self, iid): return "running"
-    def exec_run(self, iid, cmd, timeout=60):
+    def exec_run(self, iid, cmd, timeout=60, stdout_only=False):
         self.execs.append((iid, cmd))
         if cmd[0] == "pg_dump": return 0, b"PGDMP-fake-" + str(len(self.execs)).encode()
         return 0, ("ran: " + " ".join(cmd)).encode()
@@ -44,6 +44,15 @@ class Fake:
         open(path, "wb").write(self.files.get(vol, b"empty")); return os.path.getsize(path)
     def restore_volume(self, vol, path): self.files[vol] = open(path, "rb").read()
     def remove_network(self, n): pass
+    class _C:   # docker-client stand-in for pg_restore's put_archive
+        class containers:
+            @staticmethod
+            def get(iid):
+                class Ct:
+                    def put_archive(self, path, data): return True
+                    def logs(self, **k): return b""
+                return Ct()
+    c = _C()
 @pytest.fixture
 def fake(monkeypatch, tmp_path):
     monkeypatch.setattr(parity, "BACKUP_DIR", str(tmp_path / "bk")); get_drivers(); f = Fake(); monkeypatch.setitem(REGISTRY, "local-docker", f); return f
