@@ -157,7 +157,11 @@ def bundle_secrets(path):
 def _due(kind, owner, every=86400):
     t = (q("select max(created) t from offsite where kind=? and owner=?", (kind, owner), one=True) or {}).get("t") or 0
     return time.time() - t > every - 600
+import threading as _th
+_run_lock = _th.Lock()
 def backup_all(force=False):
+    with _run_lock: return _backup_all(force)
+def _backup_all(force=False):
     """Daily: every Postgres DB (fresh pg_dump), every local volume (fresh snapshot), control-plane DB, secrets."""
     if not enabled(): return {"skipped": "disabled", "missing": missing()}
     from . import parity
@@ -236,6 +240,8 @@ def verify(oid):
         if os.path.exists(tmp): os.remove(tmp)
     q("update offsite set verified=?, verify_result=? where id=?", (time.time(), res[:500], oid)); return res
 def verify_all(force=False):
+    with _run_lock: return _verify_all(force)
+def _verify_all(force=False):
     if not enabled(): return {"skipped": "disabled"}
     out = {}
     for k in q("select distinct kind, owner from offsite"):
