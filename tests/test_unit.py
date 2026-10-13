@@ -446,3 +446,9 @@ def test_autoscale_does_not_idle_right_after_redeploy(monkeypatch):
     monkeypatch.setattr(controller, "q", lambda sql, args=(), one=False: [r for r in q(sql, args, one) if r["name"] == "redep-x"] if "from apps" in sql else q(sql, args, one))
     controller.autoscale_tick()
     assert not any(c[0] == "redep-x" and c[1] == 0 for c in calls), calls
+
+# ---------------- health endpoints ----------------
+def test_api_health_endpoint(client):
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}

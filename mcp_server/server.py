@@ -183,5 +183,11 @@ def create_deploy_token(app: str = "", expires_in: str = "90d", api_key: str = "
     """Create a CI deploy token scoped to one app (or the whole account if app is empty). Shown once."""
     return _r("POST", "/v1/tokens", api_key, json={"app": app or None, "expires_in": expires_in})
 mcp.custom_route("/oauth/login", methods=["GET","POST"])(login_page)
+
+async def healthz():
+    from starlette.responses import JSONResponse
+    return JSONResponse({"ok": True})
+mcp.custom_route("/healthz", methods=["GET"])(healthz)
+
 if __name__ == "__main__":
     mcp.run("streamable-http" if HTTP_MODE else "stdio")

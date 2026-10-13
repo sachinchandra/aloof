@@ -98,6 +98,7 @@ Nothing secret is committed. At first start the box creates `data/secret.key` (F
 
 ## Tests
 ```bash
+pip install -r requirements-dev.txt                        # test dependencies (pytest, respx, dnslib, ruff, pip-audit)
 sg docker -c '.venv/bin/python -m pytest -q tests/'        # unit + mocked-cloud node lifecycle (real Docker)
 .venv/bin/python tests/oauth_e2e.py ; .venv/bin/python tests/oauth_password.py
 .venv/bin/python tests/mcp_e2e.py ; .venv/bin/python tests/mcp_volumes.py ; .venv/bin/python tests/ui_smoke.py

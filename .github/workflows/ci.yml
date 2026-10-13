@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - name: Lint with ruff
+        run: ruff check paas/ mcp_server/ tests/ --select=F --ignore=F401,F811,F841
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Run unit tests
+        run: |
+          pytest tests/test_unit.py tests/test_phase1.py tests/test_devx.py tests/test_www.py -v \
+            --ignore=tests/test_node_lifecycle.py \
+            --ignore=tests/test_private_sources.py \
+            --ignore=tests/test_offsite.py \
+            --ignore=tests/test_parity.py \
+            -k "not (minio or docker or lifecycle or registry)"
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz
+          sudo mv gitleaks /usr/local/bin/
+      - name: Run gitleaks
+        run: gitleaks detect --source . --verbose --redact
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Install project dependencies for audit
+        run: pip install -r requirements.txt
+      - name: Run pip-audit
+        run: pip-audit --strict --progress-spinner off
