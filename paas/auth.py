@@ -92,4 +92,8 @@ def safe_next(n, default="/dashboard"):
     if not isinstance(n, str) or not n or len(n) > 2000: return default
     if _re.search(r"[\x00-\x20\x7f\\]", n) or not n.startswith("/") or n.startswith("//"): return default
     if _u.urlsplit(n).netloc or _u.urlsplit(n).scheme: return default
+    if not n.isascii(): return default   # no Unicode slashes/lookalikes (e.g. U+2215, fullwidth solidus)
+    path = _u.unquote(n.split("?", 1)[0].split("#", 1)[0])
+    if not path.isascii() or "//" in path or "/./" in path or "/../" in path or path.endswith(("/.", "/..")) or path.startswith("/@") or "\\" in path:
+        return default
     return n

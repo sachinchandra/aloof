@@ -71,3 +71,43 @@ def test_f7_ref(ref, ok):
     if ok: T.repo_template("https://github.com/a/b", ref)
     else:
         with pytest.raises(T.TemplateError): T.repo_template("https://github.com/a/b", ref)
+
+# ---- optional hardening (QA a072f38 items 1-5) ----
+def test_safe_next_tightened():
+    from paas.auth import safe_next
+    for bad in ("/.//evil.com", "/@evil.com", "/\u2215evil.com", "/%2F%2Fevil.com", "/a/../..//x", "/\uff0fevil", "/a//b", "/%2e/%2e/"):
+        assert safe_next(bad) == "/dashboard", bad
+    for ok in ("/dashboard", "/deploy?template=n8n", "/deploy?repo=https%3A%2F%2Fgithub.com%2Fa%2Fb", "/templates/uptime-kuma"):
+        assert safe_next(ok) == ok
+
+def test_repo_owner_and_ref_hardening():
+    import pytest as _p
+    from paas import templating as T
+    for bad in ("https://github.com/-x/b", "https://github.com/a/-b"):
+        with _p.raises(T.TemplateError): T.check_repo(bad)
+    for bad in ("..", "a..b", "main/../x", "main\n"):
+        with _p.raises(T.TemplateError): T.repo_template("https://github.com/a/b", ref=bad)
+    T.repo_template("https://github.com/a/b", ref="v1.2.3")
+
+def test_mcp_template_id_fullmatch():
+    src = open(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", "mcp_server", "server.py")).read()
+    assert "_re.fullmatch(r\"[a-z0-9][a-z0-9-]{1,38}[a-z0-9]\"" in src
+    import re; assert not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,38}[a-z0-9]", "n8n\n")
+
+def test_confirm_form_blocks_pg_prefix():
+    from fastapi.testclient import TestClient
+    from paas import api
+    c = TestClient(api.app, base_url="http://api.aloof.test", follow_redirects=False)
+    c.post("/v1/auth/register", json={"email": "pgform@example.in", "password": "correct horse 9"})
+    assert "(?!pg-)" in c.get("/deploy?template=uptime-kuma").text
+
+def test_unexpected_deploy_error_is_clean_json(monkeypatch):
+    from fastapi.testclient import TestClient
+    from paas import api, engine
+    c = TestClient(api.app, base_url="http://api.aloof.test", raise_server_exceptions=False)
+    k = c.post("/v1/signup", json={"email": "boom@example.in"}).json()["api_key"]
+    monkeypatch.setattr(engine, "deploy", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("docker down")))
+    r = c.post("/v1/templates/uptime-kuma/deploy", json={"name": "boomapp"}, headers={"Authorization": f"Bearer {k}"})
+    assert r.status_code == 503 and "nothing was created" in r.json()["detail"] and "docker" not in r.text
+    from paas.db import q
+    assert not q("select 1 from volumes where name like 'boomapp%'", one=True)

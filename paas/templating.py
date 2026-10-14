@@ -58,7 +58,7 @@ def check_repo(url):
         raise TemplateError("repo must be on github.com or gitlab.com (no other hosts, IPs or ports)")
     if u.query or u.fragment: raise TemplateError("repo URL must not have a query or fragment")
     parts = [p for p in u.path.split("/") if p]
-    seg = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
+    seg = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$")   # no leading '-' (never an option-looking segment)
     maxp = 2 if u.hostname == "github.com" else 4
     if not (2 <= len(parts) <= maxp) or not all(seg.match(p) and p not in (".", "..") for p in parts): raise TemplateError("repo URL must look like https://github.com/<owner>/<repo>")
     return f"https://{u.hostname}/" + "/".join(parts)
@@ -127,7 +127,7 @@ def _gen(g):
 
 REF_RE = re.compile(r"^[\w./@^~+-]+$")   # same rule as creds.clone
 def repo_template(repo, ref=None, port=8080, plan=None):
-    if ref is not None and (not REF_RE.match(ref) or ref.startswith("-") or len(ref) > 200): raise TemplateError("bad git ref")
+    if ref is not None and (not REF_RE.fullmatch(ref) or ref.startswith("-") or ".." in ref or len(ref) > 200): raise TemplateError("bad git ref")
     return validate({"id": "from-repo", "name": "Repository", "description": repo, "source": {"repo": check_repo(repo), **({"ref": ref} if ref else {})},
                      "app": {"port": int(port or 8080), "plan": plan or "shared-1x-512mb"}})
 
@@ -214,6 +214,10 @@ def _run(a, t, b):
     try: r = deploy(a["id"], t, b.name, b.env, b.plan, api.URL_DOMAIN); api.with_url(r["app"]); return r
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
+    except HTTPException: raise
+    except Exception:   # rollback already ran inside deploy(); return a clean JSON error, never a bare 500 page
+        import logging; logging.getLogger("paas.templates").exception("template deploy %s failed", t.get("id"))
+        raise HTTPException(503, "deploy could not be started; nothing was created. Try again, or contact support if it persists")
 
 @R.get("/v1/templates")
 def list_templates(): return {"version": 1, "schema": "/v1/templates/schema", "templates": [public(t) for t in registry().values()]}
@@ -286,7 +290,7 @@ def deploy_button(request: Request, template: str | None = None, repo: str | Non
     extra = "" if p else "<label>Port<input name=port type=number value=8080></label>"
     title = f"Deploy {p['name']}" if p else "Deploy repository"
     inner = f"""<p>{e(p['description']) if p else 'From <code>' + e(repo) + '</code>'}</p>
-<form id=f class=card><label>App name<input name=name required pattern='[a-z][a-z0-9\-]{{1,21}}[a-z0-9]' minlength=3 maxlength=23 title='3-23 chars: lowercase letters, digits, hyphens; starts with a letter'></label>{fields}{extra}<button class=btn>Deploy</button></form><pre id=o></pre>
+<form id=f class=card><label>App name<input name=name required pattern='(?!pg-)[a-z][a-z0-9\-]{{1,21}}[a-z0-9]' minlength=3 maxlength=23 title='3-23 chars: lowercase letters, digits, hyphens; starts with a letter'></label>{fields}{extra}<button class=btn>Deploy</button></form><pre id=o></pre>
 <script>document.getElementById('f').onsubmit=async function(ev){{ev.preventDefault();var fd=new FormData(this),b={{name:fd.get('name'),env:{{}}}};
 for(var [k,v] of fd.entries()){{if(k.indexOf('env_')==0)b.env[k.slice(4)]=v}}{'' if p else "b.repo=" + json.dumps(repo) + ";b.port=+fd.get('port');"}
 var r=await fetch({json.dumps(ep)},{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json','X-Aloof-CSRF':'1'}},body:JSON.stringify(b)}});
