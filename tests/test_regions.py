@@ -89,3 +89,7 @@ def test_status_page_regions():
 
 def test_migration_columns():
     for t in ("apps", "volumes", "pg_dbs", "nodes"): q(f"select region from {t} limit 1")
+def test_dashboard_region_picker_markup():
+    import os
+    h = open(os.path.join(os.path.dirname(__file__), "..", "dashboard", "index.html")).read()
+    for s in ("id=d_region", "/v1/regions", "Coming soon", "region:rg", "id=v_region", "id=pg_region", "EU regions only", "d_err"): assert s in h, s
