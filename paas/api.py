@@ -454,9 +454,27 @@ def auth_magic_finish(token: str):
 @app.post("/v1/auth/logout")
 def auth_logout(request: Request):
     auth.end_session(request.cookies.get(auth.COOKIE)); r = JSONResponse({"ok": True}); r.delete_cookie(auth.COOKIE, path="/"); return r
+class NameReq(BaseModel): name: str | None = None
+@app.put("/v1/auth/profile")
+def auth_profile(p: NameReq, a=Depends(acct)):
+    """Display name (also used as the invoice name)."""
+    n = (p.name or "").strip()[:120] or None; q("update accounts set billing_name=? where id=?", (n, a["id"])); return {"ok": True, "name": n}
+@app.get("/v1/auth/sessions")
+def auth_sessions(request: Request, a=Depends(acct)):
+    """Active browser sessions (no IP or user agent is stored). `current` marks the one making this request."""
+    cur = auth.sha256(request.cookies.get(auth.COOKIE) or "")
+    return [{"id": r["token_hash"][:12], "created": r["created"], "expires": r["expires"], "current": r["token_hash"] == cur}
+            for r in q("select token_hash, created, expires from sessions where account_id=? and expires>? order by created desc", (a["id"], time.time()))]
+@app.delete("/v1/auth/sessions/others")
+def auth_sessions_revoke_others(request: Request, a=Depends(acct)):
+    """Sign out every other browser session. API keys and deploy tokens are not affected."""
+    cur = auth.sha256(request.cookies.get(auth.COOKIE) or "")
+    n = len(q("select token_hash from sessions where account_id=? and token_hash!=?", (a["id"], cur)))
+    q("delete from sessions where account_id=? and token_hash!=?", (a["id"], cur)); return {"ok": True, "revoked": n}
 @app.get("/v1/auth/me")
 def auth_me(a=Depends(acct)):
-    return {"id": a["id"], "email": a["email"], "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")),
+    return {"id": a["id"], "email": a["email"], "name": a.get("billing_name"), "created": a.get("created"), "tier": a.get("tier") or "free",
+            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")),
             "api_key_prefix": a.get("api_key_prefix"), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}

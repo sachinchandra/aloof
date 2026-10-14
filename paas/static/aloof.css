@@ -282,3 +282,21 @@ a.logo i{width:28px;height:28px;flex:none}
 .spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--acc);animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.spin,.dps.active i{animation:none}}
+
+/* dashboard settings */
+.settings{display:grid;gap:18px;max-width:880px}
+.set-card{border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.set-h{padding:20px 24px 0}.set-h h3{margin:0;font-size:16px}.set-h p{margin:4px 0 0;color:var(--fg2);font-size:13.5px}
+.set-b{padding:16px 24px 20px;display:grid;gap:14px}
+.set-foot{display:flex;align-items:center;gap:12px;justify-content:flex-end;padding:12px 24px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--fg) 3%,transparent);font-size:13px}.set-foot .sp{flex:1}
+.set-row{display:flex;align-items:center;gap:14px}
+.set-f{display:grid;gap:6px;font-size:13.5px;font-weight:600;max-width:440px}.set-f input{font-weight:400}.set-f .hint{font-weight:400;color:var(--fg3);font-size:12.5px}
+.set-kv{display:flex;justify-content:space-between;gap:12px;font-size:14px;border-bottom:1px dashed var(--line);padding-bottom:10px}.set-kv span{color:var(--fg2)}
+.set-sub b{display:block;font-size:13.5px;margin-bottom:6px}
+.avatar.lg{width:44px;height:44px;font-size:17px;border-radius:50%;display:inline-grid;place-items:center}
+.set-card.danger{border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}.set-card.danger .set-h h3{color:var(--bad)}
+.switch{display:flex;gap:12px;align-items:flex-start;cursor:pointer;font-size:14px}.switch input{position:absolute;opacity:0;width:1px;height:1px}
+.switch .sw{flex:none;width:36px;height:20px;border-radius:99px;background:var(--line);position:relative;transition:.15s;margin-top:2px}
+.switch .sw:after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s}
+.switch input:checked+.sw{background:var(--acc)}.switch input:checked+.sw:after{left:18px}.switch input:focus-visible+.sw{outline:2px solid var(--acc);outline-offset:2px}
+@media(max-width:640px){.set-h,.set-b,.set-foot{padding-left:16px;padding-right:16px}.set-foot{flex-wrap:wrap}}
