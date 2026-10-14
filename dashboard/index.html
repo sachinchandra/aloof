@@ -299,8 +299,8 @@ function conClose(){if(WS){WS.onclose=null;WS.close();WS=null}}
 function conOpen(){conClose();const el=$('con');if(!el)return;el.textContent='';$('con_st').textContent='connecting…';
  WS=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/v1/apps/'+encodeURIComponent(A())+'/console');WS.binaryType='arraybuffer';const dec=new TextDecoder();
  WS.onopen=()=>{$('con_st').textContent='connected';WS.send(JSON.stringify({resize:[30,120]}));$('con_in').focus()};
- WS.onmessage=e=>{let t=(typeof e.data=='string'?e.data:dec.decode(e.data,{stream:true})).replace(ANSI,'').replace(/\r\n/g,'\n').replace(/\r/g,'');el.textContent=(el.textContent+t).slice(-60000);el.scrollTop=el.scrollHeight};
- WS.onclose=e=>{if($('con_st'))$('con_st').textContent='disconnected'+(e.reason?': '+e.reason:'')};
+ WS.onmessage=e=>{let t=(typeof e.data=='string'?e.data:dec.decode(e.data,{stream:true}));if(t.indexOf('\x1b[6n')>=0)conSend('\x1b[1;1R');t=t.replace(ANSI,'').replace(/\r\n/g,'\n').replace(/\r/g,'');el.textContent=(el.textContent+t).slice(-60000);el.scrollTop=el.scrollHeight};
+ WS.onclose=e=>{if($('con_st'))$('con_st').textContent='disconnected'+(e.reason?': '+e.reason:(e.code==1006?' (connection lost; check your network and try Reconnect)':''))};
  $('con_in').onkeydown=e=>{if(e.key=='Enter'){conSend($('con_in').value+'\r');$('con_in').value=''}}}
 function conSend(t){if(WS&&WS.readyState==1)WS.send(new TextEncoder().encode(t))}
 // ---- drains

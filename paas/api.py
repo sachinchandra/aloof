@@ -638,6 +638,8 @@ def login_page(request: Request):
     n = request.query_params.get("next")
     if n is not None and auth.safe_next(n, None) is None: return RedirectResponse("/login", 303)   # F1: drop unsafe next server-side
     return www.at("/login", "default", site.login, BRAND)
+@app.get("/static/analytics.js", include_in_schema=False)
+def static_analytics(): return FileResponse(os.path.join(ROOT, "paas", "static", "analytics.js"), media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"})
 @app.get("/static/aloof.css", include_in_schema=False)
 def static_css(): return FileResponse(os.path.join(ROOT, "paas", "static", "aloof.css"), media_type="text/css", headers={"Cache-Control": "public, max-age=3600"})
 @app.get("/privacy", response_class=HTMLResponse)
@@ -770,13 +772,27 @@ def _ws_account(ws: WebSocket):
 async def app_console(ws: WebSocket, name: str, instance: str|None=None):
     """Interactive shell in a running instance. Binary frames carry terminal bytes both ways; a text frame {"resize":[rows,cols]} resizes.
     Session open/close and each entered line are written to the audit log."""
-    a = _ws_account(ws); ap = engine.get_app(name)
-    if not a or not ap or ap["account_id"] != a["id"] or ap["status"] == "destroyed": await ws.close(code=4401); return
-    i = q("select * from instances where app=? and status='running'" + (" and id=?" if instance else "") + " order by started", (name, *([instance] if instance else [])), one=True)
+    # Accept first, then close with a code + reason: closing before accept() turns into an HTTP 403 and the browser only sees 1006.
+    a = _ws_account(ws); ap = engine.get_app(name); await ws.accept()
+    if not a or not ap or ap["account_id"] != a["id"] or ap["status"] == "destroyed":
+        await ws.close(code=4401, reason="not signed in, or no such app on this account"); return
+    if ap["status"] in ("suspended", "capped"):
+        await ws.close(code=4409, reason="app is " + ("suspended (balance at $0): top up to resume" if ap["status"] == "suspended" else "paused at the Free plan's monthly cap")); return
+    sel = lambda: q("select * from instances where app=? and status='running'" + (" and id=?" if instance else "") + " order by started", (name, *([instance] if instance else [])), one=True)
+    i = sel()
+    if not i and not instance and ap["status"] in ("running", "idle"):   # scaled to zero: wake it like an incoming request would
+        await ws.send_bytes(b"Waking the app (it was scaled to zero)...\r\n")
+        try: await asyncio.to_thread(controller.cold_start, name)
+        except Exception as e: log.warning("console wake failed for %s: %s", name, e)
+        i = sel()
     drv = get_drivers().get(i["provider"]) if i else None
-    if not i or not hasattr(drv, "exec_socket"): await ws.close(code=4409, reason="no running instance (or console unsupported on this node)"); return
-    await ws.accept(); ip = ws.client.host if ws.client else None; t0 = time.time()
-    eid, sock = await asyncio.to_thread(drv.exec_socket, i["id"])
+    if not i or not hasattr(drv, "exec_socket"):
+        await ws.close(code=4409, reason="no running instance" if not i else "console isn't supported on this node"); return
+    ip = ws.client.host if ws.client else None; t0 = time.time()
+    try: eid, sock = await asyncio.to_thread(drv.exec_socket, i["id"])
+    except Exception as e:
+        log.warning("console exec failed for %s: %s", name, e); await ws.close(code=1011, reason="couldn't start a shell in the instance"); return
+    controller.M.begin(name)   # an open console counts as activity, so scale-to-zero doesn't kill the session
     _audit(a["id"], name, "console.open", f"instance {i['id']}", ip)
     async def pump():
         while True:
@@ -809,6 +825,7 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
         except Exception: pass
         try: sock.close()
         except Exception: pass
+        controller.M.end(name)
         _audit(a["id"], name, "console.close", f"{time.time()-t0:.0f}s, {n} bytes in", ip)
 @app.get("/v1/audit")
 def audit_log(limit: int=100, app_name: str|None=None, a=Depends(acct)):

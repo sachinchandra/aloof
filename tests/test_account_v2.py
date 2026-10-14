@@ -22,3 +22,11 @@ def test_billing_daily():
     q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (aid, time.time() - 60, -250, "usage", "t"))
     q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (aid, time.time() - 30, 1000, "topup", "t"))
     d = c.get("/v1/billing/daily?days=7").json()["days"]; assert len(d) == 7 and d[-1]["usage_usd"] == 2.5 and sum(x["plan_usd"] for x in d) == 0
+def test_console_closes_with_reason_and_analytics_js():
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+    c = TestClient(api.app)
+    with c.websocket_connect("/v1/apps/nope/console", headers={"origin": "http://localhost"}) as ws:
+        with pytest.raises(WebSocketDisconnect) as e: ws.receive_bytes()
+    assert e.value.code == 4401 and "not signed in" in (e.value.reason or "")
+    r = c.get("/static/analytics.js"); assert r.status_code == 200 and "javascript" in r.headers["content-type"]
