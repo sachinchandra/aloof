@@ -53,18 +53,40 @@ def _clean_register(body):
     gm = body.get("gpu_model")
     if gm is not None and (not isinstance(gm, str) or len(gm) > 100 or not gm.isprintable()): raise ValueError("gpu_model must be printable text")
     out["gpu_model"] = gm
-    out["agent_url"] = body.get("agent_url") if isinstance(body.get("agent_url"), str) else None
+    out["agent_url"] = None
+    if direct and body.get("agent_url") is not None: out["agent_url"] = check_agent_url(body.get("agent_url"))
     return out
+def direct_agent_guard():
+    """PAAS_ALLOW_DIRECT_AGENT=1 (agents reached without WireGuard) is a dev switch. Refuse it in production (PAAS_ENV_FILE set)
+    unless PAAS_ALLOW_DIRECT_AGENT_PROD=1 is also set. Called at control-plane start."""
+    if os.environ.get("PAAS_ALLOW_DIRECT_AGENT") == "1" and os.environ.get("PAAS_ENV_FILE") and os.environ.get("PAAS_ALLOW_DIRECT_AGENT_PROD") != "1":
+        raise RuntimeError("PAAS_ALLOW_DIRECT_AGENT=1 is not allowed in production; unset it (or set PAAS_ALLOW_DIRECT_AGENT_PROD=1 deliberately)")
+def check_agent_url(u):
+    """http(s)://<host>[:port][/path] where the host is a public IP, or a name resolving only to public IPs. ValueError otherwise."""
+    import urllib.parse, socket, ipaddress
+    if not isinstance(u, str) or len(u) > 300 or not u.isprintable() or any(c.isspace() for c in u): raise ValueError("agent_url must be an http(s) URL")
+    p = urllib.parse.urlsplit(u)
+    if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password or p.query or p.fragment: raise ValueError("agent_url must be http(s)://host[:port]")
+    try: port = p.port
+    except ValueError: raise ValueError("agent_url port is invalid")
+    try: ips = [ipaddress.ip_address(p.hostname)]
+    except ValueError:
+        try: ips = [ipaddress.ip_address(a[4][0].split("%")[0]) for a in socket.getaddrinfo(p.hostname, port or 80, proto=socket.IPPROTO_TCP)]
+        except OSError: raise ValueError("agent_url host does not resolve")
+    if not ips or not all(wg.valid_public_ip(str(i)) for i in ips): raise ValueError("agent_url must point to a public (global unicast) address")
+    return u
 def register_node(body):
     """Called by the agent at first boot. Validates the body, then validates and burns the join token, returns agent token + WG config."""
     db, crypto = _db()
     clean = _clean_register(body)
     node_id = db.kv_get("join", crypto.sha256(body.get("join_token", "")))
     if not node_id: raise PermissionError("invalid or used join token")
+    if body.get("wg_pubkey") and db.q("select 1 from nodes where wg_pubkey=? and status!='destroyed' and id!=?", (body["wg_pubkey"], node_id), one=True):
+        raise LookupError("this WireGuard public key is already registered to another node")
     db.kv_del("join", crypto.sha256(body["join_token"])); body = clean
     n = db.q("select * from nodes where id=?", (node_id,), one=True)
     tok = "at_" + secrets.token_urlsafe(32)
-    agent_url = body.get("agent_url") if (body.get("agent_url") and os.environ.get("PAAS_ALLOW_DIRECT_AGENT") == "1") else f"http://{n['wg_ip']}:{body['agent_port']}"
+    agent_url = body["agent_url"] if (body.get("agent_url") and os.environ.get("PAAS_ALLOW_DIRECT_AGENT") == "1") else f"http://{n['wg_ip']}:{body['agent_port']}"
     db.q("update nodes set status='ready', wg_pubkey=?, agent_url=?, agent_token_enc=?, vcpu=?, mem_mb=?, gpus=?, gpu_model=?, last_seen=?, public_ip=coalesce(public_ip, ?) where id=?",
          (body.get("wg_pubkey"), agent_url, crypto.enc(tok), body.get("vcpu"), body.get("mem_mb"), body.get("gpus") or 0, body.get("gpu_model"), time.time(), body.get("public_ip"), node_id))
     peer = wg.add_peer(body.get("wg_pubkey"), n["wg_ip"])

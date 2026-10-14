@@ -496,6 +496,7 @@ def _admin_token():
         fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(fd, ("adm_" + _s.token_urlsafe(32)).encode()); os.close(fd)
     return open(f).read().strip()
 ADMIN = _admin_token()
+remote.direct_agent_guard()   # refuse PAAS_ALLOW_DIRECT_AGENT in production
 def admin(authorization: str = Header(None)):
     import hmac as _h
     a = authorization or ""
@@ -506,6 +507,7 @@ async def node_register(request: Request):
     except Exception: raise HTTPException(400, "body must be JSON")
     try: return remote.register_node(body)
     except PermissionError as e: raise HTTPException(403, str(e))
+    except LookupError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
 @app.get("/v1/nodes/agent.py", response_class=PlainTextResponse)
 def node_agent(): return open(os.path.join(ROOT, "paas", "agent", "agent.py")).read()
@@ -558,7 +560,9 @@ def admin_metrics():
                      f"{n} paid customers: GPU unlock reached. Set PAAS_GPU_ENABLED=1 plus HYPERSTACK_API_KEY / RUNPOD_API_KEY."),
             "dashboard": m}
 @app.delete("/v1/admin/nodes/{node_id}", dependencies=[Depends(admin)])
-def admin_drop_node(node_id: str): remote.destroy_node(node_id, "admin"); return {"ok": True}
+def admin_drop_node(node_id: str):
+    if not q("select 1 from nodes where id=?", (node_id,), one=True): raise HTTPException(404, "unknown node")
+    remote.destroy_node(node_id, "admin"); return {"ok": True}
 @app.get("/healthz")
 def health(): return {"ok":True}
 def _llms_gpu():

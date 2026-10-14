@@ -104,6 +104,7 @@ update apps set region='nbg1' where region is null or region in ('eu-de','eu-cen
 update volumes set region='nbg1' where region is null;
 update pg_dbs set region='nbg1' where region is null;
 update nodes set region='nbg1' where region is null;
+create unique index if not exists nodes_wg_pubkey_live on nodes(wg_pubkey) where wg_pubkey is not null and status!='destroyed';
 """)
 ]
 def _dialect(sql):
