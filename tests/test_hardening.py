@@ -49,7 +49,11 @@ def test_mcp_manifest_region_and_tools():
 def test_pricing_seats_truthful():
     from paas.plans import TIERS
     assert TIERS["pro"]["seats"] == 1
-    h = c.get("/pricing").text; assert "Unlimited seats" not in h and "deploy tokens" in h
+    h = c.get("/pricing").text; assert "1 seat" in h
+    for bad in ("Unlimited seats", "unlimited seats", "for teams", "For teams", "per workspace"):
+        assert bad not in h and bad not in c.get("/").text, bad
+    for comp in ("Fly.io", "Render", "Heroku", "Railway"): assert comp not in h, comp
+    assert "Nuremberg, Germany" in h and "$24.97" in h and "$4.97" in h and "$6.48" in h
 def test_cli_default_api():
     src = open(os.path.join(os.path.dirname(__file__), "..", "cli", "aloof")).read()
     assert 'DEFAULT_API = "https://api.aloof.si"' in src and "localhost:8000" not in src
