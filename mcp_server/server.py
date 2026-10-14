@@ -194,7 +194,7 @@ def create_deploy_token(app: str = "", expires_in: str = "90d", api_key: str = "
     return _r("POST", "/v1/tokens", api_key, json={"app": app or None, "expires_in": expires_in})
 mcp.custom_route("/oauth/login", methods=["GET","POST"])(login_page)
 
-async def healthz():
+async def healthz(request):
     from starlette.responses import JSONResponse
     return JSONResponse({"ok": True})
 mcp.custom_route("/healthz", methods=["GET"])(healthz)
