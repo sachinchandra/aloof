@@ -136,12 +136,18 @@ def join_gpu_waitlist(email: str, gpu: str = "", note: str = "") -> dict:
     return _r("POST", "/v1/waitlist", json={"email": email, **({"gpu": gpu} if gpu else {}), **({"note": note} if note else {})})
 @mcp.tool()
 def list_releases(name: str, api_key: str = "") -> list | dict:
-    """Release history of an app (every deploy, config change and rollback is a numbered release; status active/superseded/failed)."""
+    """Release history of an app (every deploy, config change and rollback is a numbered release; status active/superseded/failed).
+    `auto_rollback` is set on a release that self-heal rolled back (reason, numbers vs the previous release's baseline)."""
     return _r("GET", f"/v1/apps/{name}/releases", api_key)
 @mcp.tool()
 def rollback_app(name: str, version: int | None = None, api_key: str = "") -> dict:
     """Roll back to an earlier release (default: the previous one). Zero downtime, no rebuild. Poll get_status."""
     return _r("POST", f"/v1/apps/{name}/rollback", api_key, json={"version": version})
+@mcp.tool()
+def set_self_heal(name: str, enabled: bool, api_key: str = "") -> dict:
+    """Self-healing deploys (default on): for ~5 minutes after a deploy the new release's 5xx rate and p95 latency are compared with
+    the previous release; if clearly worse it is rolled back automatically with the reason recorded. Turn it off/on per app."""
+    return _r("PUT", f"/v1/apps/{name}/self-heal", api_key, json={"enabled": enabled})
 @mcp.tool()
 def create_postgres(name: str, plan: str = "pg-dev", region: str = "", api_key: str = "") -> dict:
     """Create a managed Postgres 16 database (plans: pg-dev $2.99/mo, pg-basic $9.99, pg-standard $28.99, pg-perf $60.99; daily

@@ -173,7 +173,7 @@ HELP = {
     "templates": "list one-click templates", "status": "show an app's status and instances", "logs": "show (or follow) an app's logs",
     "destroy": "delete an app", "scale": "change instance count or VM size", "env": "set or unset environment variables",
     "volumes": "create, list, attach and delete persistent volumes", "autoscale": "configure autoscaling and scale-to-zero",
-    "domains": "add, verify and remove custom domains", "health": "configure the HTTP health check", "releases": "list an app's releases",
+    "domains": "add, verify and remove custom domains", "health": "configure the HTTP health check", "releases": "list an app's releases", "self-heal": "turn automatic rollback of bad deploys on or off",
     "rollback": "roll back to a previous release", "pg": "managed Postgres databases", "snapshots": "volume snapshots and off-site backups",
     "launch": "detect the framework and write a Dockerfile + aloof.toml", "audit": "show the account audit log", "config": "validate or show aloof.toml",
     "tokens": "create, list and revoke deploy tokens", "secrets": "manage app secrets", "certs": "show TLS certificates for an app",
@@ -215,6 +215,7 @@ a.add_argument("--concurrency", type=int, default=10); a.add_argument("--cpu", t
 a = s.add_parser("domains"); a.add_argument("name"); a.add_argument("action", choices=["add","list","verify","remove"]); a.add_argument("domain", nargs="?")
 a = s.add_parser("health"); a.add_argument("name"); a.add_argument("--path", default="/"); a.add_argument("--failures", type=int, default=3)
 a = s.add_parser("releases"); a.add_argument("name")
+a = s.add_parser("self-heal"); a.add_argument("name"); a.add_argument("state", nargs="?", choices=["on", "off"])
 a = s.add_parser("rollback"); a.add_argument("name"); a.add_argument("version", nargs="?", type=int, help="default: previous release")
 a = s.add_parser("pg", help="managed Postgres"); ps = a.add_subparsers(dest="pcmd", required=True)
 x = ps.add_parser("create"); x.add_argument("name"); x.add_argument("--plan", default="pg-dev"); x.add_argument("--region")
@@ -320,6 +321,10 @@ elif o.cmd == "health": pj(call("PUT", f"/v1/apps/{o.name}/health", {"path": o.p
 elif o.cmd == "releases":
     for r in call("GET", f"/v1/apps/{o.name}/releases"):
         print(f"v{r['version']:<4} {r['status']:<11} {time.strftime('%Y-%m-%d %H:%M', time.localtime(r['created']))}  {r['reason'] or '':<22} {r['image'] or ''}")
+        if r.get("auto_rollback"): print(f"      auto-rolled back to v{r['auto_rollback']['rolled_back_to']}: {r['auto_rollback']['reason']}")
+elif o.cmd == "self-heal":
+    r = call("PUT", f"/v1/apps/{o.name}/self-heal", {"enabled": o.state == "on"}) if o.state else call("GET", f"/v1/apps/{o.name}/self-heal")
+    print("self-heal", "on" if r["enabled"] else "off", f"(watching v{r['watching']['version']}, {r['watching']['seconds_left']}s left)" if r.get("watching") else "")
 elif o.cmd == "rollback":
     r = call("POST", f"/v1/apps/{o.name}/rollback", {"version": o.version}); print("rolling back", r["name"])
     while True:

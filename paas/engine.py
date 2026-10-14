@@ -181,9 +181,11 @@ def _set_release(name, version, status, image=None, spec=None):
     q("update releases set status=?" + (", image=?" if image else "") + (", spec=?" if spec else "") + " where app=? and version=?",
       (status, *([image] if image else []), *([dump_spec(spec)] if spec else []), name, version))
 def releases(name):
+    from . import selfheal
     return [{k: r[k] for k in ("version", "image", "status", "reason", "created")} | {"plan": load_spec(r["spec"]).get("plan"), "env_keys": sorted(load_spec(r["spec"]).get("env", {}))}
+            | {"auto_rollback": selfheal.auto_rollback_info(name, r["version"])}
             for r in q("select * from releases where app=? order by version desc limit 50", (name,))]
-def rollback(name, version=None):
+def rollback(name, version=None, reason=None):
     """Redeploy an earlier release's image + config (env, plan, port, command, scale, health). Volumes, Postgres attachments and
     domains stay as they are now. No rebuild, so it's fast; zero-downtime like any deploy."""
     cur = q("select version from releases where app=? and status='active' order by version desc", (name,), one=True)
@@ -200,7 +202,7 @@ def rollback(name, version=None):
     spec["_image"] = r["image"]
     q("update apps set spec=?, status='queued', updated=?, error=null where name=?", (dump_spec(spec), time.time(), name))
     event(name, f"rollback to v{r['version']} queued")
-    threading.Thread(target=_run_deploy, args=(name, r["image"], f"rollback to v{r['version']}"), daemon=True).start()
+    threading.Thread(target=_run_deploy, args=(name, r["image"], reason or f"rollback to v{r['version']}"), daemon=True).start()
     return get_app(name)
 def _prune_images(name, drv):
     keep = {r["image"] for r in q("select image from releases where app=? order by version desc limit ?", (name, RELEASE_KEEP))}
@@ -263,6 +265,10 @@ def _run_deploy(name, image=None, reason=None):
             q("update apps set status=?, updated=?, error=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(),
               (f"{len(bad)} instance(s) not ready" if bad else None), name))
             _set_release(name, ver, "active"); log(f"deploy complete (v{ver} live)")
+            try:
+                from . import selfheal
+                selfheal.on_active(name, ver, prev["version"] if prev else None, reason or "deploy")
+            except Exception as e: log(f"self-heal: {e}")
             _track_deploy(app, spec, ver, reason)
             try: _sync_groups(name, app["account_id"], spec, image)
             except Exception as e: log(f"process groups: {e}")
@@ -289,7 +295,7 @@ def deploy_progress(name):
     rel = q("select version, status, reason, created, image from releases where app=? order by version desc limit 1", (name,), one=True)
     if rel and rel["created"] < t0 - 1: rel = None   # this deploy's release row isn't written yet
     st = app["status"]; src = load_spec(app["spec"]).get("source") or {}
-    from_image = bool(src.get("image")) or bool(rel and (rel["reason"] or "").startswith("rollback"))
+    from_image = bool(src.get("image")) or bool(rel and (rel["reason"] or "").startswith(("rollback", "auto-rollback")))
     pushed = any(e["msg"].startswith("pushed ") for e in evs)
     if rel and rel["status"] == "active": phase = "live"
     elif rel and rel["status"] == "failed": phase = "failed"

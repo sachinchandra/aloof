@@ -638,11 +638,19 @@ def dash(request: Request):
 
 
 # ---------------- Fly parity: releases/rollback, managed Postgres, snapshots, exec/console, log drains/history, audit ----------------
-from . import parity
+from . import parity, selfheal
 from .db import audit as _audit
 def _ip(request): return request.client.host if request.client else None
 @app.get("/v1/apps/{name}/releases")
 def app_releases(name: str, a=Depends(acct)): own(name, a); return engine.releases(name)
+class SelfHealReq(BaseModel): enabled: bool
+@app.get("/v1/apps/{name}/self-heal")
+def app_selfheal_get(name: str, a=Depends(acct)): own(name, a); return selfheal.status(name)
+@app.put("/v1/apps/{name}/self-heal")
+def app_selfheal_put(name: str, b: SelfHealReq, request: Request, a=Depends(acct)):
+    """Turn automatic rollback after a bad deploy on or off for this app (default on)."""
+    own(name, a); selfheal.set_enabled(name, b.enabled)
+    _audit(a["id"], name, "self-heal", "on" if b.enabled else "off", _ip(request)); return selfheal.status(name)
 class RollbackReq(BaseModel): version: int|None=None
 @app.post("/v1/apps/{name}/rollback")
 def app_rollback(name: str, request: Request, b: RollbackReq|None=None, a=Depends(acct)):
@@ -852,6 +860,9 @@ def resolve_app(host, path):
         if name.startswith("pg-"): return None, path
         return name, (rest[0] if rest else "")
     return None, path
+def _sh_record(name, status, t0):
+    try: selfheal.record(name, status, (time.monotonic() - t0) * 1000)   # time to response headers
+    except Exception: pass
 @proxy.api_route("/{path:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS","HEAD"])
 async def edge(path: str, request: Request):
     host = request.headers.get("host","").split(":")[0].lower(); name, path = resolve_app(host, path)
@@ -870,7 +881,7 @@ async def edge(path: str, request: Request):
     url = f"http://{i['host']}:{i['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     hdrs = {k:v for k,v in request.headers.items() if k.lower() not in HOP} | {"x-forwarded-host": host, "x-forwarded-proto": proto}
-    controller.M.begin(name); body_bytes = await request.body(); r = None
+    controller.M.begin(name); body_bytes = await request.body(); r = None; t0 = time.monotonic()
     for attempt in range(3):
         try:
             r = await client.send(client.build_request(request.method, url, headers=hdrs, content=body_bytes), stream=True); break
@@ -884,7 +895,8 @@ async def edge(path: str, request: Request):
         except httpx.HTTPError as e:
             err = e; break
     if r is None:
-        controller.M.end(name); return PlainTextResponse(f"upstream error: {err}", 502)
+        controller.M.end(name); _sh_record(name, 502, t0); return PlainTextResponse(f"upstream error: {err}", 502)
+    _sh_record(name, r.status_code, t0)
     async def body():
         try:
             async for chunk in r.aiter_raw():
