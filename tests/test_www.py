@@ -95,6 +95,9 @@ def test_support_doc_fixes():
     qs = c.get("/docs/quickstart").text; assert "sudo curl" in qs and "WSL" in qs and '{"api": "' in qs and "~/.local/bin" in qs
     d = c.get("/docs/domains").text; assert "Cloudflare" in d and "DNS only" in d and "id=root" in d and "id=verify-failed" in d and "Propagation" in d
     t = c.get("/docs/troubleshooting"); assert t.status_code == 200 and "HTTP 402" in t.text and "id=failed-releases" in t.text and "build logs" in t.text.lower() and "release_command" in t.text
-    b = c.get("/docs/billing").text; assert b.index("The short version") < b.index("/v1/billing/subscribe") and "refund policy: pending" in b.lower() and "Railway" not in b
-    p = c.get("/docs/postgres").text; assert "aloof proxy 5432 -a pg-" in p and "max_connections" in p and "id=resize" in p
+    b = c.get("/docs/billing").text; assert b.index("The short version") < b.index("/v1/billing/subscribe") and "id=cancel" in b and "id=refunds" in b and "id=delete" in b and "pending" not in b.lower() and "Railway" not in b and "Fly" not in b and "Render" not in b
+    p = c.get("/docs/postgres").text; assert "aloof proxy 5432 -a pg-" in p and "max_connections" in p and "id=resize" in p and "Support will resize" in p
     assert "Support contact: pending" in c.get("/docs/support").text and "Remix" in c.get("/guides").text
+def test_terms_billing_section():
+    t = c.get("/terms").text; assert "Billing, cancellation and refunds" in t and "/docs/billing#cancel" in t
+    assert "$5 of prepaid credit" in c.get("/docs/quickstart").text
