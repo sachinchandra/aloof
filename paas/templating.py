@@ -5,7 +5,8 @@
   [app]      port, plan (default plan), region (only live regions; today nbg1)
   [[env]]    name + one of: value (supports ${APP_URL} / ${APP_NAME}) | generate = "secret:<n>" | "hex:<n>" | required = true (user supplies)
   [[volumes]] name (suffix; volume is <app>-<name>), path, size_gb
-  [postgres] plan (pg-*), var (env var for the URL, default DATABASE_URL)
+  [postgres] plan (pg-*), var (env var for the URL, default DATABASE_URL); optional [postgres.env] VAR = "url|host|port|database|user|password"
+             for apps that take the connection parts separately (then var is only set if given explicitly)
 
 Single service per template for now (a `services` table is rejected). Deploy-button URLs: https://www.aloof.si/deploy?template=<id>
 or ?repo=<https github/gitlab url>; they go through login/signup and an explicit confirm click (no deploy on GET)."""
@@ -34,10 +35,17 @@ SCHEMA = {
         "env": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}, "value": {"type": "string"},
                 "generate": {"type": "string", "pattern": "^(secret|hex):[0-9]+$"}, "required": {"type": "boolean"}, "description": {"type": "string"}}}},
         "volumes": {"type": "array", "items": {"type": "object", "required": ["name", "path"], "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "size_gb": {"type": "integer"}}}},
-        "postgres": {"type": "object", "properties": {"plan": {"type": "string"}, "var": {"type": "string"}}},
+        "postgres": {"type": "object", "properties": {"plan": {"type": "string"}, "var": {"type": "string"},
+                     "env": {"type": "object", "additionalProperties": {"enum": ["url", "host", "port", "database", "user", "password"]}}}},
     }}
 
 class TemplateError(ValueError): pass
+PG_FIELDS = ("url", "host", "port", "database", "user", "password")
+def pg_vars(pgt):
+    """{env var: field} for a template's [postgres] table."""
+    m = dict(pgt.get("env") or {})
+    if "var" in pgt or not m: m[pgt.get("var", "DATABASE_URL")] = "url"
+    return m
 
 def check_repo(url):
     """SSRF-safe repo URL check: https only, host exactly github.com or gitlab.com, no credentials/port/query/fragment,
@@ -81,6 +89,8 @@ def validate(t, fname=None):
     if "postgres" in t:
         if t["postgres"].get("plan", "pg-dev") not in PG_PLANS: raise TemplateError(f"{t['id']}: postgres plan")
         if not ENV_RE.match(t["postgres"].get("var", "DATABASE_URL")): raise TemplateError(f"{t['id']}: postgres var")
+        for k, v in (t["postgres"].get("env") or {}).items():
+            if not ENV_RE.match(k) or v not in PG_FIELDS: raise TemplateError(f"{t['id']}: postgres.env {k}={v}")
     return t
 
 @functools.lru_cache(maxsize=1)
@@ -107,7 +117,7 @@ def public(t):
                      **({"default": e["value"]} if "value" in e else {}), "description": e.get("description", "")} for e in t.get("env", [])],
             "required_env": [e["name"] for e in t.get("env", []) if not ("value" in e or "generate" in e)],
             "volumes": [{"name": v["name"], "path": v["path"], "size_gb": v.get("size_gb", 1)} for v in t.get("volumes", [])],
-            "postgres": ({"plan": t["postgres"].get("plan", "pg-dev"), "var": t["postgres"].get("var", "DATABASE_URL")} if "postgres" in t else None),
+            "postgres": ({"plan": t["postgres"].get("plan", "pg-dev"), "env": pg_vars(t["postgres"])} if "postgres" in t else None),
             "page": f"https://www.aloof.si/templates/{t['id']}", "deploy_button": f"https://www.aloof.si/deploy?template={t['id']}",
             "api": f"POST /v1/templates/{t['id']}/deploy"}
 
@@ -149,10 +159,14 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
     if vols: spec["volumes"] = vols
     pg = None
     if "postgres" in t:
-        pgn = f"{name}-db"; var = t["postgres"].get("var", "DATABASE_URL")
+        pgn = f"{name}-db"; vmap = pg_vars(t["postgres"]); var = next(iter(vmap))
         pg = parity.pg_create(account_id, pgn, t["postgres"].get("plan", "pg-dev"))
         row = q("select * from pg_dbs where name=?", (pgn,), one=True)
-        spec["networks"] = [parity.pg_net(pgn)]; spec["env"][var] = parity.pg_url(row)
+        url = parity.pg_url(row); u = urllib.parse.urlsplit(url)
+        parts = {"url": url, "host": u.hostname, "port": str(u.port or 5432), "database": u.path.lstrip("/"),
+                 "user": urllib.parse.unquote(u.username or ""), "password": urllib.parse.unquote(u.password or "")}
+        spec["networks"] = [parity.pg_net(pgn)]
+        for k, f in vmap.items(): spec["env"][k] = parts[f]
         q("update pg_dbs set attached=? where name=?", (json.dumps([{"app": name, "var": var}]), pgn))
     r = engine.deploy(account_id, spec)
     return {"app": r, "template": t["id"], "generated_secrets": generated, "volumes": vols, "postgres": pg and pg["name"],
@@ -218,7 +232,7 @@ def template_page(tid: str):
     vols = "".join(f"<li>{e(v['size_gb'])} GB at <code>{e(v['path'])}</code></li>" for v in p["volumes"]) or "<li>none</li>"
     src = p["source"].get("image") or p["source"].get("repo")
     inner = (f"<p><a class='btn' href='{e(p['deploy_button'])}'>Deploy on Aloof</a></p><h2>What gets created</h2><ul><li>App from <code>{e(src)}</code> on port {p['port']}, plan <code>{e(p['default_plan'])}</code>, region {e(p['region'])}</li>"
-             f"{'<li>Managed Postgres (' + e(p['postgres']['plan']) + '), URL in <code>' + e(p['postgres']['var']) + '</code></li>' if p['postgres'] else ''}</ul>"
+             f"{'<li>Managed Postgres (' + e(p['postgres']['plan']) + '), connection in <code>' + e(', '.join(p['postgres']['env'])) + '</code></li>' if p['postgres'] else ''}</ul>"
              f"<h3>Environment</h3><ul>{envs}</ul><h3>Volumes</h3><ul>{vols}</ul>"
              f"<h3>CLI / API / MCP</h3><pre>aloof deploy --template {e(p['id'])} &lt;app-name&gt;\ncurl -X POST https://api.aloof.si/v1/templates/{e(p['id'])}/deploy -H 'Authorization: Bearer $ALOOF_API_KEY' -d '{{\"name\":\"my-{e(p['id'])}\"}}'\nMCP: deploy_template(template=\"{e(p['id'])}\", name=...)</pre>"
              f"<p class=muted>Button markdown: <code>[![Deploy on Aloof](https://www.aloof.si/button.svg)]({e(p['deploy_button'])})</code></p>")

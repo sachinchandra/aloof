@@ -4,7 +4,7 @@ description = "Privacy-friendly web analytics (Google Analytics alternative) on 
 category = "Analytics"
 website = "https://umami.is"
 [source]
-image = "ghcr.io/umami-software/umami:postgresql-latest"
+image = "ghcr.io/umami-software/umami:latest"
 [app]
 port = 3000
 plan = "shared-1x-512mb"

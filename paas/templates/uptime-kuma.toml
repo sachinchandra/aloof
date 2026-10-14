@@ -4,7 +4,7 @@ description = "Self-hosted uptime monitoring with status pages and alerts."
 category = "Observability"
 website = "https://github.com/louislam/uptime-kuma"
 [source]
-image = "louislam/uptime-kuma:1"
+image = "louislam/uptime-kuma:2"
 [app]
 port = 3001
 plan = "shared-1x-512mb"

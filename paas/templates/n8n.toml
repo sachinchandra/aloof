@@ -24,7 +24,13 @@ name = "N8N_PORT"
 value = "5678"
 [postgres]
 plan = "pg-dev"
-var = "DB_POSTGRESDB_CONNECTION_URL"
+# n8n has no connection-URL variable; it takes the parts separately (docs.n8n.io database env vars)
+[postgres.env]
+DB_POSTGRESDB_HOST = "host"
+DB_POSTGRESDB_PORT = "port"
+DB_POSTGRESDB_DATABASE = "database"
+DB_POSTGRESDB_USER = "user"
+DB_POSTGRESDB_PASSWORD = "password"
 [[volumes]]
 name = "data"
 path = "/home/node/.n8n"
