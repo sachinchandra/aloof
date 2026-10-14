@@ -68,7 +68,7 @@ TIERS = {
             "compare": "Railway Free ($0 + $1 usage), Render Hobby ($0), Fly: no free tier"},
   "hobby": {"fee_usd": 5,  "included_usage_usd": 5,  "seats": 1,    "max_apps": 50,  "autoscale": True, "note": "",
             "compare": "Railway Hobby $5 incl. $5 usage"},
-  "pro":   {"fee_usd": 20, "included_usage_usd": 20, "seats": 1, "max_apps": None, "autoscale": True, "note": "per workspace; single-user account plus scoped deploy tokens (team seats not available yet)",
+  "pro":   {"fee_usd": 20, "included_usage_usd": 20, "seats": 1, "max_apps": None, "autoscale": True, "note": "single seat; one user plus scoped deploy tokens",
             "compare": "Railway Pro $20 incl. $20; Render Pro $25 + compute"},
 }
 for t in TIERS.values(): t["egress_gb"] = 0
