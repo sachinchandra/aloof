@@ -118,3 +118,9 @@ def test_analytics_on_with_key(monkeypatch):
     h = c.get("/").text; assert "/static/analytics.js" in h and "eu.i.posthog.com" in h and 'data-cta=deploy_free' in h and "data-cta=connect_mcp" in h
     assert c.get("/v1/config").json()["posthog"]["key"] == "phc_testkey1234567890"
     assert "PostHog Cloud EU" in c.get("/privacy").text
+def test_client_events_no_server_duplicates():
+    import os
+    r = os.path.join(os.path.dirname(__file__), "..")
+    js = "".join(open(os.path.join(r, f)).read() for f in ("paas/static/analytics.js", "paas/site.py", "dashboard/index.html"))
+    for e in ("signup_completed", "first_deploy_succeeded", "deploy_succeeded", "mcp_connected", "plan_upgraded", "gpu_waitlist_joined"): assert f"'{e}'" not in js, e
+    assert "aloofIdentify(String(me.id))" in js and "auth/magic',{{method:'POST'" in js and js.count("attribution:window.aloofAttribution") == 2

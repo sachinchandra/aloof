@@ -416,7 +416,7 @@ if(location.hash=='#register')mode('register');
 async function go(kind){{if(kind=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'password'}});const r=await fetch('/v1/auth/'+kind,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,password:pw.value,attribution:window.aloofAttribution?aloofAttribution():null}})}});
  const j=await r.json(); if(!r.ok){{msg.className='bad';msg.textContent=j.detail||'error';return}}
  if(j.api_key) sessionStorage.newKey=j.api_key; var n=new URLSearchParams(location.search).get('next');location=(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&n.indexOf(String.fromCharCode(92))<0)?n:'/dashboard'}}
-async function magic(){{const r=await fetch('/v1/auth/magic',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value}})}});
+async function magic(){{const r=await fetch('/v1/auth/magic',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,attribution:window.aloofAttribution?aloofAttribution():null}})}});
  const j=await r.json(); msg.className=r.ok?'ok':'bad'; msg.textContent=j.detail}}
 </script>""", brand)
 LEGAL = {

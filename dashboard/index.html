@@ -287,7 +287,7 @@ async function rmpg(n){if(!await ask('Destroy database '+n+' and its backups? Th
 // ---- audit
 async function auditlog(){const a=await api('GET','/v1/audit?limit=200');$('audit_empty').style.display=a.length?'none':'';$('auditt').style.display=a.length?'':'none';$('auditt').innerHTML='<tr><th>When</th><th>App</th><th>Action</th><th>Detail</th><th>IP</th></tr>'+a.map(e=>`<tr><td>${dt(e.ts)}</td><td>${esc(e.app||'—')}</td><td><code>${esc(e.action)}</code></td><td>${esc(e.detail)}</td><td class=muted>${esc(e.ip||'')}</td></tr>`).join('')}
 async function logout(){await api('POST','/v1/auth/logout');location='/login'}
-(async()=>{const me=await api('GET','/v1/auth/me');ME=me;if(window.aloofIdentify)aloofIdentify(me.id);$('who').textContent=me.email;$('av').textContent=me.email[0];setTheme(document.documentElement.dataset.theme||'dark');
+(async()=>{const me=await api('GET','/v1/auth/me');ME=me;if(window.aloofIdentify)aloofIdentify(String(me.id));$('who').textContent=me.email;$('av').textContent=me.email[0];setTheme(document.documentElement.dataset.theme||'dark');
  const p=await api('GET','/v1/plans');PL=p.plans;$('d_plan').innerHTML=p.plans.map(x=>`<option value=${x.id}>${esc(planLabel(x))}</option>`).join('');est();
  if(sessionStorage.newKey){const k=sessionStorage.newKey;delete sessionStorage.newKey;showKey(k,true)}refresh();setInterval(()=>{if(tab=='apps')apps()},6000)})();
 </script><!--ANALYTICS--></body></html>
