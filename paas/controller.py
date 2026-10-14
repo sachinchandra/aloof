@@ -1,7 +1,7 @@
 """Background loops running inside the edge process: autoscaler (concurrency/CPU, scale-to-zero) and health checks."""
 import os, json, math, time, threading, urllib.request, urllib.error, logging
 from .db import q, event
-from . import engine
+from . import engine, lb
 from .drivers import get_drivers
 log = logging.getLogger("paas.controller")
 class Metrics:
@@ -66,7 +66,9 @@ def _health_pass():
             try: urllib.request.urlopen(f"http://{i['host']}:{i['port']}{h['path']}", timeout=3)
             except urllib.error.HTTPError as e: ok = e.code < 500; why = f"HTTP {e.code}"
             except Exception as e: ok = False; why = f"{type(e).__name__}"
-        if ok: _fails.pop(i["id"], None); continue
+        if ok: _fails.pop(i["id"], None); lb.health_ok(i["id"]); continue
+        try: lb.health_failed(i["app"], i["id"], q("select id from instances where app=? and status='running'", (i["app"],)), why)   # out of rotation now
+        except Exception: log.exception("lb eject")
         n = _fails[i["id"]] = _fails.get(i["id"], 0) + 1
         if n >= int(h.get("failures", 3)) or st in ("exited", "dead", "gone"):
             _fails.pop(i["id"], None); engine.replace_instance(i["app"], i, why)
