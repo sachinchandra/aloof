@@ -388,7 +388,7 @@ def test_tier_api(client):
     r = c.put("/v1/billing/tier", json={"tier": "hobby"}); assert r.status_code == 200
     b = c.get("/v1/billing").json(); assert b["month"]["tier"] == "hobby" and b["credit_cents"] < 500 and any(l["kind"] == "plan" for l in b["ledger"])
     p = TestClient(api.app).get("/v1/plans").json(); assert p["currency"] == "USD" and "inr" not in json.dumps(p["plans"]).lower() and "₹" not in json.dumps(p["plans"], ensure_ascii=False) and "cpu-small" not in [x["id"] for x in p["plans"]]
-    assert list(p["regions"])[0] == "eu-de" and "Hetzner" in p["region_note"] and "runs in India" not in p["region_note"]
+    assert list(p["regions"])[0] == "nbg1" and "Hetzner" in p["region_note"] and "runs in India" not in p["region_note"]
 
 
 def test_min_margin_floor_every_plan_every_pool():

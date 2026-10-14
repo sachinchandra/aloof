@@ -81,7 +81,7 @@ class Source(BaseModel):
     upload: str|None=None; dockerfile: str|None=None; build_args: dict[str,str]|None=None; github_installation: int|None=None
 class DeployReq(BaseModel):
     name: str; source: Source; plan: str="shared-1x-1gb"; port: int=8080; env: dict[str,str]={}; instances: int=1
-    command: list[str]|None=None; region: str="eu-de"; provider: str|None=None
+    command: list[str]|None=None; region: str|None=None; provider: str|None=None
     volumes: list[dict]=[]; autoscale: dict|None=None; health: dict|None=None
     processes: dict[str, str|list[str]]|None=None; process_counts: dict[str,int]|None=None; cron: list[dict]|None=None; release_command: str|list[str]|None=None
 @app.post("/v1/signup")
@@ -92,6 +92,15 @@ def signup(s: Signup):
     if q("select 1 from accounts where email=?", (e,), one=True): raise HTTPException(409, "exists")
     a = engine.create_account(e); analytics.capture(a["id"], "signup_completed", {"method": "api"} | analytics.attribution(s))
     return {"email":a["email"],"api_key":a["api_key"],"credit_usd":billing.usd(a.get("credit_cents"))}
+def _live_regions():
+    from . import regions as R
+    return {r["id"]: f"{r['name']} ({r['provider']})" for r in R.status() if r["live"]} | {k: v for k, v in REGIONS.items() if k == "in-del"}
+@app.get("/v1/regions")
+def list_regions():
+    """Regions with live status derived from healthy nodes. Only status=live regions accept new apps, volumes and databases."""
+    from . import regions as R
+    st = R.status(); return {"default": R.home(), "regions": st, "live": [r["id"] for r in st if r["live"]],
+                             "aliases": R.ALIASES, "pricing": R.live_prices(), "note": "Status is computed from registered healthy nodes; coming_soon regions reject new workloads."}
 @app.get("/v1/plans")
 def plans(legacy: bool = False):
     """Pricing v3 (USD excl. tax/VAT): per-second plans, usage rates, workspace tiers and regions."""
@@ -100,7 +109,7 @@ def plans(legacy: bool = False):
            if (legacy or not v["legacy"]) and (v["kind"] != "gpu" or _plans.GPU_ENABLED)]
     gpu = _plans.gpu_status() | ({} if _plans.GPU_ENABLED else {"coming_soon": [{"id": k, "gpu": v["gpu"]} for k, v in PLANS.items() if v["kind"] == "gpu"]})
     return {"currency": "USD", "tax": "excluded; VAT/GST/sales tax added at checkout where applicable", "billing": "per second while running; volumes per provisioned GB-month; egress per GB (counts toward included usage)",
-            "plans": out, "gpu": gpu, "rates": RATES, "tiers": TIERS, "regions": REGIONS, "region_note": REGION_NOTE}
+            "plans": out, "gpu": gpu, "rates": RATES, "tiers": TIERS, "regions": _live_regions(), "region_pricing": __import__("paas.regions", fromlist=["x"]).live_prices(), "region_note": REGION_NOTE}
 class WaitlistReq(BaseModel):
     email: str; gpu: str | None = None; note: str | None = None; kind: str = "gpu"; region: str | None = None; company: str | None = None
     source: str | None = None; website: str | None = None   # website = honeypot (hidden field; humans leave it empty)
@@ -114,7 +123,9 @@ def waitlist(w: WaitlistReq, request: Request, bg: BackgroundTasks):
     try: e = auth._check_email(w.email)
     except ValueError as x: raise HTTPException(400, str(x))
     from .www_content import SOON_REGIONS
+    from .regions import ALIASES as _RA
     codes = {c: l for c, l, _, _ in SOON_REGIONS}
+    if w.region: w.region = _RA.get(w.region.lower(), w.region.lower())   # legacy waitlist codes (eu-fsn, us-ash, ...) map to region ids
     if w.kind == "region" and w.region not in codes: raise HTTPException(400, f"region must be one of {list(codes)}")
     if w.kind == "gpu" and w.gpu and (w.gpu not in PLANS or PLANS[w.gpu]["kind"] != "gpu"): raise HTTPException(400, "gpu must be a GPU plan id")
     msgs = {"gpu": "You're on the GPU waitlist. We'll email you when GPUs launch.", "region": f"You're on the waitlist for {codes.get(w.region, '')}. We'll email you once, when it's live.",
@@ -202,14 +213,14 @@ class Health(BaseModel): path: str|None="/"; failures: int=3
 def health_cfg(name: str, h: Health, a=Depends(acct)):
     own(name, a); return with_url(engine.update_spec(name, lambda s: s.__setitem__("health", h.model_dump())))
 # ---- volumes ----
-class VolReq(BaseModel): name: str; size_gb: int=1
+class VolReq(BaseModel): name: str; size_gb: int=1; region: str|None=None
 @app.post("/v1/volumes")
 def vol_create(v: VolReq, a=Depends(acct)):
-    try: return engine.create_volume(a["id"], v.name, v.size_gb)
+    try: return engine.create_volume(a["id"], v.name, v.size_gb, v.region)
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
 @app.get("/v1/volumes")
-def vol_list(a=Depends(acct)): return q("select name,size_gb,app,mount_path,node_id,created from volumes where account_id=?", (a["id"],))
+def vol_list(a=Depends(acct)): return q("select name,size_gb,app,mount_path,node_id,created,region from volumes where account_id=?", (a["id"],))
 def own_vol(n, a):
     v = q("select * from volumes where name=?", (n,), one=True)
     if not v or v["account_id"] != a["id"]: raise HTTPException(404, "volume not found")
@@ -494,13 +505,16 @@ async def node_register(request: Request):
     except PermissionError as e: raise HTTPException(403, str(e))
 @app.get("/v1/nodes/agent.py", response_class=PlainTextResponse)
 def node_agent(): return open(os.path.join(ROOT, "paas", "agent", "agent.py")).read()
-class NodeReq(BaseModel): pool: str="self-hosted"; plan: str="cpu-large"; gpu: bool=False
+class NodeReq(BaseModel): pool: str="self-hosted"; plan: str="cpu-large"; gpu: bool=False; region: str|None=None
 @app.post("/v1/admin/nodes", dependencies=[Depends(admin)])
 def admin_add_node(n: NodeReq):
     """Create a join token for a manually-managed node (self-hosted / Yotta bare metal / any Ubuntu box)."""
     if n.pool not in PROVISIONERS: raise HTTPException(400, f"pool must be one of {list(PROVISIONERS)}")
-    node_id, join = remote.create_node_record(n.pool, n.plan, n.gpu)
-    return {"node_id": node_id, "join_token": join,
+    from . import regions as R
+    try: region = R.canonical(n.region or R.home())
+    except ValueError as e: raise HTTPException(400, str(e))
+    node_id, join = remote.create_node_record(n.pool, n.plan, n.gpu, region)
+    return {"node_id": node_id, "join_token": join, "region": region,
             "install": f"curl -fsSL '{PUBLIC_API_URL}/v1/nodes/bootstrap.sh?node={node_id}&token={join}' | sudo bash"}
 @app.get("/v1/nodes/bootstrap.sh", response_class=PlainTextResponse)
 def node_bootstrap(node: str, token: str):
@@ -511,7 +525,15 @@ def node_bootstrap(node: str, token: str):
     if not n: raise HTTPException(404, "unknown node")
     return bootstrap.render(node, n["provider"], n["plan"], token, bool(n["gpus"]))
 @app.get("/v1/admin/nodes", dependencies=[Depends(admin)])
-def admin_nodes(): return q("select id,provider,provider_ref,status,public_ip,wg_ip,vcpu,mem_mb,gpus,gpu_model,plan,created,last_seen,error from nodes order by created desc")
+def admin_nodes(): return q("select id,provider,provider_ref,status,region,public_ip,wg_ip,vcpu,mem_mb,gpus,gpu_model,plan,created,last_seen,error from nodes order by created desc")
+@app.get("/v1/admin/edge/wireguard", dependencies=[Depends(admin)], response_class=PlainTextResponse)
+def admin_edge_wg():
+    """wg-quick [Peer] blocks for the edge hub, one per registered node, grouped by region (render only; applies nothing)."""
+    return remote.edge_wireguard_config()
+@app.get("/v1/admin/edge/routes", dependencies=[Depends(admin)])
+def admin_edge_routes():
+    """Where the edge sends each running instance: region, node and WireGuard upstream."""
+    return remote.edge_routes()
 def paid_customers():
     """Accounts that have actually paid us: a paid Stripe top-up/invoice, an active subscription, or a paid Razorpay order."""
     return q("""select count(distinct id) as c from (
@@ -606,7 +628,7 @@ def app_rollback(name: str, request: Request, b: RollbackReq|None=None, a=Depend
     except ValueError as e: raise HTTPException(400, str(e))
     _audit(a["id"], name, "rollback", f"to v{b.version}" if b and b.version else "previous", _ip(request)); return with_url(r)
 # managed Postgres
-class PgReq(BaseModel): name: str; plan: str="pg-dev"
+class PgReq(BaseModel): name: str; plan: str="pg-dev"; region: str|None=None
 def own_pg(n, a):
     d = q("select * from pg_dbs where name=?", (n,), one=True)
     if not d or d["account_id"] != a["id"]: raise HTTPException(404, "database not found")
@@ -616,7 +638,7 @@ def pg_plans(): return {"plans": [{"id": k} | {x: y for x, y in v.items() if x !
                         "backups": {"schedule": "daily", "keep": parity.PG_KEEP, "usd_gb_month": RATES["backup_usd_gb_month"]}}
 @app.post("/v1/pg")
 def pg_create(b: PgReq, request: Request, a=Depends(acct)):
-    try: r = parity.pg_create(a["id"], b.name, b.plan)
+    try: r = parity.pg_create(a["id"], b.name, b.plan, b.region)
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
     _audit(a["id"], f"pg-{b.name}", "pg.create", b.plan, _ip(request)); return r

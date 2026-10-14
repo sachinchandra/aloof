@@ -82,11 +82,17 @@ def customers():
 # ---------------- regions ----------------
 @R.get("/regions", response_class=HTMLResponse)
 def regions():
-    live = "".join(f"<tr><td><code>{c}</code></td><td><b>{l}</b></td><td>{p}</td><td>{w}</td><td><span class='status s-running'>live</span></td></tr>" for c, l, p, w in LIVE_REGIONS)
-    soon = "".join(f"<div class='card reveal'><span class='tag tag-soon'>Coming soon · not live</span><h3>{l}</h3><p class=muted style='font-size:13px'>{p}</p><p>{w}</p><button class='btn sm' style='margin-top:14px' onclick=\"wl('{c}','{l}')\">Join waitlist</button></div>" for c, l, p, w in SOON_REGIONS)
-    opts = "".join(f"<option value='{c}'>{l}</option>" for c, l, _, _ in SOON_REGIONS)
+    from . import regions as RG
+    from .www_content import REGION_PURPOSE
+    st = {r["id"]: r for r in RG.status()}
+    live_rows = [(r["id"], r["name"], r["provider"], REGION_PURPOSE.get(r["id"], "Compute")) for r in st.values() if r["live"]] + [x for x in LIVE_REGIONS if x[0] not in st]
+    soon_rows = [x for x in SOON_REGIONS if not (x[0] in st and st[x[0]]["live"])]   # live is derived from healthy nodes, never declared
+    live = "".join(f"<tr><td><code>{c}</code></td><td><b>{l}</b></td><td>{p}</td><td>{w}</td><td><span class='status s-running'>{'live' if c in st else 'storage'}</span></td></tr>" for c, l, p, w in live_rows)
+    soon = "".join(f"<div class='card reveal'><span class='tag tag-soon'>Coming soon · not live</span><h3>{l}</h3><p class=muted style='font-size:13px'>{p}</p><p>{w}</p><button class='btn sm' style='margin-top:14px' onclick=\"wl('{c}','{l}')\">Join waitlist</button></div>" for c, l, p, w in soon_rows)
+    SOON = soon_rows
+    opts = "".join(f"<option value='{c}'>{l}</option>" for c, l, _, _ in SOON)
     inner = f"""<h2 class=t>Live</h2><div class=scroll><table class=tbl><tr><th>Code</th><th>Location</th><th>Provider</th><th>What runs there</th><th>Status</th></tr>{live}</table></div>
-<p class=muted>Typical round trip to Nuremberg: about 10–40 ms within Europe, 90–110 ms from US East, 150–200 ms from India or US West. Apps can't choose another region yet.</p>
+<p class=muted>Typical round trip to Nuremberg: about 10–40 ms within Europe, 90–110 ms from US East, 150–200 ms from India or US West. Pick a region per app with <code>--region</code> or <code>primary_region</code>; only regions listed as live accept new apps.</p>
 <h2 class=t style="margin-top:56px">Coming soon</h2><p class=t>None of these is available today, and we don't have dates. Join the waitlist for a region and we'll email you once, when it's live.</p><div class='grid g3'>{soon}</div>
 <form class="card form-card" id=rw style="margin-top:28px" onsubmit="event.preventDefault();var f=this;fetch('/v1/waitlist',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:f.email.value,kind:'region',region:f.region.value,source:location.pathname,website:f.website.value}})}}).then(r=>r.json().then(j=>{{rwmsg.className=r.ok?'ok':'bad';rwmsg.textContent=j.message||j.detail}}))">
 <h3>Region waitlist</h3><div class=fgrid><input name=email type=email required placeholder="you@company.com" aria-label=Email><select name=region aria-label=Region>{opts}</select></div>{HP}<button class="btn pri">Join waitlist</button><p class=muted style="font-size:13px;margin:10px 0 0">By joining, you agree that we email you once, when the region is live. Every email has a link to remove your address.</p><p id=rwmsg role=status aria-live=polite></p></form>
@@ -129,7 +135,9 @@ def status_data():
         out[c] = {"label": LABELS[c], "ok": bool(last and last["ok"]), "last_check": last and last["ts"], "ms": last and last["ms"], "code": last and last["code"],
                   "uptime_24h": up(86400), "uptime_7d": up(7 * 86400), "uptime_30d": up(30 * 86400), "days": days}
     first = q("select min(ts) t from status_checks", one=True)
-    return {"components": out, "since": first and first["t"], "interval_seconds": 60}
+    from . import regions as RG
+    regs = [{k: r[k] for k in ("id", "name", "city", "country", "status", "live", "healthy_nodes")} for r in RG.status()]
+    return {"components": out, "regions": regs, "since": first and first["t"], "interval_seconds": 60}
 @R.get("/v1/status")
 def status_json(): return status_data()
 @R.get("/status", response_class=HTMLResponse)
@@ -142,6 +150,7 @@ def status_page():
     def pct(v): return "—" if v is None else f"{v:g}%"
     rows = "".join(f"""<div class="card st-row"><div class=st-h><h3>{c['label']}</h3><span class="status {'s-running' if c['ok'] else 's-failed'}">{'operational' if c['ok'] else ('down' if c['last_check'] else 'no data')}</span></div>
 <div class=bars aria-label="90-day history">{''.join(bar(x) for x in c['days'])}</div><div class="st-f muted"><span>90 days ago</span><span>24 h {pct(c['uptime_24h'])} · 7 d {pct(c['uptime_7d'])} · 30 d {pct(c['uptime_30d'])}{f" · last {c['ms']:.0f} ms" if c['ms'] else ''}</span><span>today</span></div></div>""" for c in comps.values())
+    rows += "<h3 style='margin-top:24px'>Regions</h3>" + "".join(f"""<div class="card st-row"><div class=st-h><h3>{r['id']} · {r['city']}, {r['country']}</h3><span class="status {'s-running' if r['live'] else 's-stopped'}">{'live · ' + str(r['healthy_nodes']) + ' healthy node(s)' if r['live'] else 'coming soon · not live'}</span></div></div>""" for r in d["regions"])
     since = time.strftime("%b %-d, %Y %H:%M UTC", time.gmtime(d["since"])) if d["since"] else "not started"
     head = f"<div class='card banner {'ok' if allok else 'bad'}'><b>{'All systems operational' if allok else 'Some systems are not operational'}</b></div>"
     inner = f"""{head}{rows}<p class=muted>Our server probes each endpoint every 60 seconds over HTTPS; anything other than a 5xx or timeout counts as up. History since {since}. Because the probe runs on the same host, a full host outage shows up as a gap in data ("no data"), not as downtime. Machine-readable: <a href="/v1/status">/v1/status</a>.</p>"""

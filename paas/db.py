@@ -94,6 +94,17 @@ create index if not exists waitlist_kind on waitlist(kind, created);
     ,(9, """
 create table if not exists analytics_once(account_id INTEGER, event TEXT, primary key(account_id, event));
 """),
+    # v10: multi-region. Every placed thing carries a canonical region id (see paas/regions.py); today's data is all in Nuremberg.
+    ,(10, """
+alter table apps add column region TEXT default 'nbg1';
+alter table volumes add column region TEXT default 'nbg1';
+alter table pg_dbs add column region TEXT default 'nbg1';
+alter table nodes add column region TEXT default 'nbg1';
+update apps set region='nbg1' where region is null or region in ('eu-de','eu-central','local');
+update volumes set region='nbg1' where region is null;
+update pg_dbs set region='nbg1' where region is null;
+update nodes set region='nbg1' where region is null;
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

@@ -20,8 +20,8 @@ def test_no_fabricated_claims():
     for bad in ("SOC 2 certified", "SOC 2 compliant", "ISO 27001 certified", "trusted by", "Trusted by", "99.99%"):
         assert bad not in allh
     reg = c.get("/regions").text
-    assert "Nuremberg" in reg and reg.count("Coming soon · not live") == 5
-    for l in ("Falkenstein", "Ashburn", "Singapore", "Mumbai"): assert l in reg
+    assert "Nuremberg" in reg and reg.count("Coming soon · not live") == 6
+    for l in ("Falkenstein", "Vint Hill", "Singapore", "Mumbai"): assert l in reg
     assert "Reference build" in c.get("/examples").text and "Become a design partner" in c.get("/examples").text
     assert "Germany and Finland" not in allh
 def test_prices_in_posts_match_plans():

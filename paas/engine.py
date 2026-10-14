@@ -33,11 +33,18 @@ def validate(spec):
         spec["instances"] = max(a["min"], min(spec["instances"], a["max"]))
     return spec
 class NoCapacity(ValueError): pass
+def _avail(drv, region):
+    try: return drv.available(region=region)
+    except TypeError: return drv.available()
 def pick_provider(spec):
-    from . import plans as _plans
-    d = get_drivers(); plan = PLANS[spec["plan"]]
+    """Pool for the spec's region. local-docker is the control plane host, so it only serves the control plane's region;
+    remote pools only count if they have (or may provision) a node in that region. Never places outside the region."""
+    from . import plans as _plans, regions as R
+    d = get_drivers(); plan = PLANS[spec["plan"]]; region = R.canonical(spec.get("region"))
+    local_ok = region == R.home() and R.local_capacity()
     if spec.get("provider"):
         if spec["provider"] not in d: raise ValueError(f"unknown provider {spec['provider']}")
+        if spec["provider"] == "local-docker" and not local_ok: raise NoCapacity(f"local-docker only serves region {R.home()}; app is in {region}")
         if not _plans.pool_allowed(spec["plan"], spec["provider"]):
             m = _plans.pool_margin(spec["plan"], spec["provider"])
             raise ValueError(f"plan {spec['plan']} can't run on {spec['provider']}: margin "
@@ -46,11 +53,12 @@ def pick_provider(spec):
     tried = []
     for pool in plan["providers"]:
         if not _plans.pool_allowed(spec["plan"], pool): tried.append(f"{pool}: refused, under {_plans.MIN_MARGIN:.0%} margin floor"); continue
-        ok, why = d[pool].available(); tried.append(f"{pool}: {why}")
+        if pool == "local-docker" and not local_ok: tried.append(f"local-docker: only serves {R.home()}"); continue
+        ok, why = _avail(d[pool], region); tried.append(f"{pool}: {why}")
         if ok: return pool
-    if plan["kind"] == "cpu" and _plans.pool_allowed(spec["plan"], "local-docker"): return "local-docker"
-    if plan["kind"] == "gpu" and d["local-docker"].supports_gpu and _plans.pool_allowed(spec["plan"], "local-docker"): return "local-docker"
-    raise NoCapacity(f"no {'GPU ' if plan['kind'] == 'gpu' else ''}capacity for {spec['plan']} (" + "; ".join(tried or [f"local-docker: refused, under {_plans.MIN_MARGIN:.0%} margin floor"]) + ")")
+    if local_ok and plan["kind"] == "cpu" and _plans.pool_allowed(spec["plan"], "local-docker"): return "local-docker"
+    if local_ok and plan["kind"] == "gpu" and d["local-docker"].supports_gpu and _plans.pool_allowed(spec["plan"], "local-docker"): return "local-docker"
+    raise NoCapacity(f"no {'GPU ' if plan['kind'] == 'gpu' else ''}capacity for {spec['plan']} in region {region} (" + "; ".join(tried or [f"local-docker: refused, under {_plans.MIN_MARGIN:.0%} margin floor"]) + ")")
 import socket, urllib.request, urllib.error
 def wait_ready(host, port, path=None, timeout=None, tcp=False):
     end = time.time() + (timeout or float(__import__("os").environ.get("PAAS_READY_TIMEOUT", "30")))
@@ -120,6 +128,23 @@ def _check_platform_image(account_id, spec):
     if owner is None: return
     o = q("select account_id from apps where name=?", (owner,), one=True)
     if not o or o["account_id"] != account_id: raise PermissionError("that image belongs to another app")
+def _set_region(spec, ex, account_id=None):
+    """Canonical region on the spec. New apps must target a live region; an app never moves region (its volumes and Postgres
+    live there); volumes in the spec must be in the app's region."""
+    from . import regions as R
+    live_app = ex and ex["status"] != "destroyed"
+    cur = R.canonical(ex.get("region")) if live_app else None
+    want = R.canonical(spec.get("region")) if spec.get("region") else (cur or R.home())
+    if cur and want != cur:
+        raise R.RegionError(f"app {spec['name']} runs in {cur}; moving an app to another region isn't supported (create a new app in {want})")
+    if not cur: R.require_live(want)
+    if account_id is not None:
+        a = q("select tier from accounts where id=?", (account_id,), one=True)
+        R.check_allowed(want, (a or {}).get("tier") or "free", PLANS.get(spec.get("plan", "cpu-small")))
+    spec["region"] = want
+    for v in spec.get("volumes") or []:
+        vr = q("select region from volumes where name=?", (v["name"],), one=True)
+        if vr: R.same_region("volume", v["name"], vr.get("region"), spec["name"], want)
 def deploy(account_id, spec):
     ex = q("select * from apps where name=?", (spec.get("name"),), one=True)
     if ex and ex["account_id"] == account_id and ex["status"] != "destroyed":   # redeploy: keep attached state
@@ -130,6 +155,7 @@ def deploy(account_id, spec):
         if not spec.pop("_replace_env", False): spec["env"] = {**old.get("env", {}), **spec.get("env", {})}
     spec = validate(spec); name = spec["name"]
     if ex and ex["account_id"] != account_id: raise PermissionError("app name taken")
+    _set_region(spec, ex, account_id)
     _check_platform_image(account_id, spec)
     acct_net = f"aloof-acct-{account_id}"   # private network: <app>.internal resolves between this account's apps only
     spec["networks"] = sorted(set(spec.get("networks") or []) | {acct_net}, key=lambda n: (n != acct_net, n)) if spec.get("kind") != "postgres" else sorted(set(spec.get("networks") or []) | {acct_net})
@@ -139,6 +165,7 @@ def deploy(account_id, spec):
     q("insert into apps(name,account_id,spec,status,provider,created,updated,error) values(?,?,?,?,?,?,?,null) "
       "on conflict(name) do update set account_id=excluded.account_id, spec=excluded.spec, status=excluded.status, provider=excluded.provider, updated=excluded.updated, error=null",
       (name, account_id, dump_spec(spec), "queued", prov, ex["created"] if ex else now, now))
+    q("update apps set region=? where name=?", (spec["region"], name))
     event(name, f"deploy queued on {prov} plan={spec['plan']} instances={spec['instances']}")
     threading.Thread(target=_run_deploy, args=(name,), daemon=True).start()
     return get_app(name)
@@ -343,18 +370,23 @@ def set_autoscale(name, cfg):
     def f(spec): spec["autoscale"] = cfg
     return update_spec(name, f)
 # ---- volumes ----
-def create_volume(account_id, name, size_gb):
+def create_volume(account_id, name, size_gb, region=None):
+    from . import regions as R
     if not NAME_RE.match(name): raise ValueError("bad volume name")
+    region = R.require_live(region or R.home())
     if q("select 1 from volumes where name=?", (name,), one=True): raise PermissionError("volume exists")
     k, t = account_tier(account_id)
     if t.get("max_volume_gb"):
         used = q("select coalesce(sum(size_gb),0) s from volumes where account_id=?", (account_id,), one=True)["s"]
         if used + size_gb > t["max_volume_gb"]: raise ValueError(f"{k} tier allows {t['max_volume_gb']} GB of volumes in total")
     # created lazily by the driver of the node that first mounts it (docker named volume)
-    q("insert into volumes(name,account_id,size_gb,created) values(?,?,?,?)", (name, account_id, size_gb, time.time())); return q("select * from volumes where name=?", (name,), one=True)
+    q("insert into volumes(name,account_id,size_gb,created,region) values(?,?,?,?,?)", (name, account_id, size_gb, time.time(), region)); return q("select * from volumes where name=?", (name,), one=True)
 def attach_volume(app, vol, path):
     v = q("select * from volumes where name=?", (vol,), one=True)
     if v["app"] and v["app"] != app: raise ValueError(f"volume attached to {v['app']}; detach first")
+    from . import regions as R
+    ap = q("select region from apps where name=?", (app,), one=True)
+    if ap: R.same_region("volume", vol, v.get("region"), app, ap.get("region"))
     q("update volumes set app=?, mount_path=? where name=?", (app, path, vol)); event(app, f"volume {vol} attached at {path}")
     def f(spec): spec["volumes"] = [x for x in spec.get("volumes",[]) if x["name"] != vol] + [{"name": vol, "path": path}]
     return update_spec(app, f)
