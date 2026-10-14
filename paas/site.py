@@ -218,7 +218,7 @@ def landing(brand, base, api, mcp):
 <p class="c muted" style="margin-top:18px">Pay per second. Smallest app from {_money(p0)}/mo. <a href="/pricing">Full pricing →</a></p>
 <p class="c muted soonline">Coming soon: predictive scaling · auto right-sizing · GPUs · more regions · <a href="/pricing#gpus">Join waitlist</a></p></div></section>
 <section class="s v5s" id=faq><div class=wrap style="max-width:760px"><h2 class="t c">FAQ</h2>{faqh}<p class=c style="margin-top:16px"><a href="/docs/self-driving#faq">All questions →</a></p></div></section>
-<section class="ctaband v5cta"><h2>Stop babysitting servers.</h2><div class=cta style="justify-content:center"><a class="btn pri" data-cta=deploy_free data-cta-loc=footer_band href="/login#register">Deploy free</a></div></section>{HERO_JS}"""
+<section class="ctaband v5cta"><h2>Give your superintelligence a stronger engine.</h2><div class=cta style="justify-content:center"><a class="btn pri" data-cta=deploy_free data-cta-loc=footer_band href="/login#register">Deploy free</a></div></section>{HERO_JS}"""
     return page(f"{brand}: the self-driving cloud for your backends", body, brand,
                 desc="Backends that roll back bad deploys, route around failing instances and scale to zero on their own. Drive it from Claude, ChatGPT or Cursor.")
 def _pg_rows():

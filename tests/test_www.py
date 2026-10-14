@@ -150,8 +150,10 @@ def test_selfdriving_doc_numbers_from_code():
 def test_home_v5():
     import re
     h = c.get("/").text; b = re.sub(r"<script.*?</script>|<style.*?</style>", "", h, flags=re.S)
-    assert "babysitting" in h and "Coming soon" in h and "/pricing#gpus" in h and "/docs/self-driving" in h and 'href="/templates"' in h
+    assert "Give your superintelligence a stronger engine." in h and "babysit" not in h.lower() and "Coming soon" in h and "/pricing#gpus" in h and "/docs/self-driving" in h and 'href="/templates"' in h
     for t in ("uptime-kuma", "n8n", "umami", "vaultwarden", "ntfy", "pocketbase", "linkding"): assert f"/templates/{t}" in h, t
     assert h.count("<details class=faq>") <= 4 and "diagnose_app" in h and 'role=img aria-label="Animation' in h and "prefers-reduced-motion" in h
     for comp in ("Fly", "Render", "Railway", "Heroku", "testimonial"): assert comp not in b
     assert len(h.encode()) < 40000
+    from paas import site
+    for pth in ["/", "/pricing", "/templates", "/security", "/llms.txt", "/sitemap.xml"] + [f"/docs/{k}" for k in site.DOCS]: assert "babysit" not in c.get(pth).text.lower(), pth
