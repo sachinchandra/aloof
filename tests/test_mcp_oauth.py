@@ -114,3 +114,10 @@ def test_cimd_real_world_docs(srv):
     assert str(c.validate_redirect_uri(AnyUrl("http://localhost:54321/callback"))) == "http://localhost:54321/callback"   # any loopback port
     for bad in ["http://localhost:54321/other", "http://evil.example.com/callback", "https://localhost/callback"]:
         with pytest.raises(Exception): c.validate_redirect_uri(AnyUrl(bad))
+
+def test_mcp_healthz_endpoint(srv):
+    """MCP /healthz endpoint must return 200 OK with JSON body."""
+    c, _, _ = srv
+    r = c.get("/healthz")
+    assert r.status_code == 200, f"healthz returned {r.status_code}: {r.text}"
+    assert r.json() == {"ok": True}
