@@ -182,6 +182,22 @@ def _prune_images(name, drv):
         if r["image"] and r["image"] not in keep and hasattr(drv, "remove_image"):
             try: drv.remove_image(r["image"])
             except Exception: pass
+def _source_type(spec):
+    s = spec.get("source") or {}
+    if s.get("github_installation"): return "github"
+    for k in ("git", "upload", "path", "image"):
+        if s.get(k): return k
+    return "postgres" if spec.get("kind") == "postgres" else "other"
+def _track_deploy(app, spec, ver, reason):
+    """Analytics only for real deploys (not scale/restart), never raises."""
+    try:
+        if reason in ("scale",): return
+        from . import analytics
+        p = {"app_id": app["name"], "region": spec.get("region"), "source_type": _source_type(spec), "version": ver}
+        analytics.capture(app["account_id"], "deploy_succeeded", p)
+        if analytics.enabled() and analytics.once(app["account_id"], "first_deploy_succeeded"):
+            analytics.capture(app["account_id"], "first_deploy_succeeded", {k: p[k] for k in ("app_id", "region", "source_type")})
+    except Exception: pass
 def _run_deploy(name, image=None, reason=None):
     """Zero-downtime: new instances start and must pass readiness (HTTP health path, or TCP for databases) before the old ones
     stop. If any new instance fails, the new ones are removed and the previous release keeps serving. Apps with a volume are
@@ -220,6 +236,7 @@ def _run_deploy(name, image=None, reason=None):
             q("update apps set status=?, updated=?, error=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(),
               (f"{len(bad)} instance(s) not ready" if bad else None), name))
             _set_release(name, ver, "active"); log(f"deploy complete (v{ver} live)")
+            _track_deploy(app, spec, ver, reason)
             try: _sync_groups(name, app["account_id"], spec, image)
             except Exception as e: log(f"process groups: {e}")
             _prune_images(name, drv)

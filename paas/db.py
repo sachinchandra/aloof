@@ -91,6 +91,9 @@ create table if not exists waitlist(id AUTOPK, kind TEXT, email TEXT, item TEXT 
   consent_ts REAL, created REAL, updated REAL, ip TEXT, is_test int default 0, mail_user TEXT, mail_admin TEXT, unique(kind, email, item));
 create index if not exists waitlist_kind on waitlist(kind, created);
 """)
+    ,(9, """
+create table if not exists analytics_once(account_id INTEGER, event TEXT, primary key(account_id, event));
+"""),
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

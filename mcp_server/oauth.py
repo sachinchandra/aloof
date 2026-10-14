@@ -156,6 +156,17 @@ def patch_metadata():
         m.client_id_metadata_document_supported = True
         return m
     build._aloof = True; routes.build_metadata = build
+def _track_connected(client, api_key, code):
+    """mcp_connected analytics (OAuth grant completed). Sends only the client's display name and redirect host. Never raises."""
+    try:
+        from paas import analytics
+        if not analytics.enabled(): return
+        r = _db.q("select a.id from accounts a where a.api_key_hash=? union select k.account_id from api_keys k where k.key_hash=?",
+                  (_crypto.sha256(api_key),) * 2, one=True)
+        if not r: return
+        host = urlsplit(str(code.redirect_uri or "")).hostname or (urlsplit(client.client_id).hostname if is_cimd_client_id(client.client_id) else None)
+        analytics.capture(r["id"], "mcp_connected", {"client_name": getattr(client, "client_name", None), "client_host": host})
+    except Exception: pass
 class PaasOAuthProvider(OAuthAuthorizationServerProvider):
     def __init__(self, issuer): self.issuer = issuer.rstrip("/")
     async def get_client(self, client_id):
@@ -179,7 +190,9 @@ class PaasOAuthProvider(OAuthAuthorizationServerProvider):
     async def exchange_authorization_code(self, client, code: AuthorizationCode):
         d = S.get("code", code.code); S.rm("code", code.code)   # single use
         if not d: raise TokenError("invalid_grant", "code expired or used")
-        return self._issue(client.client_id, code.scopes, d["api_key"], d["subject"], code.resource)
+        tok = self._issue(client.client_id, code.scopes, d["api_key"], d["subject"], code.resource)
+        _track_connected(client, d["api_key"], code)
+        return tok
     async def load_refresh_token(self, client, refresh_token):
         d = S.get("refresh", refresh_token)
         if not d or d["client_id"] != client.client_id: return None

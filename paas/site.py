@@ -53,7 +53,7 @@ def footer(brand):
 <div><h5>Account</h5><a href="/login">Log in</a><a href="/login#register">Sign up</a><a href="/dashboard">Dashboard</a></div></div>
 <div class=base><span>© 2026 {brand}</span><span>Prices in USD, excluding tax.</span></div></div></footer>"""
 def posthog_key():
-    k = os.environ.get("POSTHOG_KEY", "").strip()
+    k = (os.environ.get("POSTHOG_KEY") or os.environ.get("POSTHOG_API_KEY") or "").strip()
     if not k:
         f = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "posthog_key")
         try: k = open(f).read().strip()

@@ -8,6 +8,7 @@ from .db import q
 from .plans import PLANS, REGIONS, REGION_NOTE, TIERS, RATES
 from . import plans as _plans
 from .drivers import get_drivers
+from . import analytics
 from . import controller, auth, billing, stripe_billing, razorpay_legacy as rzp, domains as doms
 from .drivers import remote
 from .drivers.providers import PROVISIONERS
@@ -71,7 +72,10 @@ def own(name, a):
     if not ap or ap["account_id"] != a["id"] or ap["status"]=="destroyed": raise HTTPException(404, "app not found")
     return ap
 def with_url(ap): ap["url"] = f"https://{ap['name']}.{URL_DOMAIN}/"; ap["http_url"] = f"http://{ap['name']}.{URL_DOMAIN}:8080/"; ap["path_url"] = f"{PUBLIC_PROXY}/_app/{ap['name']}/"; return ap
-class Signup(BaseModel): email: str
+class Attribution(BaseModel):
+    """Optional first-touch attribution from the frontend (sent to analytics only; sanitized and length-limited)."""
+    utm_source: str|None=None; utm_medium: str|None=None; utm_campaign: str|None=None; referrer: str|None=None
+class Signup(Attribution): email: str
 class Source(BaseModel):
     image: str|None=None; git: str|None=None; ref: str|None=None; subdir: str|None=None; path: str|None=None
     upload: str|None=None; dockerfile: str|None=None; build_args: dict[str,str]|None=None; github_installation: int|None=None
@@ -86,7 +90,8 @@ def signup(s: Signup):
     try: e = auth._check_email(s.email)
     except ValueError as x: raise HTTPException(400, str(x))
     if q("select 1 from accounts where email=?", (e,), one=True): raise HTTPException(409, "exists")
-    a = engine.create_account(e); return {"email":a["email"],"api_key":a["api_key"],"credit_usd":billing.usd(a.get("credit_cents"))}
+    a = engine.create_account(e); analytics.capture(a["id"], "signup_completed", {"method": "api"} | analytics.attribution(s))
+    return {"email":a["email"],"api_key":a["api_key"],"credit_usd":billing.usd(a.get("credit_cents"))}
 @app.get("/v1/plans")
 def plans(legacy: bool = False):
     """Pricing v3 (USD excl. tax/VAT): per-second plans, usage rates, workspace tiers and regions."""
@@ -121,6 +126,9 @@ def waitlist(w: WaitlistReq, request: Request, bg: BackgroundTasks):
     r, created = W.upsert(w.kind, e, gpu=w.gpu if w.kind == "gpu" else None, region=w.region if w.kind == "region" else None,
                           company=(w.company or "")[:200] or None if w.kind == "design_partner" else None, note=note,
                           source=W._source(w.source, request.headers.get("referer")), ip=ip)
+    if created and w.kind == "gpu":
+        acc = q("select id from accounts where email=?", (e,), one=True)
+        if acc: analytics.capture(acc["id"], "gpu_waitlist_joined", {"gpu": w.gpu})
     if created: bg.add_task(W.send_emails, r["id"]); return {"ok": True, "message": msgs[w.kind], "duplicate": False}
     return {"ok": True, "message": "You're already on the list, we updated your choice." if w.kind != "design_partner" else "You're already on the list, we updated your application.", "duplicate": True}
 @app.get("/v1/providers")
@@ -362,8 +370,9 @@ def invoice(inv_id: int, a=Depends(acct)):
     if not inv: raise HTTPException(404, "invoice not found")
     return rzp.invoice_html(inv)
 # ---- auth: password, magic link, sessions ----
-class Creds(BaseModel): email: str; password: str; attribution: dict | None = None
-class MagicReq(BaseModel): email: str
+class Creds(BaseModel): email: str; password: str
+class RegisterReq(Attribution, Creds): attribution: dict | None = None
+class MagicReq(Attribution): email: str; attribution: dict | None = None
 def _login_response(a, body=None):
     r = JSONResponse(body or {"ok": True, "email": a["email"]}); r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
@@ -376,11 +385,12 @@ def _save_attribution(account_id, attr):
         try: q("update accounts set signup_attribution=? where id=?", (json.dumps(clean), account_id))
         except Exception: pass
 @app.post("/v1/auth/register")
-def auth_register(c: Creds):
+def auth_register(c: RegisterReq):
     try: a = auth.register(c.email, c.password)
     except ValueError as e: raise HTTPException(400, str(e))
     except PermissionError as e: raise HTTPException(409, str(e))
     _save_attribution(a["id"], c.attribution)
+    analytics.capture(a["id"], "signup_completed", {"method": "password"} | analytics.attribution(c))
     return _login_response(a, {"ok": True, "email": a["email"], "api_key": a["api_key"]})
 # Soft login rate limit (in-memory, per process): LOGIN_LIMIT attempts per LOGIN_WINDOW s per client IP and per email -> 429 + Retry-After.
 LOGIN_LIMIT = int(os.environ.get("PAAS_LOGIN_LIMIT", "10")); LOGIN_WINDOW = 60.0
@@ -408,7 +418,7 @@ def auth_login(c: Creds, request: Request):
     except PermissionError as e: raise HTTPException(401, str(e))
 @app.post("/v1/auth/magic")
 def auth_magic(m: MagicReq, request: Request):
-    try: auth.start_magic(m.email, PUBLIC_API_URL if SECURE_COOKIES else str(request.base_url))
+    try: auth.start_magic(m.email, PUBLIC_API_URL if SECURE_COOKIES else str(request.base_url), attribution=analytics.attribution(m))
     except ValueError as e: raise HTTPException(400, str(e))
     except auth.MailError: raise HTTPException(503, "email sign-in is temporarily unavailable; log in with your password or try again later")
     return {"ok": True, "detail": "If the address is valid, a sign-in link is on its way (valid 15 minutes)."}
@@ -416,6 +426,7 @@ def auth_magic(m: MagicReq, request: Request):
 def auth_magic_finish(token: str):
     try: a = auth.finish_magic(token)
     except PermissionError as e: return HTMLResponse(f"<p>{e}. <a href='/login'>Request a new link</a></p>", 400)
+    if a.get("_created"): analytics.capture(a["id"], "signup_completed", {"method": "magic_link"} | (a.get("_attribution") or {}))
     r = RedirectResponse("/dashboard", 303); r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
 @app.post("/v1/auth/logout")
@@ -539,7 +550,8 @@ def mcp_manifest():
 from .mcp_tools import mcp_tool_names
 @app.get("/v1/config")
 def config(): return {"brand": BRAND, "base_domain": BASE_DOMAIN, "api": PUBLIC_API_URL, "mcp": PUBLIC_MCP_URL, "app_url_pattern": f"https://<app>.{URL_DOMAIN}/", "app_domains": APP_DOMAINS,
-                       "posthog": ({"key": site.posthog_key(), "host": site.POSTHOG_HOST} if site.posthog_key() else None)}
+                       "posthog": ({"key": site.posthog_key(), "host": site.POSTHOG_HOST} if site.posthog_key() else None),
+                       "posthog_key": analytics.api_key() or None, "posthog_host": analytics.host() if analytics.enabled() else None}   # phc_ project key is public by design
 from . import site
 @app.get("/", response_class=HTMLResponse)
 def landing(): return www.at("/", "default", site.landing, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)

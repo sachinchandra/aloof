@@ -52,19 +52,26 @@ def login(email, password):
     if not a or not a.get("password_hash") or not check_password(password or "", a["password_hash"]):
         check_password("x", "scrypt$16384$8$1$00$00"); raise PermissionError("invalid email or password")   # equalize timing
     return a
-def start_magic(email, base_url):
+_magic_attr = {}   # token hash -> first-touch attribution for a magic-link signup (in-memory, best effort, bounded)
+def start_magic(email, base_url, attribution=None):
     """Always reports success (no account enumeration). Creates the account on first verified login."""
     email = _check_email(email); tok = "ml_" + secrets.token_urlsafe(32)
     q("insert into magic_links(token_hash,email,expires,used) values(?,?,?,0)", (sha256(tok), email, time.time() + MAGIC_TTL))
+    if attribution:
+        if len(_magic_attr) > 5000: _magic_attr.clear()
+        _magic_attr[sha256(tok)] = attribution
     send_mail(email, "Your Aloof sign-in link", f"Sign in to Aloof (valid 15 minutes, single use):\n\n{base_url.rstrip('/')}/auth/magic?token={tok}\n\nIf you didn't request this, ignore this email.\n")
     return True
 def finish_magic(tok):
     won = q("update magic_links set used=1 where token_hash=? and used=0 and expires>? returning email", (sha256(tok or ""), time.time()))
     if not won: raise PermissionError("link invalid, expired or already used")
     email = won[0]["email"]; a = q("select * from accounts where email=?", (email,), one=True)
+    created = not a; attr = _magic_attr.pop(sha256(tok or ""), None)
     if not a: a = engine.create_account(email, None, verified=True)
     else: q("update accounts set email_verified=1 where id=?", (a["id"],))
-    return q("select * from accounts where email=?", (email,), one=True)
+    a = q("select * from accounts where email=?", (email,), one=True)
+    if created: a["_created"] = True; a["_attribution"] = attr
+    return a
 def new_session(account_id):
     tok = "s_" + secrets.token_urlsafe(32)
     q("insert into sessions(token_hash,account_id,expires,created) values(?,?,?,?)", (sha256(tok), account_id, time.time() + SESSION_TTL, time.time()))

@@ -132,6 +132,20 @@ def set_tier(acct, tier, sub_id=None, why="stripe"):
                if load_spec(r["spec"]).get("plan") not in TIERS[tier]["plans"]]
         if bad: billing.cap_account(acct)
     else: billing.uncap_account(acct, f"{tier} plan")
+def _rank(t): return {"free": 0, "hobby": 1, "pro": 2}.get(t or "free", 0)
+def _track_upgrade(acct, tier, o):
+    """plan_upgraded analytics: plan, amount_usd, interval (from the Checkout Session or Subscription). Never raises."""
+    try:
+        from . import analytics
+        from .plans import TIERS
+        amt = o.get("amount_total"); interval = None
+        items = ((o.get("items") or {}).get("data") or [])
+        if items:
+            pr = items[0].get("price") or {}; interval = (pr.get("recurring") or {}).get("interval")
+            if amt is None and pr.get("unit_amount") is not None: amt = pr["unit_amount"] * (items[0].get("quantity") or 1)
+        usd = round(amt / 100, 2) if isinstance(amt, (int, float)) else TIERS.get(tier, {}).get("fee_usd")
+        analytics.capture(acct, "plan_upgraded", {"plan": tier, "amount_usd": usd, "interval": interval or "month"})
+    except Exception: pass
 def handle_webhook(raw: bytes, sig_header):
     if not verify_signature(raw, sig_header): return 400, {"error": "invalid signature"}
     ev = json.loads(raw); eid = ev.get("id")
@@ -147,7 +161,8 @@ def handle_webhook(raw: bytes, sig_header):
             if acct and tier:
                 if o.get("customer"): q("update accounts set stripe_customer=? where id=? and stripe_customer is null", (o["customer"], acct))
                 q("update stripe_sessions set status='paid', updated=? where id=?", (time.time(), o.get("id")))
-                set_tier(acct, tier, o.get("subscription"), why="stripe checkout"); return 200, {"ok": True, "tier": tier}
+                set_tier(acct, tier, o.get("subscription"), why="stripe checkout"); _track_upgrade(acct, tier, o)
+                return 200, {"ok": True, "tier": tier}
         return 200, {"ok": True, "ignored": "session"}
     if t == "invoice.paid":
         acct = _acct_from(o)
@@ -162,6 +177,8 @@ def handle_webhook(raw: bytes, sig_header):
         if t.endswith("deleted") or o.get("status") in ("canceled", "unpaid", "incomplete_expired"):
             set_tier(r["id"], "free", None, why=f"stripe {t} ({o.get('status')})"); return 200, {"ok": True, "tier": "free"}
         tier = (o.get("metadata") or {}).get("tier")
-        if tier and tier != r["tier"]: set_tier(r["id"], tier, o["id"], why="stripe plan change")
+        if tier and tier != r["tier"]:
+            set_tier(r["id"], tier, o["id"], why="stripe plan change")
+            if _rank(tier) > _rank(r["tier"]): _track_upgrade(r["id"], tier, o)
         return 200, {"ok": True}
     return 200, {"ok": True, "ignored": t}
