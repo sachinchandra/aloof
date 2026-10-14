@@ -91,3 +91,9 @@ def test_qa_end_to_end_readonly_and_old_release_env(fake, user, monkeypatch):
     assert _snapshot("qa-dg") == before
     for s in ["dbpw12345", "zz-api-key-value", "old-env-secret-1", "hunter2", "Sup3rS3cret", "abcdEFGH1234secretTOKEN"]: assert s not in r.text, s
     user.delete("/v1/apps/qa-dg"); time.sleep(0.3); assert user.get("/v1/apps/qa-dg/diagnose").status_code == 404
+
+def test_healthy_app_with_noisy_logs_is_not_a_bad_release(fake, user, monkeypatch):
+    deploy(user, "dg-noisy", "good:v1"); diagnose._cache.clear()
+    monkeypatch.setattr(fake, "logs", lambda i, tail=200, **k: "warn: cannot find optional config\nerror_log set\n", raising=False)
+    d = user.get("/v1/apps/dg-noisy/diagnose").json()
+    assert not [c for c in d["likely_causes"] if "Bad release" in c["cause"]] and d["summary"] == "No problems detected."

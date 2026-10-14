@@ -133,10 +133,17 @@ def _rules(app, spec, ev, insts, errors, rel, now):
                       f"Make sure the app listens on 0.0.0.0:{port} (the PORT env var)" + (f" and that {hp} returns a non-5xx status" if hp else "") +
                       "; or change the health path with aloof health."))
     last_deploy = next((e for e in reversed(ev) if e["msg"].startswith("deploy complete")), None)
-    if last_deploy and now - last_deploy["ts"] < 1800 and (errors or replaced or [e for e in ev if "self-heal: rolling back" in e["msg"]]):
+    if last_deploy and now - last_deploy["ts"] < 1800:
         prev = next((r for r in rel if r["status"] == "superseded"), None)
-        out.append(_c("Bad release: problems started right after the latest deploy", "medium", f"{last_deploy['msg']} {int((now - last_deploy['ts']) / 60)} min ago, followed by errors",
-                      f"Roll back with aloof rollback {app['name']}" + (f" (to v{prev['version']})" if prev else "") + ", then fix and redeploy."))
+        after = [e for e in ev if e["ts"] >= last_deploy["ts"]]
+        bad = [e for e in after if "health: replacing" in e["msg"] or "self-heal: rolling back" in e["msg"] or "lb: ejected" in e["msg"]]
+        rb = f"aloof rollback {app['name']}" + (f" (to v{prev['version']})" if prev else "")
+        if bad:
+            out.append(_c("Bad release: problems started right after the latest deploy", "medium", f"{last_deploy['msg']} {int((now - last_deploy['ts']) / 60)} min ago, then: {bad[-1]['msg']}",
+                          f"Roll back with {rb}, then fix and redeploy."))
+        elif len(errors) >= 5 and prev:
+            out.append(_c("Errors logged since the latest deploy", "low", f"{len(errors)} error-like log lines; the app is still serving",
+                          f"Check error_log_lines; if they are new in this release, {rb}."))
     if st == "idle" or (spec.get("autoscale") and not [i for i in insts if i["status"] == "running"] and st in ("running", "idle")):
         out.append(_c("Scaled to zero (idle): the next request wakes it in about a second", "info", "autoscale min 0 with no running instances",
                       f"Expected behaviour. To keep it warm: aloof autoscale {app['name']} --min 1."))
