@@ -15,3 +15,10 @@ def test_account_markup():
     import os
     d = open(os.path.join(os.path.dirname(__file__), "..", "dashboard", "index.html")).read()
     for x in ("id=s-profile", "id=s-security", "id=s-notify", "Danger zone", "/docs/billing#delete", "Sign out other sessions"): assert x in d, x
+def test_billing_daily():
+    import time
+    from paas.db import q
+    c = _login("bill2@realmail.dev"); aid = c.get("/v1/auth/me").json()["id"]
+    q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (aid, time.time() - 60, -250, "usage", "t"))
+    q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (aid, time.time() - 30, 1000, "topup", "t"))
+    d = c.get("/v1/billing/daily?days=7").json()["days"]; assert len(d) == 7 and d[-1]["usage_usd"] == 2.5 and sum(x["plan_usd"] for x in d) == 0

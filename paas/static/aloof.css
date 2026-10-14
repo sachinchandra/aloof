@@ -300,3 +300,16 @@ a.logo i{width:28px;height:28px;flex:none}
 .switch .sw:after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s}
 .switch input:checked+.sw{background:var(--acc)}.switch input:checked+.sw:after{left:18px}.switch input:focus-visible+.sw{outline:2px solid var(--acc);outline-offset:2px}
 @media(max-width:640px){.set-h,.set-b,.set-foot{padding-left:16px;padding-right:16px}.set-foot{flex-wrap:wrap}}
+
+/* billing v2 */
+.bl-top{margin-bottom:16px}.bl-card{display:flex;flex-direction:column;gap:4px}
+.bl-lab{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3);font-weight:600}
+.bl-big{font-size:30px;font-weight:750;letter-spacing:-.025em;line-height:1.15}
+.bl-change{margin-top:10px}.bl-change summary{list-style:none;display:inline-flex;cursor:pointer}.bl-change summary::-webkit-details-marker{display:none}.bl-change[open] summary{margin-bottom:10px}
+.bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin:12px 0 6px}.bar i{display:block;height:100%;background:var(--acc);border-radius:99px;transition:width .4s}
+.bar.hi i{background:color-mix(in srgb,var(--acc) 60%,var(--bad))}.bar.full i{background:var(--bad)}
+.bl-chart .bars{display:flex;align-items:flex-end;gap:3px;height:120px;border-bottom:1px solid var(--line)}.bl-chart .bars span{flex:1;background:var(--acc);border-radius:3px 3px 0 0;min-width:2px;opacity:.85}.bl-chart .bars span:hover{opacity:1}
+.bars-ax{display:flex;justify-content:space-between;font-size:11.5px;color:var(--fg3);margin-top:4px}
+.pm-off{border:1px dashed var(--line);border-radius:12px;padding:14px 16px}
+.bl-tabs{margin-bottom:12px;display:inline-flex}
+.bl-tabs button.on{background:var(--panel);color:var(--fg);box-shadow:0 0 0 1px var(--line)}

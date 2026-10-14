@@ -332,6 +332,15 @@ async def billing_webhook(request: Request):
     if not rzp.enabled(): return JSONResponse({"error": "razorpay disabled"}, status_code=404)
     code, body = rzp.handle_webhook(await request.body(), request.headers.get("x-razorpay-signature"))
     return JSONResponse(body, status_code=code)
+@app.get("/v1/billing/daily")
+def billing_daily(days: int = 30, a=Depends(acct)):
+    """Balance debits per UTC day (metered usage beyond included, and plan fees) for the last N days. Usage covered by the
+    plan's included amount isn't in the ledger, so it isn't counted here; see /v1/billing month.usage for that."""
+    days = max(1, min(days, 90)); since = time.time() - days * 86400; out = {}
+    for r in q("select ts, amount_cents, kind from ledger where account_id=? and ts>? and amount_cents<0", (a["id"], since)):
+        d = time.strftime("%Y-%m-%d", time.gmtime(r["ts"])); o = out.setdefault(d, {"usage_usd": 0.0, "plan_usd": 0.0})
+        o["plan_usd" if r["kind"] == "plan" else "usage_usd"] += -r["amount_cents"] / 100
+    return {"days": [{"date": time.strftime("%Y-%m-%d", time.gmtime(since + (i + 1) * 86400)), **{k: round(v, 2) for k, v in out.get(time.strftime("%Y-%m-%d", time.gmtime(since + (i + 1) * 86400)), {"usage_usd": 0.0, "plan_usd": 0.0}).items()}} for i in range(days)]}
 @app.get("/v1/billing/runway")
 def billing_runway(a=Depends(acct)):
     """Estimated hours of prepaid credit left at the last 6 hours' burn rate, plus alert settings. Drives the dashboard banner."""
