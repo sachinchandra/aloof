@@ -643,6 +643,11 @@ from .db import audit as _audit
 def _ip(request): return request.client.host if request.client else None
 @app.get("/v1/apps/{name}/releases")
 def app_releases(name: str, a=Depends(acct)): own(name, a); return engine.releases(name)
+@app.get("/v1/apps/{name}/diagnose")
+def app_diagnose(name: str, a=Depends(acct)):
+    """Read-only diagnosis: recent errors, failed health checks, deploys/rollbacks/restarts, instance states and exit codes,
+    and rule-based likely causes with suggested fixes. Secrets and env values are redacted."""
+    own(name, a); from . import diagnose; return diagnose.diagnose(name)
 class RollbackReq(BaseModel): version: int|None=None
 @app.post("/v1/apps/{name}/rollback")
 def app_rollback(name: str, request: Request, b: RollbackReq|None=None, a=Depends(acct)):

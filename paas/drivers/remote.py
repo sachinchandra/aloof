@@ -228,6 +228,12 @@ class RemoteDriver(Driver):
         n, cid = self._split(iid)
         try: return agent(n, "GET", f"/v1/containers/{cid}/logs", params={"tail": tail})
         except Exception as e: return f"(logs unavailable: {e})\n"
+    def exit_info(self, iid):
+        n, cid = self._split(iid)
+        if not n or n["status"] != "ready": return None
+        try: r = agent(n, "GET", f"/v1/containers/{cid}", timeout=10)
+        except Exception: return None
+        return {k: r[k] for k in ("exit_code", "oom_killed") if k in r} or None
     def inspect(self, iid):
         n, cid = self._split(iid)
         if not n or n["status"] != "ready": return "gone"
