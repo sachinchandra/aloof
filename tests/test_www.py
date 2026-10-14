@@ -124,3 +124,7 @@ def test_client_events_no_server_duplicates():
     js = "".join(open(os.path.join(r, f)).read() for f in ("paas/static/analytics.js", "paas/site.py", "dashboard/index.html"))
     for e in ("signup_completed", "first_deploy_succeeded", "deploy_succeeded", "mcp_connected", "plan_upgraded", "gpu_waitlist_joined"): assert f"'{e}'" not in js, e
     assert "aloofIdentify(String(me.id))" in js and "auth/magic',{{method:'POST'" in js and js.count("attribution:window.aloofAttribution") == 2
+def test_hero_and_footer_copy():
+    h = c.get("/").text
+    assert "Backends your AI can deploy and run on its own. Idle apps cost nothing, busy ones scale up." in h and "They run in the EU" not in h
+    for pth in ("/", "/pricing", "/docs", "/examples", "/terms"): assert "The cloud for apps your AI ships." in c.get(pth).text, pth
