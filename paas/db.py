@@ -90,6 +90,17 @@ create table if not exists waitlist(id AUTOPK, kind TEXT, email TEXT, item TEXT 
   consent_ts REAL, created REAL, updated REAL, ip TEXT, is_test int default 0, mail_user TEXT, mail_admin TEXT, unique(kind, email, item));
 create index if not exists waitlist_kind on waitlist(kind, created);
 """)
+    # v9: multi-region. Every placed thing carries a canonical region id (see paas/regions.py); today's data is all in Nuremberg.
+    ,(9, """
+alter table apps add column region TEXT default 'nbg1';
+alter table volumes add column region TEXT default 'nbg1';
+alter table pg_dbs add column region TEXT default 'nbg1';
+alter table nodes add column region TEXT default 'nbg1';
+update apps set region='nbg1' where region is null or region in ('eu-de','eu-central','local');
+update volumes set region='nbg1' where region is null;
+update pg_dbs set region='nbg1' where region is null;
+update nodes set region='nbg1' where region is null;
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

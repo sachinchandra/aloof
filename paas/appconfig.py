@@ -1,5 +1,5 @@
 """aloof.toml (fly.toml-compatible subset) -> app spec. `aloof config validate` calls validate(); `aloof deploy` sends the parsed TOML.
-Supported: app, primary_region, regions (placeholder: one region today), [build] image|dockerfile|git/ref|build_args|subdir, [env],
+Supported: app, primary_region (region id, e.g. nbg1; see GET /v1/regions), regions (first entry used; one region per app), [build] image|dockerfile|git/ref|build_args|subdir, [env],
 [processes], [http_service] (+ checks, concurrency, auto_stop/min_machines_running), [[services]] (first internal_port), [checks],
 [deploy] release_command, [[mounts]], [autoscale], [[vm]] size|cpus+memory, [scale] counts per process group, [[cron]]."""
 import re
@@ -99,7 +99,10 @@ def to_spec(cfg, name=None):
             parse(c["schedule"])
         spec["cron"] = [{"name": c.get("name") or f"job{i}", "schedule": c["schedule"], "command": c["command"]} for i, c in enumerate(crons)]
     regs = cfg.get("regions") or ([cfg["primary_region"]] if cfg.get("primary_region") else [])
-    if len(regs) > 1: w.append("multi-region placement is not available yet: the app runs in one region (EU, Hetzner nbg1)")
+    if regs:
+        from .regions import canonical
+        spec["region"] = canonical(regs[0])   # unknown ids raise; eu-de / eu-central are accepted aliases of nbg1
+    if len(regs) > 1: w.append(f"multi-region placement is not available yet: the app runs in one region ({spec['region']}, the first listed)")
     from .engine import NAME_RE
     if not NAME_RE.match(app): raise ValueError("app name must be 3-32 chars, lowercase letters/digits/hyphens")
     return spec, mounts, w

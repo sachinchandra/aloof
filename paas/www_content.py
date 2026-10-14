@@ -24,7 +24,7 @@ def guide_html(slug):
 <h2>1. Generate config</h2><p><code>aloof launch</code> detects {n} from {detect} and writes a Dockerfile (unless you have one), <code>aloof.toml</code> and <code>.dockerignore</code>.</p>
 <pre>$ aloof launch --name my-{slug}</pre>
 <h2>2. Review aloof.toml</h2><pre>app = "my-{slug}"
-primary_region = "eu-de"
+primary_region = "nbg1"
 
 [http_service]
   internal_port = 8080
@@ -69,12 +69,20 @@ ARCHES = [
   ["<code>[[cron]]</code> entries in aloof.toml", "Runs on the private network with the app's env", "Exit codes and output kept per run"], None),
 ]
 
-LIVE_REGIONS = [("eu-de", "Nuremberg, Germany", "Hetzner Cloud (nbg1)", "Compute, control plane, edge, managed Postgres, volumes"),
-                ("eu-fi (storage)", "Helsinki, Finland", "Hetzner Object Storage", "Encrypted off-site backups only, no compute")]
-SOON_REGIONS = [("eu-fsn", "Falkenstein, Germany", "Hetzner Cloud", "Second German location for capacity and node-level redundancy."),
-                ("eu-hel", "Helsinki, Finland", "Hetzner Cloud", "Compute next to our backup location."),
-                ("us-ash", "Ashburn, Virginia, US", "Hetzner Cloud", "For users in North America."),
-                ("ap-sin", "Singapore", "Hetzner Cloud", "For users in Southeast Asia."),
+# Regions page rows. Live/soon for compute regions is decided at request time by paas.regions.status() (healthy nodes), never here.
+REGION_PURPOSE = {"nbg1": "Compute, control plane, edge, managed Postgres, volumes",
+                  "fsn1": "Second German location for capacity and node-level redundancy.",
+                  "hel1": "Compute next to our backup location.",
+                  "us-east": "For users on the US East Coast.",
+                  "us-west": "For users on the US West Coast.",
+                  "sg": "For users in Southeast Asia."}
+LIVE_REGIONS = [("nbg1", "Nuremberg, Germany", "Hetzner Cloud (nbg1)", REGION_PURPOSE["nbg1"]),
+                ("hel1 (storage)", "Helsinki, Finland", "Hetzner Object Storage", "Encrypted off-site backups only, no compute")]
+SOON_REGIONS = [("fsn1", "Falkenstein, Germany", "Hetzner Cloud", REGION_PURPOSE["fsn1"]),
+                ("hel1", "Helsinki, Finland", "Hetzner Cloud", REGION_PURPOSE["hel1"]),
+                ("us-east", "Vint Hill, Virginia, US", "OVHcloud (planned)", REGION_PURPOSE["us-east"]),
+                ("us-west", "Hillsboro, Oregon, US", "OVHcloud (planned)", REGION_PURPOSE["us-west"]),
+                ("sg", "Singapore", "OVHcloud (planned)", REGION_PURPOSE["sg"]),
                 ("ap-bom", "Mumbai, India", "Provider not chosen yet", "For users in India. We'll name the provider when it's decided.")]
 
 ABOUT = """<p>Aloof is a small, independent hosting platform for backends, APIs and workers. You bring a Docker image, a git repo or a local directory; we run it, bill it per second, and put it to sleep when it's idle.</p>

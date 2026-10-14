@@ -83,6 +83,7 @@ def cmd_deploy(o):
         if o.plan: cfg.setdefault("vm", [{}]); cfg["vm"] = [{"size": o.plan}]
         if o.port: cfg.setdefault("http_service", {})["internal_port"] = o.port
         if o.instances is not None: cfg.setdefault("scale", {})["count"] = o.instances
+        if o.region: cfg["primary_region"] = o.region
         body = {"config": cfg, "env": env}
         b = cfg.get("build") or {}
         if o.image: body["image"] = o.image
@@ -96,7 +97,7 @@ def cmd_deploy(o):
         t0 = time.time(); r = call("POST", f"/v1/apps/{name}/deploy", body)
     else:
         src = {"image": o.image} if o.image else {"git": o.git, **({"ref": o.ref} if o.ref else {})}
-        t0 = time.time(); r = call("POST", "/v1/apps", {"name": name, "source": src, "plan": o.plan or "shared-1x-1gb", "port": o.port or 8080, "instances": 1 if o.instances is None else o.instances, "env": env})
+        t0 = time.time(); r = call("POST", "/v1/apps", {"name": name, "source": src, "plan": o.plan or "shared-1x-1gb", "port": o.port or 8080, "instances": 1 if o.instances is None else o.instances, "env": env, **({"region": o.region} if o.region else {})})
     print("deploying", r["name"], "on", r["provider"])
     if o.no_wait: return
     r = wait_deploy(name, t0)
@@ -147,14 +148,15 @@ a.add_argument("name", nargs="?"); g = a.add_mutually_exclusive_group()
 g.add_argument("--image"); g.add_argument("--git"); a.add_argument("--ref"); a.add_argument("--plan")
 a.add_argument("--port", type=int); a.add_argument("-e","--env", action="append", default=[]); a.add_argument("-n","--instances", type=int)
 a.add_argument("--no-wait", action="store_true"); a.add_argument("-c", "--config", default="aloof.toml"); a.add_argument("--dir", default=".")
-a.add_argument("-a", "--app", dest="app_opt")
+a.add_argument("-a", "--app", dest="app_opt"); a.add_argument("--region", help="region id or alias (see `aloof regions`); default nbg1")
+s.add_parser("regions", help="list regions and which are live")
 for c in ("status","logs","destroy"):
     x = s.add_parser(c); x.add_argument("name", nargs="?"); x.add_argument("-a", "--app", dest="app_opt")
     if c == "logs": x.add_argument("-f", "--follow", action="store_true"); x.add_argument("-n", "--lines", type=int, default=200)
 a = s.add_parser("scale", help="scale <app> <n> | scale count web=2 worker=1 | scale vm <plan>"); a.add_argument("args", nargs="+"); a.add_argument("-a", "--app", dest="app_opt"); a.add_argument("--group")
 a = s.add_parser("env"); a.add_argument("name"); a.add_argument("pairs", nargs="+", help="K=V or K= to unset")
 a = s.add_parser("volumes"); vs = a.add_subparsers(dest="vcmd", required=True)
-x = vs.add_parser("create"); x.add_argument("name"); x.add_argument("--size", type=int, default=1)
+x = vs.add_parser("create"); x.add_argument("name"); x.add_argument("--size", type=int, default=1); x.add_argument("--region")
 vs.add_parser("list"); x = vs.add_parser("delete"); x.add_argument("name")
 x = vs.add_parser("attach"); x.add_argument("app"); x.add_argument("name"); x.add_argument("--path", default="/data")
 x = vs.add_parser("detach"); x.add_argument("app"); x.add_argument("name")
@@ -165,7 +167,7 @@ a = s.add_parser("health"); a.add_argument("name"); a.add_argument("--path", def
 a = s.add_parser("releases"); a.add_argument("name")
 a = s.add_parser("rollback"); a.add_argument("name"); a.add_argument("version", nargs="?", type=int, help="default: previous release")
 a = s.add_parser("pg", help="managed Postgres"); ps = a.add_subparsers(dest="pcmd", required=True)
-x = ps.add_parser("create"); x.add_argument("name"); x.add_argument("--plan", default="pg-dev")
+x = ps.add_parser("create"); x.add_argument("name"); x.add_argument("--plan", default="pg-dev"); x.add_argument("--region")
 ps.add_parser("list"); ps.add_parser("plans")
 for c in ("status", "destroy", "backup", "backups", "url"): ps.add_parser(c).add_argument("name")
 x = ps.add_parser("attach"); x.add_argument("name"); x.add_argument("app"); x.add_argument("--var", default="DATABASE_URL")
@@ -225,6 +227,9 @@ elif o.cmd == "plans":
     for pl in call("GET","/v1/plans")["plans"]: print(f"{pl['id']:<11} {pl['kind']} {pl['vcpu']:>5} vCPU {pl['memory_mb']:>7}MB {pl['gpu'] or '':<18} ${pl['price_usd_hr']:.4f}/hr  via {pl['provider']}")
 elif o.cmd == "apps":
     for x in call("GET","/v1/apps"): print(f"{x['name']:<20} {x['status']:<9} {len(x['instances'])} inst  {x['url']}")
+elif o.cmd == "regions":
+    r = call("GET", "/v1/regions")
+    for x in r["regions"]: print(f"{x['id']:6} {x['status']:12} {x['city']}, {x['country']}" + ("  (default)" if x["id"] == r["default"] else ""))
 elif o.cmd == "deploy": cmd_deploy(o)
 elif o.cmd == "status": cmd_status(o)
 elif o.cmd == "logs": cmd_logs(o)
@@ -233,7 +238,7 @@ elif o.cmd == "env": pj(call("POST", f"/v1/apps/{o.name}/env", {"env": {k:(v or 
 elif o.cmd == "destroy": pj(call("DELETE", f"/v1/apps/{app_of(o)}"))
 elif o.cmd == "usage": pj(call("GET","/v1/usage"))
 elif o.cmd == "volumes":
-    if o.vcmd == "create": pj(call("POST","/v1/volumes",{"name":o.name,"size_gb":o.size}))
+    if o.vcmd == "create": pj(call("POST","/v1/volumes",{"name":o.name,"size_gb":o.size,**({"region":o.region} if o.region else {})}))
     elif o.vcmd == "list":
         for v in call("GET","/v1/volumes"): print(f"{v['name']:<20} {v['size_gb']}GB  {(v['app'] or '-')+':'+(v['mount_path'] or ''):<30}")
     elif o.vcmd == "delete": pj(call("DELETE", f"/v1/volumes/{o.name}"))
@@ -268,7 +273,7 @@ elif o.cmd == "rollback":
         if r["status"] in ("running", "failed"): break
     print(r.get("error") or "rolled back; live: " + r["url"])
 elif o.cmd == "pg":
-    if o.pcmd == "create": r = call("POST", "/v1/pg", {"name": o.name, "plan": o.plan}); print(f"creating {r['name']} ({r['plan']}, ${r['price_usd_month']}/mo). Attach: aloof pg attach {r['name']} <app>")
+    if o.pcmd == "create": r = call("POST", "/v1/pg", {"name": o.name, "plan": o.plan, **({"region": o.region} if o.region else {})}); print(f"creating {r['name']} ({r['plan']}, ${r['price_usd_month']}/mo). Attach: aloof pg attach {r['name']} <app>")
     elif o.pcmd == "list":
         for d in call("GET", "/v1/pg"): print(f"{d['name']:<20} {d['plan']:<12} {str(d['status']):<9} attached: {', '.join(x['app'] for x in d['attached']) or '-'}")
     elif o.pcmd == "plans":
