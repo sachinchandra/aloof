@@ -245,3 +245,4 @@ a.logo i{width:28px;height:28px;flex:none}
 @media(max-width:860px){.pp-grid,.pp-how{grid-template-columns:1fr}.pp-hero{padding:56px 0 0}.pp-hero h1{font-size:40px}.pp-h{font-size:24px;margin-top:56px}.pp-card{padding:22px}}
 .top .btn{white-space:nowrap}
 .hero h1:first-child{margin-top:0}
+.empty .eacts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.empty p code{font-size:12.5px}
