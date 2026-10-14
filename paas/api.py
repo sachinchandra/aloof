@@ -680,6 +680,11 @@ def app_selfheal_put(name: str, b: SelfHealReq, request: Request, a=Depends(acct
     """Turn automatic rollback after a bad deploy on or off for this app (default on)."""
     own(name, a); selfheal.set_enabled(name, b.enabled)
     _audit(a["id"], name, "self-heal", "on" if b.enabled else "off", _ip(request)); return selfheal.status(name)
+@app.get("/v1/apps/{name}/diagnose")
+def app_diagnose(name: str, a=Depends(acct)):
+    """Read-only diagnosis: recent errors, failed health checks, deploys/rollbacks/restarts, instance states and exit codes,
+    and rule-based likely causes with suggested fixes. Secrets and env values are redacted."""
+    own(name, a); from . import diagnose; return diagnose.diagnose(name)
 class RollbackReq(BaseModel): version: int|None=None
 @app.post("/v1/apps/{name}/rollback")
 def app_rollback(name: str, request: Request, b: RollbackReq|None=None, a=Depends(acct)):

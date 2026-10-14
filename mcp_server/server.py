@@ -140,6 +140,12 @@ def list_releases(name: str, api_key: str = "") -> list | dict:
     `auto_rollback` is set on a release that self-heal rolled back (reason, numbers vs the previous release's baseline)."""
     return _r("GET", f"/v1/apps/{name}/releases", api_key)
 @mcp.tool()
+def diagnose_app(name: str, api_key: str = "") -> dict:
+    """Read-only: why is my app broken? Returns recent error log lines, failed health checks, recent deploys, rollbacks and restarts,
+    instance states and exit codes, and likely causes (OOM/exit 137, crash loop, bad release after a deploy, port mismatch or failing
+    health check, suspended for $0 balance, scaled to zero) each with a suggested fix. Changes nothing; secrets and env values are redacted."""
+    return _r("GET", f"/v1/apps/{name}/diagnose", api_key)
+@mcp.tool()
 def rollback_app(name: str, version: int | None = None, api_key: str = "") -> dict:
     """Roll back to an earlier release (default: the previous one). Zero downtime, no rebuild. Poll get_status."""
     return _r("POST", f"/v1/apps/{name}/rollback", api_key, json={"version": version})

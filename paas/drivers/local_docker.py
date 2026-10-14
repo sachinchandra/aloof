@@ -192,6 +192,12 @@ class LocalDockerDriver(Driver):
             for v in ports.values():
                 if v: return v[0]["HostIp"] or "127.0.0.1", int(v[0]["HostPort"])
         except Exception: return None
+    def exit_info(self, iid):
+        """Read-only: exit code / OOM flag of a container that has stopped (None while running or gone)."""
+        try: st = self.c.containers.get(iid).attrs.get("State") or {}
+        except Exception: return None
+        if st.get("Running"): return {"restart_count": None}
+        return {"exit_code": st.get("ExitCode"), "oom_killed": bool(st.get("OOMKilled")), "finished_at": st.get("FinishedAt")}
     def inspect(self, iid):
         try: return self.c.containers.get(iid).status
         except docker.errors.NotFound: return "gone"
