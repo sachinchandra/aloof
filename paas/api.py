@@ -860,8 +860,10 @@ def resolve_app(host, path):
         if name.startswith("pg-"): return None, path
         return name, (rest[0] if rest else "")
     return None, path
-def _sh_record(name, status, t0):
-    try: selfheal.record(name, status, (time.monotonic() - t0) * 1000)   # time to response headers
+def _sh_record(name, status, t0, request=None, path="/"):
+    try:
+        ip = (request.headers.get("x-forwarded-for", "").split(",")[-1].strip() or (request.client.host if request.client else None)) if request else None
+        selfheal.record(name, status, (time.monotonic() - t0) * 1000, ip, path)   # time to response headers
     except Exception: pass
 @proxy.api_route("/{path:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS","HEAD"])
 async def edge(path: str, request: Request):
@@ -895,8 +897,10 @@ async def edge(path: str, request: Request):
         except httpx.HTTPError as e:
             err = e; break
     if r is None:
-        controller.M.end(name); _sh_record(name, 502, t0); return PlainTextResponse(f"upstream error: {err}", 502)
-    _sh_record(name, r.status_code, t0)
+        controller.M.end(name)
+        if isinstance(err, httpx.ConnectError): _sh_record(name, 502, t0, request, path)   # timeouts / client aborts don't count
+        return PlainTextResponse(f"upstream error: {err}", 502)
+    _sh_record(name, r.status_code, t0, request, path)
     async def body():
         try:
             async for chunk in r.aiter_raw():
