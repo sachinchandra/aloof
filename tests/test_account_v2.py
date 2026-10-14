@@ -30,3 +30,8 @@ def test_console_closes_with_reason_and_analytics_js():
         with pytest.raises(WebSocketDisconnect) as e: ws.receive_bytes()
     assert e.value.code == 4401 and "not signed in" in (e.value.reason or "")
     r = c.get("/static/analytics.js"); assert r.status_code == 200 and "javascript" in r.headers["content-type"]
+def test_frontend_uses_720_hours():
+    import os, re
+    d = open(os.path.join(os.path.dirname(__file__), "..", "dashboard", "index.html")).read()
+    assert not re.search(r"[*/]\s*730\b", d) and "HPM=720" in d
+    from paas.plans import HOURS_MONTH; assert HOURS_MONTH == 720
