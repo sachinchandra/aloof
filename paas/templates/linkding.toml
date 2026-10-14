@@ -1,0 +1,22 @@
+id = "linkding"
+name = "linkding"
+description = "Minimal self-hosted bookmark manager."
+category = "Productivity"
+website = "https://github.com/sissbruecker/linkding"
+[source]
+image = "sissbruecker/linkding:latest"
+[app]
+port = 9090
+plan = "shared-1x-256mb"
+region = "nbg1"
+[[env]]
+name = "LD_SUPERUSER_NAME"
+required = true
+description = "Admin username to create on first start."
+[[env]]
+name = "LD_SUPERUSER_PASSWORD"
+generate = "secret:24"
+[[volumes]]
+name = "data"
+path = "/etc/linkding/data"
+size_gb = 1

@@ -1,17 +1,33 @@
 #!/usr/bin/env python3
 """aloof CLI. Config: ~/.aloof.json (falls back to ~/.paas.json) {api, key} or env ALOOF_API_URL / ALOOF_API_KEY."""
 import argparse, json, os, sys, time, urllib.request, urllib.error
+VERSION = "0.4.0"   # single source of truth: `aloof --version` and the User-Agent header
+UA = f"aloof-cli/{VERSION} (python {sys.version_info[0]}.{sys.version_info[1]}; {sys.platform})"
 CFG = os.path.expanduser("~/.aloof.json")
 if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")
 cfg = json.load(open(CFG)) if os.path.exists(CFG) else {}
 DEFAULT_API = "https://api.aloof.si"   # precedence: ALOOF_API_URL / PAAS_API_URL env > ~/.aloof.json "api" > this
-DEFAULT_API = "https://api.aloof.si"   # precedence: ALOOF_API_URL / PAAS_API_URL env > ~/.aloof.json "api" > this
 API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", cfg.get("api", DEFAULT_API))); KEY = os.environ.get("ALOOF_API_TOKEN") or os.environ.get("ALOOF_API_KEY", os.environ.get("PAAS_API_KEY", cfg.get("key")))
+def _api_source():
+    for k in ("ALOOF_API_URL", "PAAS_API_URL"):
+        if os.environ.get(k): return f"env {k}"
+    return CFG if cfg.get("api") else None
+def warn_local_api(api=None, src=None, out=sys.stderr):
+    """Warn when the API URL points at this machine and came from env/config (a leftover dev setting)."""
+    import urllib.parse as _u
+    api = api or API; src = src if src is not None else _api_source()
+    h = (_u.urlsplit(api).hostname or "").lower()
+    if src and (h in ("localhost", "::1", "0.0.0.0") or h.startswith("127.")):
+        fix = f"unset {src[4:]}" if src.startswith("env ") else f'remove "api" from {src} (or set it to {DEFAULT_API})'
+        print(f"warning: using API {api} from {src}; this is a local dev server, not Aloof. To use {DEFAULT_API}: {fix}", file=out)
+        return True
+    return False
 def call(m, p, body=None, raw=False):
     req = urllib.request.Request(API+p, method=m, data=json.dumps(body).encode() if body is not None else None,
-                                 headers={"Content-Type":"application/json", **({"Authorization":f"Bearer {KEY}"} if KEY else {})})
+                                 headers={"Content-Type":"application/json", "User-Agent": UA, **({"Authorization":f"Bearer {KEY}"} if KEY else {})})
     try: d = urllib.request.urlopen(req, timeout=120).read().decode()
     except urllib.error.HTTPError as e: sys.exit(f"error {e.code}: {e.read().decode()}")
+    except urllib.error.URLError as e: warn_local_api(); sys.exit(f"can't reach {API}: {e.reason}")
     return d if raw else json.loads(d)
 def load_toml(path):
     if not os.path.exists(path): return {}
@@ -61,7 +77,7 @@ def tar_context(root):
                 if not ign(rel): t.add(os.path.join(d, x), arcname=rel, recursive=False); n += 1
     return buf.getvalue(), n
 def upload(name, data):
-    req = urllib.request.Request(f"{API}/v1/apps/{name}/source", method="POST", data=data, headers={"Content-Type": "application/gzip", "Authorization": f"Bearer {KEY}"})
+    req = urllib.request.Request(f"{API}/v1/apps/{name}/source", method="POST", data=data, headers={"Content-Type": "application/gzip", "User-Agent": UA, "Authorization": f"Bearer {KEY}"})
     try: return json.loads(urllib.request.urlopen(req, timeout=600).read())
     except urllib.error.HTTPError as e: sys.exit(f"upload failed {e.code}: {e.read().decode()}")
 def wait_deploy(name, t0):
@@ -75,6 +91,17 @@ def wait_deploy(name, t0):
         if rel.get("created", 0) >= t0 - 2 and rel.get("status") in ("active", "failed"): break
     return call("GET", f"/v1/apps/{name}")
 def cmd_deploy(o):
+    if o.template:
+        name = o.app_opt or o.name
+        if not name: sys.exit("app name? `aloof deploy --template <id> <name>`")
+        env = dict(e.split("=", 1) for e in o.env)
+        r = call("POST", f"/v1/templates/{o.template}/deploy", {"name": name, "env": env, **({"plan": o.plan} if o.plan else {})})
+        print("deploying", r["app"]["name"], "from template", r["template"])
+        for k, v in (r.get("generated_secrets") or {}).items(): print(f"generated {k}={v}  (shown once; also in the app env)")
+        if o.no_wait: return
+        r = wait_deploy(name, time.time() - 1); print(r.get("error") or f"live: {r['url']}")
+        if r["status"] == "failed": sys.exit(1)
+        return
     cfg = load_toml(os.path.join(o.dir, o.config) if not os.path.isabs(o.config) else o.config)
     name = o.app_opt or o.name or cfg.get("app")
     if not name: sys.exit("app name? `aloof deploy <name>` or set app = \"...\" in aloof.toml (aloof launch creates one)")
@@ -140,16 +167,39 @@ def cmd_scale(o):
     elif len(a) == 2: pj(call("POST", f"/v1/apps/{a[0]}/scale", {"instances": int(a[1])}))
     elif len(a) == 1 and a[0].isdigit(): pj(call("POST", f"/v1/apps/{app_of(o)}/scale", {"instances": int(a[0])}))
     else: sys.exit("usage: aloof scale count [web=]N [worker=N] | aloof scale vm <plan> | aloof scale <app> <n>")
-p = argparse.ArgumentParser(prog="aloof"); s = p.add_subparsers(dest="cmd", required=True)
+HELP = {
+    "signup": "create an account and save the API key", "plans": "list compute plans and prices", "apps": "list your apps",
+    "usage": "show this month's usage and charges", "deploy": "deploy the current directory, an image, a git repo or a template",
+    "templates": "list one-click templates", "status": "show an app's status and instances", "logs": "show (or follow) an app's logs",
+    "destroy": "delete an app", "scale": "change instance count or VM size", "env": "set or unset environment variables",
+    "volumes": "create, list, attach and delete persistent volumes", "autoscale": "configure autoscaling and scale-to-zero",
+    "domains": "add, verify and remove custom domains", "health": "configure the HTTP health check", "releases": "list an app's releases",
+    "rollback": "roll back to a previous release", "pg": "managed Postgres databases", "snapshots": "volume snapshots and off-site backups",
+    "launch": "detect the framework and write a Dockerfile + aloof.toml", "audit": "show the account audit log", "config": "validate or show aloof.toml",
+    "tokens": "create, list and revoke deploy tokens", "secrets": "manage app secrets", "certs": "show TLS certificates for an app",
+    "ips": "show an app's IP addresses", "registry": "private container registry credentials", "git": "private git credentials and deploy keys",
+    "github": "GitHub App: install, link repos, auto-deploy", "previews": "PR preview environments", "cron": "list and run cron jobs",
+    "exec": "run a command in an app instance", "ssh": "open a shell in an app instance", "proxy": "forward a local port to an app",
+    "drains": "log drains", "history": "deploy history", "regions": "list regions and which are live", "login": "log in and save an API key",
+}
+class _Sub(argparse._SubParsersAction):
+    def add_parser(self, name, **kw):
+        if self.dest == "cmd": kw.setdefault("help", HELP.get(name, name))
+        return super().add_parser(name, **kw)
+p = argparse.ArgumentParser(prog="aloof", description=f"Aloof CLI {VERSION}. API: {API}")
+p.register("action", "parsers", _Sub)
+p.add_argument("--version", action="version", version=f"aloof {VERSION}")
+s = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 a = s.add_parser("signup"); a.add_argument("email")
 s.add_parser("plans"); s.add_parser("apps"); s.add_parser("usage")
 a = s.add_parser("deploy", help="deploy the current directory (aloof.toml + Dockerfile/auto-detect), an image, or a git repo")
 a.add_argument("name", nargs="?"); g = a.add_mutually_exclusive_group()
-g.add_argument("--image"); g.add_argument("--git"); a.add_argument("--ref"); a.add_argument("--plan")
+g.add_argument("--image"); g.add_argument("--git"); g.add_argument("--template", help="one-click template id (see `aloof templates`)"); a.add_argument("--ref"); a.add_argument("--plan")
 a.add_argument("--port", type=int); a.add_argument("-e","--env", action="append", default=[]); a.add_argument("-n","--instances", type=int)
 a.add_argument("--no-wait", action="store_true"); a.add_argument("-c", "--config", default="aloof.toml"); a.add_argument("--dir", default=".")
 a.add_argument("-a", "--app", dest="app_opt"); a.add_argument("--region", help="region id or alias (see `aloof regions`); default nbg1")
 s.add_parser("regions", help="list regions and which are live")
+s.add_parser("templates", help="list one-click templates")
 for c in ("status","logs","destroy"):
     x = s.add_parser(c); x.add_argument("name", nargs="?"); x.add_argument("-a", "--app", dest="app_opt")
     if c == "logs": x.add_argument("-f", "--follow", action="store_true"); x.add_argument("-n", "--lines", type=int, default=200)
@@ -218,6 +268,7 @@ a = s.add_parser("cron"); cr = a.add_subparsers(dest="crcmd", required=True)
 x = cr.add_parser("list"); x.add_argument("-a", "--app", dest="app_opt")
 x = cr.add_parser("run"); x.add_argument("job"); x.add_argument("-a", "--app", dest="app_opt")
 o = p.parse_args()
+warn_local_api()
 pj = lambda x: print(json.dumps(x, indent=2))
 if o.cmd == "signup":
     r = call("POST","/v1/signup",{"email":o.email}); fd = os.open(CFG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.fchmod(fd, 0o600)
@@ -231,6 +282,8 @@ elif o.cmd == "regions":
     r = call("GET", "/v1/regions")
     w = max(len(y['id']) for y in r['regions'])
     for x in r["regions"]: print(f"{x['id']:{w}}  {x['status']:12} {x['city']}, {x['country']}" + ("  (default)" if x["id"] == r["default"] else ""))
+elif o.cmd == "templates":
+    for t in call("GET", "/v1/templates")["templates"]: print(f"{t['id']:14} {t['description']}")
 elif o.cmd == "deploy": cmd_deploy(o)
 elif o.cmd == "status": cmd_status(o)
 elif o.cmd == "logs": cmd_logs(o)

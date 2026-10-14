@@ -1,0 +1,15 @@
+id = "pocketbase"
+name = "PocketBase"
+description = "Open-source backend in one file: SQLite database, auth, file storage and admin UI."
+category = "Starter"
+website = "https://pocketbase.io"
+[source]
+image = "ghcr.io/muchobien/pocketbase:latest"
+[app]
+port = 8090
+plan = "shared-1x-256mb"
+region = "nbg1"
+[[volumes]]
+name = "data"
+path = "/pb_data"
+size_gb = 1

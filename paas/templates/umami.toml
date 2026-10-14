@@ -1,0 +1,17 @@
+id = "umami"
+name = "Umami"
+description = "Privacy-friendly web analytics (Google Analytics alternative) on managed Postgres."
+category = "Analytics"
+website = "https://umami.is"
+[source]
+image = "ghcr.io/umami-software/umami:latest"
+[app]
+port = 3000
+plan = "shared-1x-512mb"
+region = "nbg1"
+[[env]]
+name = "APP_SECRET"
+generate = "secret:32"
+[postgres]
+plan = "pg-dev"
+var = "DATABASE_URL"

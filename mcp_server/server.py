@@ -92,6 +92,17 @@ def get_usage(api_key: str = "") -> dict:
     """Usage hours and USD cost so far, plus remaining credit (credit_usd)."""
     return _r("GET","/v1/usage", api_key)
 @mcp.tool()
+def list_templates() -> dict:
+    """One-click templates (Uptime Kuma, n8n, Umami, ...): id, description, required env vars, volumes, Postgres needs, default plan."""
+    return _r("GET", "/v1/templates")
+@mcp.tool()
+def deploy_template(template: str, name: str, env: dict[str,str] | None = None, plan: str = "", api_key: str = "") -> dict:
+    """Deploy a one-click template (id from list_templates) as app `name`. Creates the volumes and managed Postgres it needs,
+    generates its secrets (returned once in generated_secrets), and starts the deploy. Pass required env vars in `env`."""
+    import re as _re, urllib.parse as _up
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9-]{1,38}[a-z0-9]", template or ""): return {"error": "unknown template id; use list_templates"}   # F3: same as templating.ID_RE
+    return _r("POST", f"/v1/templates/{_up.quote(template, safe='')}/deploy", api_key, json={"name": name, "env": env or {}, **({"plan": plan} if plan else {})})
+@mcp.tool()
 def create_volume(name: str, size_gb: int = 1, region: str = "", api_key: str = "") -> dict:
     """Create a persistent volume in `region` (default nbg1). Attach it to an app in the same region with attach_volume; data survives redeploys."""
     return _r("POST","/v1/volumes", api_key, json={"name": name, "size_gb": size_gb, **({"region": region} if region else {})})
