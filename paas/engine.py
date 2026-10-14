@@ -376,6 +376,7 @@ def create_volume(account_id, name, size_gb, region=None):
     region = R.require_live(region or R.home())
     if q("select 1 from volumes where name=?", (name,), one=True): raise PermissionError("volume exists")
     k, t = account_tier(account_id)
+    R.check_allowed(region, k)   # region plan rules (Free is EU-only) apply to storage too
     if t.get("max_volume_gb"):
         used = q("select coalesce(sum(size_gb),0) s from volumes where account_id=?", (account_id,), one=True)["s"]
         if used + size_gb > t["max_volume_gb"]: raise ValueError(f"{k} tier allows {t['max_volume_gb']} GB of volumes in total")

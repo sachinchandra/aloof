@@ -43,7 +43,7 @@ def test_e2e_mocked_full_lifecycle(monkeypatch, tmp_path):
             assert create.call_count == 1
             n = db.q("select * from nodes where provider='e2e'", one=True); assert n["status"] == "ready" and n["provider_ref"] == "4242"
             # join token is single-use
-            assert httpx.post(f"http://127.0.0.1:{port}/v1/nodes/register", json={"join_token": agent_proc["join"]}).status_code in (401, 403)
+            assert httpx.post(f"http://127.0.0.1:{port}/v1/nodes/register", json={"join_token": agent_proc["join"]}).status_code in (400, 401, 403)
             inst = db.q("select * from instances where app='nodeapp' and status='running'", one=True)
             assert inst["node_id"] == n["id"]
             assert "nginx" in httpx.get(f"http://{inst['host']}:{inst['port']}/").text.lower()

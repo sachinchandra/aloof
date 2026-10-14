@@ -93,7 +93,7 @@ create index if not exists waitlist_kind on waitlist(kind, created);
 """)
     ,(9, """
 create table if not exists analytics_once(account_id INTEGER, event TEXT, primary key(account_id, event));
-"""),
+""")
     # v10: multi-region. Every placed thing carries a canonical region id (see paas/regions.py); today's data is all in Nuremberg.
     ,(10, """
 alter table apps add column region TEXT default 'nbg1';

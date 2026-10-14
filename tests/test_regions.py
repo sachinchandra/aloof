@@ -14,7 +14,7 @@ def node():
     def mk(region, nid=None, ready=True, seen=0):
         nid = nid or f"n-{region}-{len(made)}-{int(time.time()*1000)%100000}"
         q("insert into nodes(id,provider,status,wg_ip,wg_pubkey,public_ip,plan,created,gpus,region,last_seen) values(?,?,?,?,?,?,?,?,?,?,?)",
-          (nid, "hetzner", "ready" if ready else "provisioning", f"10.77.{len(made)+50}.2", f"PUB{nid}=", "203.0.113.9", "cx22", time.time(), 0, region, time.time() - seen))
+          (nid, "hetzner", "ready" if ready else "provisioning", f"10.88.{len(made)+50}.2", f"PUB{nid}=", "203.0.113.9", "cx22", time.time(), 0, region, time.time() - seen))
         made.append(nid); return nid
     yield mk
     for n in made: q("delete from nodes where id=?", (n,))
@@ -79,7 +79,7 @@ def test_appconfig_primary_region():
 def test_edge_config(node):
     node("nbg1", nid="edge-n1"); node("us-east", nid="edge-a1")
     cfg = remote.edge_wireguard_config()
-    assert "GENERATED, NOT APPLIED" in cfg and "# region us-east" in cfg and "PublicKey = PUBedge-a1=" in cfg and "PrivateKey = <HUB_PRIVATE_KEY>" in cfg
+    assert "GENERATED, NOT APPLIED" in cfg and "# region us-east" in cfg and "<PENDING_REGISTRATION>" in cfg and "PrivateKey = <HUB_PRIVATE_KEY>" in cfg
     rt = remote.edge_routes(); assert rt["generated_only"] and "us-east" in rt["regions"]
 
 def test_status_page_regions():

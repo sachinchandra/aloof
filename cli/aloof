@@ -229,7 +229,8 @@ elif o.cmd == "apps":
     for x in call("GET","/v1/apps"): print(f"{x['name']:<20} {x['status']:<9} {len(x['instances'])} inst  {x['url']}")
 elif o.cmd == "regions":
     r = call("GET", "/v1/regions")
-    for x in r["regions"]: print(f"{x['id']:6} {x['status']:12} {x['city']}, {x['country']}" + ("  (default)" if x["id"] == r["default"] else ""))
+    w = max(len(y['id']) for y in r['regions'])
+    for x in r["regions"]: print(f"{x['id']:{w}}  {x['status']:12} {x['city']}, {x['country']}" + ("  (default)" if x["id"] == r["default"] else ""))
 elif o.cmd == "deploy": cmd_deploy(o)
 elif o.cmd == "status": cmd_status(o)
 elif o.cmd == "logs": cmd_logs(o)
@@ -240,7 +241,7 @@ elif o.cmd == "usage": pj(call("GET","/v1/usage"))
 elif o.cmd == "volumes":
     if o.vcmd == "create": pj(call("POST","/v1/volumes",{"name":o.name,"size_gb":o.size,**({"region":o.region} if o.region else {})}))
     elif o.vcmd == "list":
-        for v in call("GET","/v1/volumes"): print(f"{v['name']:<20} {v['size_gb']}GB  {(v['app'] or '-')+':'+(v['mount_path'] or ''):<30}")
+        for v in call("GET","/v1/volumes"): print(f"{v['name']:<20} {str(v['size_gb'])+'GB':>6}  {v.get('region') or '-':<8} {(v['app'] or '-')+':'+(v['mount_path'] or ''):<30}")
     elif o.vcmd == "delete": pj(call("DELETE", f"/v1/volumes/{o.name}"))
     elif o.vcmd == "attach": r = call("POST", f"/v1/apps/{o.app}/volumes", {"volume":o.name,"path":o.path}); print("attached; redeploying", r["name"])
     elif o.vcmd == "detach": r = call("DELETE", f"/v1/apps/{o.app}/volumes/{o.name}"); print("detached; redeploying", r["name"])

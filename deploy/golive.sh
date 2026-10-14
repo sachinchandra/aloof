@@ -3,7 +3,7 @@
 # Rewrites supervisord.conf environment from golive.env, renders data/Caddyfile.live (ACME, base + alt domains) and reloads.
 set -e; cd "$(dirname "$0")"; [ -f golive.env ] || { echo "cp golive.env.example golive.env and fill it in"; exit 1; }; set -a; . ./golive.env; set +a
 grep -v '^\s*#' golive.env | grep -qE '=\s*"?<' && { echo "fill in golive.env placeholders first (or blank them)"; exit 1; }
-E="PAAS_BRAND=\"$PAAS_BRAND\",PAAS_BASE_DOMAIN=\"$PAAS_BASE_DOMAIN\",PAAS_ALT_DOMAINS=\"$PAAS_ALT_DOMAINS\",PAAS_URL_DOMAIN=\"$PAAS_URL_DOMAIN\",PAAS_API_HOST=\"$PAAS_API_HOST\",PAAS_MCP_HOST=\"$PAAS_MCP_HOST\",PAAS_PUBLIC_API_URL=\"$PAAS_PUBLIC_API_URL\",PAAS_PUBLIC_MCP_URL=\"$PAAS_PUBLIC_MCP_URL\",PAAS_PROXY_URL=\"$PAAS_PROXY_URL\",PAAS_SITE_URL=\"$PAAS_SITE_URL\",PAAS_EDGE_IPS=\"$PAAS_EDGE_IPS\",PAAS_WG_ENDPOINT=\"$PAAS_WG_ENDPOINT\",PAAS_NODE_API_URL=\"$PAAS_NODE_API_URL\",PAAS_REGISTRY=\"127.0.0.1:5000\",PAAS_REGISTRY_NODE=\"$PAAS_REGISTRY_NODE\",PAAS_ENV_FILE=\"$PWD/golive.env\""
+E="PAAS_BRAND=\"$PAAS_BRAND\",PAAS_BASE_DOMAIN=\"$PAAS_BASE_DOMAIN\",PAAS_ALT_DOMAINS=\"$PAAS_ALT_DOMAINS\",PAAS_URL_DOMAIN=\"$PAAS_URL_DOMAIN\",PAAS_API_HOST=\"$PAAS_API_HOST\",PAAS_MCP_HOST=\"$PAAS_MCP_HOST\",PAAS_PUBLIC_API_URL=\"$PAAS_PUBLIC_API_URL\",PAAS_PUBLIC_MCP_URL=\"$PAAS_PUBLIC_MCP_URL\",PAAS_PROXY_URL=\"$PAAS_PROXY_URL\",PAAS_SITE_URL=\"$PAAS_SITE_URL\",PAAS_EDGE_IPS=\"$PAAS_EDGE_IPS\",PAAS_WG_ENDPOINT=\"$PAAS_WG_ENDPOINT\",PAAS_NODE_API_URL=\"$PAAS_NODE_API_URL\",PAAS_REGISTRY=\"127.0.0.1:5000\",PAAS_WG_APPLY=\"1\",PAAS_REGISTRY_NODE=\"$PAAS_REGISTRY_NODE\",PAAS_ENV_FILE=\"$PWD/golive.env\""
 # Caddyfile: global email only if set; one site block per domain
 LIVE=../data/Caddyfile.live; mkdir -p ../data
 G=""; [ -n "$ACME_EMAIL" ] && G="email $ACME_EMAIL"

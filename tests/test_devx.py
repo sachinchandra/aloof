@@ -221,6 +221,10 @@ def test_named_api_keys():
     assert c.get("/v1/auth/me", headers={"Authorization": f"Bearer {n['api_key']}"}).status_code == 401
 def test_unknown_region_warns():
     from paas import appconfig
-    w = appconfig.validate({"app": "reg-one", "primary_region": "eu-central", "build": {"image": "nginx"}})["warnings"]
-    assert any("unknown region 'eu-central'" in x and "eu-de" in x for x in w)
-    assert not any("unknown region" in x for x in appconfig.validate({"app": "reg-two", "primary_region": "eu-de", "build": {"image": "nginx"}})["warnings"])
+    w = appconfig.validate({"app": "reg-one", "primary_region": "ams", "build": {"image": "nginx"}})["warnings"]   # fly.io code: warn, don't 400
+    assert any("unknown region 'ams'" in x and "nbg1" in x for x in w)
+    for ok in ("eu-de", "eu-central", "nbg1"):   # aliases of nbg1
+        assert not any("unknown region" in x for x in appconfig.validate({"app": "reg-two", "primary_region": ok, "build": {"image": "nginx"}})["warnings"])
+    spec = appconfig.to_spec({"app": "reg-three", "primary_region": "fsn1", "regions": ["ams", "nbg1"]})[0]
+    assert spec["region"] == "fsn1"   # primary_region wins over regions[0]
+    spec = appconfig.to_spec({"app": "reg-four", "regions": ["iad"]})[0]; assert "region" not in spec

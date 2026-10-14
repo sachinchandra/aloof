@@ -94,7 +94,7 @@ def signup(s: Signup):
     return {"email":a["email"],"api_key":a["api_key"],"credit_usd":billing.usd(a.get("credit_cents"))}
 def _live_regions():
     from . import regions as R
-    return {r["id"]: f"{r['name']} ({r['provider']})" for r in R.status() if r["live"]} | {k: v for k, v in REGIONS.items() if k == "in-del"}
+    return {r["id"]: f"{r['name']} ({r['provider']})" for r in R.status() if r["live"]}   # only deployable regions (in-del overflow isn't a selectable region)
 @app.get("/v1/regions")
 def list_regions():
     """Regions with live status derived from healthy nodes. Only status=live regions accept new apps, volumes and databases."""
@@ -498,11 +498,15 @@ def _admin_token():
 ADMIN = _admin_token()
 def admin(authorization: str = Header(None)):
     import hmac as _h
-    if not ADMIN or not _h.compare_digest((authorization or "").removeprefix("Bearer "), ADMIN): raise HTTPException(401, "admin token required")
+    a = authorization or ""
+    if not ADMIN or not a.startswith("Bearer ") or not _h.compare_digest(a[7:], ADMIN): raise HTTPException(401, "admin token required")
 @app.post("/v1/nodes/register")
 async def node_register(request: Request):
-    try: return remote.register_node(await request.json())
+    try: body = await request.json()
+    except Exception: raise HTTPException(400, "body must be JSON")
+    try: return remote.register_node(body)
     except PermissionError as e: raise HTTPException(403, str(e))
+    except ValueError as e: raise HTTPException(400, str(e))
 @app.get("/v1/nodes/agent.py", response_class=PlainTextResponse)
 def node_agent(): return open(os.path.join(ROOT, "paas", "agent", "agent.py")).read()
 class NodeReq(BaseModel): pool: str="self-hosted"; plan: str="cpu-large"; gpu: bool=False; region: str|None=None
@@ -510,6 +514,7 @@ class NodeReq(BaseModel): pool: str="self-hosted"; plan: str="cpu-large"; gpu: b
 def admin_add_node(n: NodeReq):
     """Create a join token for a manually-managed node (self-hosted / Yotta bare metal / any Ubuntu box)."""
     if n.pool not in PROVISIONERS: raise HTTPException(400, f"pool must be one of {list(PROVISIONERS)}")
+    if n.plan not in PLANS: raise HTTPException(400, "plan must be a known plan id (see /v1/plans)")
     from . import regions as R
     try: region = R.canonical(n.region or R.home())
     except ValueError as e: raise HTTPException(400, str(e))
@@ -520,7 +525,8 @@ def admin_add_node(n: NodeReq):
 def node_bootstrap(node: str, token: str):
     from .drivers import bootstrap
     from .crypto import sha256
-    if q("select v from kv where kind='join' and k=?", (sha256(token),), one=True) is None: raise HTTPException(403, "invalid join token")
+    from .db import kv_get
+    if kv_get("join", sha256(token)) != node: raise HTTPException(403, "invalid join token for this node")   # tokens are bound to their node
     n = q("select * from nodes where id=?", (node,), one=True)
     if not n: raise HTTPException(404, "unknown node")
     return bootstrap.render(node, n["provider"], n["plan"], token, bool(n["gpus"]))

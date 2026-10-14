@@ -30,15 +30,41 @@ def create_node_record(pool, plan_id, gpu=False, region=None):
     db.q("insert into nodes(id,provider,status,wg_ip,plan,created,gpus,region) values(?,?,?,?,?,?,?,?)", (node_id, pool, "provisioning", ip, plan_id, time.time(), 1 if gpu else 0, region))
     db.kv_put("join", crypto.sha256(join), node_id, ttl=3600 * 24)
     return node_id, join
+def _clean_register(body):
+    """Validate the agent's registration body BEFORE the join token is burned. ValueError -> 400."""
+    if not isinstance(body, dict): raise ValueError("body must be a JSON object")
+    def num(k, lo, hi, default=None):
+        v = body.get(k, default)
+        if v is None: return None
+        if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi: raise ValueError(f"{k} must be an integer {lo}-{hi}")
+        return v
+    out = {"agent_port": num("agent_port", 1, 65535, 7070), "vcpu": num("vcpu", 1, 1024), "mem_mb": num("mem_mb", 64, 16 * 1024 * 1024),
+           "gpus": num("gpus", 0, 64, 0) or 0}
+    if not isinstance(body.get("join_token"), str) or not body["join_token"]: raise ValueError("join_token required")
+    direct = os.environ.get("PAAS_ALLOW_DIRECT_AGENT") == "1"
+    if not (wg.valid_pubkey(body.get("wg_pubkey")) or (direct and body.get("wg_pubkey") is None)):   # --no-wg dev agents send none
+        raise ValueError("wg_pubkey must be a base64 32-byte WireGuard public key")
+    out["wg_pubkey"] = body["wg_pubkey"]
+    ip = body.get("public_ip")
+    out["public_ip"] = None
+    if ip not in (None, ""):
+        out["public_ip"] = wg.valid_public_ip(ip)
+        if not out["public_ip"]: raise ValueError("public_ip must be a public (global unicast) IP address")
+    gm = body.get("gpu_model")
+    if gm is not None and (not isinstance(gm, str) or len(gm) > 100 or not gm.isprintable()): raise ValueError("gpu_model must be printable text")
+    out["gpu_model"] = gm
+    out["agent_url"] = body.get("agent_url") if isinstance(body.get("agent_url"), str) else None
+    return out
 def register_node(body):
-    """Called by the agent at first boot. Validates and burns the join token, returns agent token + WG config."""
+    """Called by the agent at first boot. Validates the body, then validates and burns the join token, returns agent token + WG config."""
     db, crypto = _db()
+    clean = _clean_register(body)
     node_id = db.kv_get("join", crypto.sha256(body.get("join_token", "")))
     if not node_id: raise PermissionError("invalid or used join token")
-    db.kv_del("join", crypto.sha256(body["join_token"]))
+    db.kv_del("join", crypto.sha256(body["join_token"])); body = clean
     n = db.q("select * from nodes where id=?", (node_id,), one=True)
     tok = "at_" + secrets.token_urlsafe(32)
-    agent_url = body.get("agent_url") if (body.get("agent_url") and os.environ.get("PAAS_ALLOW_DIRECT_AGENT") == "1") else f"http://{n['wg_ip']}:{int(body.get('agent_port', 7070))}"
+    agent_url = body.get("agent_url") if (body.get("agent_url") and os.environ.get("PAAS_ALLOW_DIRECT_AGENT") == "1") else f"http://{n['wg_ip']}:{body['agent_port']}"
     db.q("update nodes set status='ready', wg_pubkey=?, agent_url=?, agent_token_enc=?, vcpu=?, mem_mb=?, gpus=?, gpu_model=?, last_seen=?, public_ip=coalesce(public_ip, ?) where id=?",
          (body.get("wg_pubkey"), agent_url, crypto.enc(tok), body.get("vcpu"), body.get("mem_mb"), body.get("gpus") or 0, body.get("gpu_model"), time.time(), body.get("public_ip"), node_id))
     peer = wg.add_peer(body.get("wg_pubkey"), n["wg_ip"])
@@ -224,11 +250,27 @@ def node_tick():
         if now - since >= ttl: destroy_node(n["id"], f"idle {int(now - since)}s"); db.kv_del("idle", n["id"])
 
 
+def _safe(v):
+    """Rendered fields never carry newlines or other control characters (config injection)."""
+    s = "" if v is None else str(v)
+    return s if s.isprintable() and "\n" not in s and "\r" not in s else None
 def _edge_nodes():
     from .. import regions as RG
+    import ipaddress as _ip
     db, _ = _db(); q = db.q; out = []
     for n in q("select id,provider,status,wg_ip,wg_pubkey,public_ip,region,last_seen from nodes where status!='destroyed' and wg_ip is not null"):
-        n = dict(n); n["region"] = n.get("region") or RG.DEFAULT
+        n = dict(n)
+        try: n["region"] = RG.canonical(n.get("region"))
+        except ValueError: continue
+        try:   # AllowedIPs only from the server-assigned address inside the WG network
+            a = _ip.ip_address(n["wg_ip"])
+            if a not in wg.NET: continue
+            n["wg_ip"] = str(a)
+        except ValueError: continue
+        if not _safe(n["id"]) or not _safe(n["status"]): continue
+        n["wg_pubkey"] = n["wg_pubkey"] if wg.valid_pubkey(n.get("wg_pubkey")) else None
+        n["public_ip"] = wg.valid_public_ip(n["public_ip"]) if n.get("public_ip") else None
+        n["fresh"] = n["status"] == "ready" and bool(n.get("last_seen")) and time.time() - n["last_seen"] <= RG.NODE_STALE
         out.append(n)
     return out
 
@@ -249,8 +291,13 @@ def edge_wireguard_config():
 def edge_routes():
     from .. import regions as RG
     q = _db()[0].q; nodes = _edge_nodes(); routes = {}
-    for a in q("select name,region,provider from apps"):
+    fresh = {n["id"]: n for n in nodes if n["fresh"]}
+    for a in q("select name,region,provider from apps where status!='destroyed'"):
         a = dict(a); r = a.get("region") or RG.DEFAULT
-        routes[a["name"]] = {"region": r, "provider": a.get("provider"),
-                             "upstreams": [n["wg_ip"] for n in nodes if n["region"] == r and n["status"] == "ready"]}
+        if a.get("provider") == "local-docker" or a["name"].startswith("pg-"):   # served on the control-plane host / private pg network
+            ups = []
+        else:   # only the nodes this app's instances actually run on, if fresh and in the app's region
+            ids = {i["node_id"] for i in q("select node_id from instances where app=? and node_id is not null and status in ('running','starting')", (a["name"],))}
+            ups = sorted(fresh[i]["wg_ip"] for i in ids if i in fresh and fresh[i]["region"] == r)
+        routes[a["name"]] = {"region": r, "provider": a.get("provider"), "upstreams": ups}
     return {"generated_only": True, "regions": sorted({n["region"] for n in nodes}), "routes": routes}

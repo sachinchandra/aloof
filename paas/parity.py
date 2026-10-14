@@ -40,6 +40,7 @@ def pg_create(account_id, name, plan="pg-dev", region=None):
     from . import regions as R
     if not PG_NAME.match(name or ""): raise ValueError("name must be 3-26 chars, lowercase letters/digits/hyphens")
     region = R.require_live(region or R.home())
+    R.check_allowed(region, engine.account_tier(account_id)[0])
     if plan not in PG_PLANS: raise ValueError(f"unknown plan; choose from {list(PG_PLANS)}")
     if q("select 1 from pg_dbs where name=?", (name,), one=True) or q("select 1 from apps where name=? and status!='destroyed'", (pg_app(name),), one=True):
         raise PermissionError("database name taken")
