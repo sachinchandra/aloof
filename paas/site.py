@@ -427,15 +427,228 @@ LEGAL = {
 <h3>Accounts</h3><ul><li>HttpOnly, SameSite session cookies; state-changing cookie requests require a CSRF header.</li><li>Single-use, expiring magic links. OAuth 2.1 with PKCE for MCP clients; tokens are scoped and revocable.</li></ul>
 <h3>Infrastructure</h3><ul><li>Compute and the control plane run on Hetzner Cloud in Nuremberg, Germany. Off-site backups are stored in Helsinki, Finland.</li><li>Payments are processed by Stripe; card data never reaches our servers.</li></ul>
 <h3>Reporting</h3><p>Email <a href="mailto:security@aloof.si">security@aloof.si</a>. Please give us reasonable time to fix an issue before disclosing it.</p>"""),
-"privacy": ("Privacy policy", """<p><b>Draft.</b> A full policy will be published before general availability.</p><p>We collect your email, billing details you provide, and operational data needed to run and bill your apps (logs, usage). Payments are handled by Stripe. We don't sell personal data.</p><p><b>Analytics.</b> On this website, the docs and the dashboard we use PostHog Cloud EU (PostHog Inc., data stored in the EU, Frankfurt) to count page views and clicks on sign-up buttons, and to see which campaign or referring site brought you here (UTM parameters and referrer). It runs without cookies: no identifier is stored on your device beyond the current browser tab, so no consent banner is shown. When you're logged in, events are linked to your account id so we can understand how the product is used. We don't send your email, app data or logs to PostHog.<p> Data is hosted in the EU. Contact: <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>"""),
-"terms": ("Terms of service", """<p><b>Draft.</b> Full terms will be published before general availability.</p><p>Don't use the service for illegal content, abuse, spam or cryptocurrency mining. Prepaid credit is consumed per second of usage; the free tier is hard-capped. Contact: <a href="mailto:legal@aloof.si">legal@aloof.si</a>.</p>
-<h2 id=billing>Billing, cancellation and refunds</h2><ul>
+"privacy": ("Privacy policy", """<p><b>Effective: 14 October 2026</b></p>
+<p>This policy explains what personal data Aloof collects, why, who we share it with, how long we keep it and what rights you have. It applies to www.aloof.si, the dashboard, the docs, the API, the CLI and the MCP server (together, the "Service"). If something here is unclear, email <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>
+
+<h2 id="who">1. Who we are</h2>
+<p>Aloof is operated by <b>Enigmatic IT Solutions FZE</b>, a company registered in the United Arab Emirates ("Aloof", "we", "us").</p>
+<p>For personal data about you as an Aloof user or website visitor (your account, billing, support requests and how you use the Service), we are the <b>controller</b>. For data that you or your end users put into the apps, databases, volumes and backups you run on Aloof, we are the <b>processor</b>: we handle it only on your instructions, and you are the controller (see section 4 and our <a href="/terms">Terms of Service</a>).</p>
+
+<h2 id="data">2. What we collect</h2>
+<h3>Data you give us</h3>
+<ul>
+<li><b>Account data:</b> your email address and, if you choose one, a password. Passwords are stored only as a salted scrypt hash.</li>
+<li><b>Billing data:</b> billing name, country, billing address details and any VAT, GST or other tax ID you add to your billing profile. Card and other payment details are entered on Stripe's pages and never reach our servers; we receive a Stripe customer ID, payment and subscription status and invoice references.</li>
+<li><b>Support and communications:</b> what you write to us by email or through support, and our replies.</li>
+<li><b>Waitlists:</b> if you join a waitlist (for example for GPUs or a new region), your email, what you signed up for, any company name or note you add, the page you came from, the time you agreed and the IP address of the request.</li>
+</ul>
+<h3>Data generated when you use the Service</h3>
+<ul>
+<li><b>Operational data:</b> apps, releases, instances, domains, volumes and databases you create; usage and metering records (compute seconds, storage, backups, egress) used to bill you; platform events and logs.</li>
+<li><b>Security and audit data:</b> session records, API key and deploy token metadata (prefix, label, created and last-used times), and an audit log of sensitive actions (for example console exec commands) that may include the IP address the request came from.</li>
+<li><b>Sign-in data:</b> single-use magic links (valid 15 minutes) and session cookies (valid up to 14 days). Session tokens, API keys and magic-link tokens are stored only as SHA-256 hashes.</li>
+<li><b>AI agent and MCP data:</b> when you connect an AI assistant through our MCP server or API, we record the OAuth client name and host, the scopes granted, and the actions the agent takes on your account, just as if you had taken them yourself.</li>
+<li><b>Sign-up attribution:</b> the campaign (UTM parameters) and referring site that brought you to Aloof, stored on your account when you sign up.</li>
+<li><b>Integrations you connect:</b> if you install our GitHub App or add registry or git credentials, the installation ID, account login, linked repositories and branches, and the credentials you provide (encrypted at rest).</li>
+</ul>
+<h3>Customer data</h3>
+<p>Your application code and images, environment variables, application logs (stdout/stderr), databases, volumes, snapshots and backups, and anything your end users send to your apps ("Customer Data"). We process Customer Data only to provide the Service to you. We don't look at it, analyse it, or use it for our own purposes, except where needed to keep the Service running, to fix a problem you ask us to help with, to enforce our Terms, or where the law requires it.</p>
+
+<h2 id="analytics">3. Analytics</h2>
+<p>On this website, the docs and the dashboard we use PostHog Cloud EU (PostHog Inc., data stored in the EU, Frankfurt) to count page views and clicks on sign-up buttons, and to see which campaign or referring site brought you here (UTM parameters and referrer). It runs without cookies: no identifier is stored on your device beyond the current browser tab, so no consent banner is shown. When you're logged in, events are linked to your account id so we can understand how the product is used. We don't send your email, app data or logs to PostHog.</p>
+<p>Our servers also send a small number of product events to PostHog EU under the same account id (for example sign-up completed, first deploy, MCP client connected, plan upgraded, waitlist joined), with only the fields needed to count them, such as the plan, amount or MCP client name.</p>
+
+<h2 id="purposes">4. Why we use your data and our legal bases</h2>
+<p>We rely on the legal bases in the EU and UK General Data Protection Regulation (GDPR) and, where it applies, the UAE Federal Decree-Law No. 45 of 2021 on the Protection of Personal Data (PDPL). Under the PDPL, the purposes below fall within the exceptions to consent for performing a contract, complying with legal obligations, and protecting our and others' legitimate interests, or rely on your consent where we ask for it.</p>
+<ul>
+<li><b>Creating and running your account and the Service</b> (sign-in, deploying and running your apps, backups, support): performance of our contract with you.</li>
+<li><b>Billing, invoicing and tax</b> (metering usage, charging cards through Stripe, issuing invoices, applying VAT/GST): performance of the contract and compliance with legal obligations (tax and accounting law).</li>
+<li><b>Security, fraud and abuse prevention</b> (audit logs, rate limits, investigating breaches of our acceptable use rules): our legitimate interest in keeping the Service and its users safe, and legal obligations where they apply.</li>
+<li><b>Service emails</b> (sign-in links, billing notices, security and service announcements): performance of the contract.</li>
+<li><b>Product analytics and attribution</b> (section 3): our legitimate interest in understanding how the Service is found and used so we can improve it. You can object at any time (section 9).</li>
+<li><b>Waitlist emails:</b> your consent, given when you join. We email you once when the item is available and for nothing else, and you can unsubscribe with the link in the email.</li>
+<li><b>Legal claims and requests from authorities:</b> legal obligations and our legitimate interest in establishing, exercising or defending legal claims.</li>
+<li><b>Customer Data:</b> processed on your instructions as your processor; your own legal basis applies.</li>
+</ul>
+<p>We don't sell personal data, we don't share it for advertising, and we don't use Customer Data to train AI models. We don't make decisions about you based solely on automated processing that have legal or similarly significant effects. The automatic pausing of apps when credit or the Free plan allowance runs out is a mechanical result of your plan and balance, and you can contact support about it.</p>
+
+<h2 id="subprocessors">5. Who we share data with (subprocessors)</h2>
+<p>We use the following service providers to run Aloof. Each one processes data only on our instructions and under a data processing agreement.</p>
+<ul>
+<li><b>Hetzner Online GmbH</b> (Germany). <b>What:</b> hosting of compute, the control plane, databases and volumes in Nuremberg, Germany, and encrypted off-site backups in Hetzner Object Storage in Helsinki, Finland. <b>Data:</b> all account, operational and Customer Data. <b>Location:</b> EU.</li>
+<li><b>Stripe</b> (Stripe Payments Europe Ltd., Ireland, and its affiliates including Stripe, Inc., USA). <b>What:</b> payments, subscriptions, invoices, the customer billing portal and tax calculation. <b>Data:</b> email, billing name, address, country, tax ID, payment details and transaction history. <b>Location:</b> EU and USA. Stripe also acts as an independent controller for some data, for example for fraud prevention and its own legal obligations; see <a href="https://stripe.com/privacy">Stripe's privacy policy</a>.</li>
+<li><b>PostHog Inc.</b> (PostHog Cloud EU). <b>What:</b> cookieless product analytics (section 3). <b>Data:</b> page views, clicks, referrer and UTM parameters, browser and device information, account id and product events. No email, app data or logs. <b>Location:</b> EU (Frankfurt, Germany).</li>
+<li><b>Our transactional email delivery provider</b>. <b>What:</b> delivering sign-in links, billing and service emails, and waitlist emails over SMTP. <b>Data:</b> your email address and the content of those emails.</li>
+</ul>
+<p>We also share data, only as far as needed, with: Let's Encrypt (Internet Security Research Group, USA), which issues TLS certificates for your app and custom domain names (certificates are published in public Certificate Transparency logs, so these domain names become public); integrations you choose to connect, such as GitHub, container registries, log drain destinations or AI assistants; our professional advisers (lawyers, accountants, auditors); a buyer or successor if Aloof is sold or reorganised, who must keep this policy's protections; and courts, regulators or law enforcement where the law requires it.</p>
+<p>We'll update this list before adding a new subprocessor that handles Customer Data. Customers who need notice of changes can ask to be notified at <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>
+
+<h2 id="transfers">6. International transfers</h2>
+<p>Our infrastructure and the data it holds (your account, operational data and Customer Data) are hosted in the European Union, in Germany and Finland, and analytics data is stored in the EU (Frankfurt).</p>
+<p>Aloof is operated from the United Arab Emirates, so personal data is accessed from the UAE by the people who run and support the Service. Some providers, such as Stripe, may also process data in the United States. The European Commission has not issued an adequacy decision for the UAE. Where personal data protected by the GDPR is transferred outside the EEA or UK, we rely on the European Commission's Standard Contractual Clauses (and the UK Addendum where relevant) or another lawful transfer mechanism, together with the safeguards in section 8. Transfers out of the UAE are made in line with the PDPL. You can ask for a copy of the safeguards we use at <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>
+
+<h2 id="retention">7. How long we keep data</h2>
+<ul>
+<li><b>Account and billing records:</b> while your account is open and for 7 years after it closes.</li>
+<li><b>Apps, databases, volumes and other Customer Data:</b> while your account is open. When it's deleted, its apps, databases, volumes, backups, API keys and sessions are removed.</li>
+<li><b>Application logs:</b> 1 day on Free, 7 days on Hobby and 30 days on Pro, then deleted automatically.</li>
+<li><b>Off-site backups:</b> encrypted copies are rotated on a 7 daily, 4 weekly and 3 monthly schedule, so deleted data can remain in backups for up to about 3 months before it is overwritten.</li>
+<li><b>Sign-in data:</b> magic links expire after 15 minutes and sessions after 14 days.</li>
+<li><b>Invoices, payment and tax records:</b> as long as tax and accounting law requires, even after the account is deleted.</li>
+<li><b>Audit and security logs:</b> 12 months.</li>
+<li><b>Waitlist entries:</b> until the item launches and we've emailed you, or until you unsubscribe, whichever is first.</li>
+<li><b>Analytics events in PostHog:</b> 12 months.</li>
+<li><b>Support emails:</b> 24 months.</li>
+</ul>
+<p>We may keep data longer where we need it to resolve a dispute, enforce our Terms or meet a legal obligation, and only for as long as that need lasts.</p>
+
+<h2 id="security">8. Security</h2>
+<p>We use technical and organisational measures to protect personal data, including: HTTPS on every public endpoint; environment variables and stored credentials encrypted at rest; passwords stored as scrypt hashes and API keys and session tokens as SHA-256 hashes; HttpOnly, SameSite session cookies with CSRF protection; single-use, expiring magic links; scoped, revocable OAuth tokens for MCP clients; each app instance isolated in its own container; nodes connected over WireGuard; and client-side AES-256-GCM encryption of off-site backups. See our <a href="/security">Security page</a> for details. No system is perfectly secure. If a personal data breach is likely to put your rights at risk, we'll notify you and the relevant authorities as the law requires. For Customer Data we'll notify you without undue delay so you can meet your own obligations.</p>
+
+<h2 id="rights">9. Your rights</h2>
+<p>Depending on where you live, you have the right to:</p>
+<ul>
+<li><b>access</b> the personal data we hold about you and get a copy;</li>
+<li><b>correct</b> inaccurate or incomplete data;</li>
+<li><b>delete</b> your data ("right to be forgotten");</li>
+<li><b>restrict</b> or <b>object</b> to processing, including processing based on our legitimate interests such as analytics;</li>
+<li><b>data portability</b>: receive data you gave us in a structured, machine-readable format;</li>
+<li><b>withdraw consent</b> at any time where we rely on it, without affecting what we did before;</li>
+<li><b>complain</b> to a data protection authority. In the EU, that's the authority where you live or work, or where you think the problem happened. In the UAE, it's the UAE Data Office.</li>
+</ul>
+<p><b>How to exercise them:</b> email <a href="mailto:privacy@aloof.si">privacy@aloof.si</a> from the email address on your account, so we can confirm it's you. You can see and export most of your data yourself through the dashboard, API and CLI, and update your billing details in Dashboard → Billing &amp; usage. To delete your account, follow <a href="/docs/billing#delete">Deleting your account</a>. We'll reply within one month (extendable by two months for complex requests, in which case we'll tell you why), and we don't charge for reasonable requests.</p>
+<p>If your request is about Customer Data in an app run by one of our customers, please contact that customer, who is the controller. We'll help them respond.</p>
+
+<h2 id="children">10. Children</h2>
+<p>Aloof is a service for developers and businesses. It isn't directed at children, and you must be at least 18 (or the age of majority where you live) to create an account. We don't knowingly collect personal data from children. If you think a child has given us personal data, contact <a href="mailto:privacy@aloof.si">privacy@aloof.si</a> and we'll delete it.</p>
+
+<h2 id="cookies">11. Cookies</h2>
+<p>We use one cookie, and it's strictly necessary: an HttpOnly, SameSite session cookie that keeps you signed in after you log in with a password or magic link, which we protect against cross-site request forgery by requiring an extra header on requests that change anything. It isn't used for tracking or advertising and doesn't need consent. Our analytics are cookieless (section 3). The analytics script keeps campaign and referrer information in your browser's session storage for the current tab only, and it is cleared when you close the tab. We don't use advertising or third-party tracking cookies. Stripe sets its own cookies on its checkout and billing portal pages, under its own policy.</p>
+
+<h2 id="changes">12. Changes to this policy</h2>
+<p>We may update this policy as the Service or the law changes. We'll change the effective date at the top, and for material changes we'll tell you by email or in the dashboard before they take effect.</p>
+
+<h2 id="contact">13. Contact</h2>
+<p>Privacy questions and requests: <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>. Legal notices: <a href="mailto:legal@aloof.si">legal@aloof.si</a>.</p>"""),
+"terms": ("Terms of service", """<p><b>Effective: 14 October 2026</b></p>
+<p>These Terms of Service ("Terms") are an agreement between you and <b>Enigmatic IT Solutions FZE</b>, a company registered in the United Arab Emirates ("Aloof", "we", "us"). They cover your use of Aloof: the website at www.aloof.si, the dashboard, docs, API, CLI, MCP server and the hosting platform behind them (together, the "Service"). Our <a href="/privacy">Privacy Policy</a> explains how we handle personal data.</p>
+
+<h2 id="acceptance">1. Accepting these Terms</h2>
+<p>By creating an account, or by using the Service, you agree to these Terms. If you use the Service for a company or other organisation, you confirm that you're authorised to accept these Terms for it, and "you" means that organisation. If you don't agree, don't use the Service.</p>
+<p>You must be at least 18 years old, or the age of majority where you live, to use the Service.</p>
+
+<h2 id="accounts">2. Your account</h2>
+<ul>
+<li>Give us a valid email address and keep your account and billing details accurate. You can sign in with a password or with a single-use magic link sent to your email.</li>
+<li>Keep your password, email account, API keys, deploy tokens and OAuth grants secure. You're responsible for everything done with your account and credentials, and for the people and tools you give access to.</li>
+<li><b>AI agents.</b> You can let AI assistants and agents use the Service through our API and MCP server, including to create an account, deploy, scale, run commands or spend credit. Anything an agent does with access you or your organisation granted is treated as your action under these Terms. You can revoke an agent's access at any time. If you build a product that lets your own users act on Aloof through an agent, you're responsible for their use as well.</li>
+<li>Tell us straight away at <a href="mailto:security@aloof.si">security@aloof.si</a> if you think your account or credentials have been compromised.</li>
+<li>One person or organisation shouldn't open multiple accounts to get around Free plan limits or the starting credit.</li>
+</ul>
+
+<h2 id="service">3. The Service</h2>
+<p>Aloof is a platform for hosting backends, APIs, workers and related services. You can deploy from a git repository or container image, attach volumes and managed Postgres databases, add custom domains, read logs and manage everything through the dashboard, CLI, API and MCP server. Compute and data are hosted on Hetzner Cloud in Nuremberg, Germany, and encrypted off-site backups are stored in Helsinki, Finland.</p>
+<p>We keep improving the Service, so features may be added, changed or removed. If we remove a feature you're paying for, or make a change that materially reduces the Service, we'll give you reasonable notice where we can. Features we describe as beta, preview or coming soon may change or stop at any time and are provided without any commitment.</p>
+
+<h2 id="aup">4. Acceptable use</h2>
+<p>You may not use the Service, or let anyone else use it, to:</p>
+<ul>
+<li>host, store or distribute illegal content, or content that infringes anyone's intellectual property, privacy or other rights;</li>
+<li>abuse others, including harassment, threats, malware, phishing, fraud, or attacks on other systems (such as denial-of-service attacks, port scanning or unauthorised access attempts);</li>
+<li>send spam or other unsolicited bulk messages;</li>
+<li>mine cryptocurrency;</li>
+<li>probe, test or break our security or isolation, access other customers' data, or interfere with the Service or its infrastructure (security research is welcome when reported to <a href="mailto:security@aloof.si">security@aloof.si</a> and done responsibly, without harming data or availability);</li>
+<li>get around usage limits, billing, metering or suspension, for example by creating accounts to get repeated free usage;</li>
+<li>resell or provide the Service itself as a hosting platform to others without our written permission (running your own products and services on Aloof for your users is fine);</li>
+<li>break any law or regulation that applies to you or to us, including sanctions and export control laws.</li>
+</ul>
+<p>We can remove content or suspend resources that break these rules (see section 7). If you notice abuse on Aloof, report it to <a href="mailto:legal@aloof.si">legal@aloof.si</a>.</p>
+
+<h2 id="customer-data">5. Your data and how we process it</h2>
+<p>"Customer Data" means your code, container images, environment variables, application logs, databases, volumes, snapshots and backups, and anything your end users send to your apps. You keep all rights to your Customer Data. You give us only the permissions we need to host, run, copy, back up, transmit and display it to provide the Service to you.</p>
+<p>You're responsible for your Customer Data and its lawfulness, for having the rights and permissions to use it, for your own end users, and for keeping your own backups of anything important. We run backups to help recover from failures, but they don't replace your own.</p>
+<h3>Data processing terms</h3>
+<p>Where Customer Data includes personal data, you are the controller (or a processor acting for your own customer), and we are your processor (or sub-processor). This section is our data processing agreement with you under Article 28 of the GDPR, and it also applies under the UAE PDPL and other data protection laws as far as they apply. We will:</p>
+<ul>
+<li><b>Follow your instructions.</b> Process Customer Data only to provide the Service, as described in these Terms and as you set it up and use it, unless the law requires otherwise (in which case we'll tell you first if the law allows).</li>
+<li><b>Keep it confidential.</b> Make sure the people we authorise to process Customer Data are bound by confidentiality.</li>
+<li><b>Keep it secure.</b> Keep appropriate technical and organisational measures in place, as described on our <a href="/security">Security page</a>.</li>
+<li><b>Use approved subprocessors.</b> You authorise the subprocessors listed in our <a href="/privacy#subprocessors">Privacy Policy</a>. We'll update that list before adding or replacing a subprocessor that handles Customer Data, and you can object at <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>. If we can't resolve a reasonable objection, you can stop using the Service, and we'll refund any prepaid credit you haven't used. We hold our subprocessors to data protection obligations at least as protective as these, and we stay responsible for them.</li>
+<li><b>Help you.</b> Help you, as far as reasonably possible, respond to requests from data subjects, carry out data protection impact assessments and meet your security and breach obligations. Most data can be managed directly through the dashboard, API and CLI.</li>
+<li><b>Tell you about breaches.</b> Notify you without undue delay after becoming aware of a personal data breach affecting your Customer Data, with the information you reasonably need.</li>
+<li><b>Delete it at the end.</b> When you delete resources or your account, delete the Customer Data in them. Encrypted backup copies roll off within our backup rotation (up to about 3 months), unless the law requires us to keep them.</li>
+<li><b>Show compliance.</b> Make available the information reasonably needed to show we meet these obligations, and allow and contribute to audits by you or an auditor you appoint, with reasonable notice, at your cost, no more than once a year unless a regulator requires it or there's been a breach, and subject to confidentiality.</li>
+<li><b>Transfer it lawfully.</b> Customer Data is hosted in the EU. Where it is accessed from or transferred outside the EEA (including from the UAE, where Aloof is operated), we'll use the European Commission's Standard Contractual Clauses or another lawful transfer mechanism.</li>
+</ul>
+<p>The subject matter of the processing is the hosting of your apps and data; it lasts for as long as you use the Service; the types of personal data and categories of data subjects are whatever you and your end users put into the Service. Our own handling of your account and billing data, as controller, is covered by our <a href="/privacy">Privacy Policy</a>. If you need a signed data processing agreement, email <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>
+<p>We may look at Customer Data only to provide or support the Service, fix a problem, keep the Service secure, enforce these Terms or comply with the law, and only as far as needed.</p>
+
+<h2 id="billing">6. Fees and billing</h2>
+<p>Each workspace is on a plan: <b>Free</b>, <b>Hobby</b> ($5 a month) or <b>Pro</b> ($20 a month). The plan fee comes back to you as included usage for that month. Usage beyond what your plan includes is paid from a prepaid credit balance that you top up by card through Stripe. Prices are in US dollars and exclude tax. VAT, GST or sales tax is added at checkout where it applies, and Stripe issues an invoice for every payment. Current prices are on our <a href="/pricing">Pricing page</a>.</p>
+<ul>
 <li>Plans (Hobby, Pro) are monthly and renew until cancelled. You can cancel at any time. A card-paid plan stays active until the end of the paid month; a balance-paid plan changes immediately. Plan fees for a partly used month aren't refunded.</li>
 <li>Usage (compute per second, storage, backups, egress) is charged as it accrues, whatever your plan, until you delete the resources.</li>
 <li>Prepaid credit doesn't expire while the account is open and is non-refundable, except where we charged you in error or decide a refund is fair after reviewing an unintended charge. The starting credit is promotional and has no cash value.</li>
 <li>Billing errors are corrected by refund or credit when reported within 60 days.</li>
-<li>Deleting your account removes its resources and forfeits remaining credit. Invoices are kept as the law requires.</li></ul>
-<p>The full policy, with how to cancel and request a refund, is in <a href="/docs/billing#cancel">Billing</a>.</p>"""),
+<li>Deleting your account removes its resources and forfeits remaining credit. Invoices are kept as the law requires.</li>
+<li>The Free plan is hard-capped and never draws on your balance: when the month's included usage is used up, your apps pause until the next month or until you upgrade. On a paid plan, when your credit runs out, your apps are suspended and resume automatically after a top-up.</li>
+<li>Card payments are processed by Stripe under Stripe's terms. You authorise us, through Stripe, to charge your payment method for subscriptions and top-ups you choose.</li>
+<li>We may change prices with at least 30 days' notice by email or in the dashboard. Changes apply from your next billing month; if you don't agree, you can cancel before then.</li>
+</ul>
+<p>The full policy, with how to cancel and request a refund, is in <a href="/docs/billing#cancel">Billing</a>.</p>
+<p>If you're a consumer, nothing in these Terms limits any mandatory rights you have under the consumer law where you live.</p>
+
+<h2 id="suspension">7. Suspension and termination</h2>
+<p><b>By you.</b> You can stop using the Service at any time. Cancel any plan, destroy resources you no longer need, and request account deletion as described in <a href="/docs/billing#delete">Deleting your account</a>.</p>
+<p><b>Suspension by us.</b> We may suspend all or part of your account or resources, without prior notice where the situation calls for it, if: you break section 4 or another important part of these Terms; your use creates a security risk or harms the Service, other customers or third parties; your payment fails or your credit runs out; we're required to by law or by an authority; or we reasonably suspect fraud. We'll limit a suspension to what's needed, tell you why where we're allowed to, and lift it once the problem is fixed.</p>
+<p><b>Termination by us.</b> We may terminate your account: immediately, if you seriously or repeatedly break these Terms or we must do so by law; or for any other reason with at least 30 days' notice. If we terminate for a reason other than your breach, we'll refund any prepaid credit you haven't used.</p>
+<p><b>What happens next.</b> When your account ends, your right to use the Service stops and your resources and Customer Data are deleted as described in section 5. Before you close an account, or during any notice period, export what you want to keep. Sections that by their nature should continue (including 5, 6 for amounts owed, 9 to 12 and 15) survive termination.</p>
+
+<h2 id="sla">8. Availability and support</h2>
+<p>We work to keep the Service available and reliable, but <b>we don't guarantee any particular uptime or performance</b>, and there are no service credits, unless we agree otherwise in writing (for example in a separate service level agreement). The Service may be interrupted for maintenance, upgrades, failures of our providers or networks, or events outside our control. Live status checks are on our <a href="/status">Status page</a>. Support is provided as described in our <a href="/docs/support">Support docs</a>.</p>
+
+<h2 id="warranties">9. Disclaimer of warranties</h2>
+<p>The Service is provided <b>"as is" and "as available"</b>. As far as the law allows, we disclaim all warranties, whether express, implied or statutory, including warranties of merchantability, fitness for a particular purpose, title, non-infringement, and that the Service will be uninterrupted, error-free or secure, or that data won't be lost. You're responsible for how you use the Service and for deciding whether it's suitable for your needs. This doesn't affect warranties or rights that can't be excluded by law.</p>
+
+<h2 id="liability">10. Limitation of liability</h2>
+<p>As far as the law allows:</p>
+<ul>
+<li>neither party is liable for any indirect, incidental, special, consequential or punitive damages, or for loss of profits, revenue, business, goodwill or data, however caused, even if told they were possible;</li>
+<li>our total liability for all claims arising from or relating to these Terms or the Service is limited to the greater of (a) the amounts you paid us in the 12 months before the event giving rise to the claim and (b) US$100.</li>
+</ul>
+<p>These limits don't apply to liability that can't be limited by law, such as for fraud, gross negligence, wilful misconduct, or death or personal injury caused by negligence, or to your payment obligations and your obligations under section 11.</p>
+
+<h2 id="indemnity">11. Indemnity</h2>
+<p>You'll defend and indemnify Aloof, its affiliates and their officers, employees and contractors against third-party claims, and the resulting losses, damages, fines and reasonable costs (including legal fees), that arise from your Customer Data, your apps or your end users, your breach of these Terms or of the law, or anything done through your account (including by AI agents you've authorised). We'll tell you promptly about any such claim, let you control the defence, and cooperate reasonably at your cost. You can't settle a claim in a way that imposes obligations on us without our written consent.</p>
+
+<h2 id="ip">12. Intellectual property</h2>
+<p>We and our licensors own the Service, including its software, design, documentation, and the Aloof name and logo. We give you a limited, non-exclusive, non-transferable right to use the Service under these Terms while your account is active. You may not copy, modify or reverse engineer the Service except as the law allows or as an open-source licence permits (section 13), and you may not use our brand in a way that suggests we endorse you without our permission.</p>
+<p>If you send us feedback or suggestions, we can use them freely, without any obligation to you.</p>
+
+<h2 id="third-party">13. Third-party services and open source</h2>
+<p>The Service works with third-party services that you may choose to use, such as GitHub, container registries, log drain destinations, DNS providers, Let's Encrypt and AI assistants. Your use of them is governed by their own terms, and we're not responsible for them. Payments are handled by Stripe under Stripe's terms.</p>
+<p>Parts of the Service, including the CLI and other tools we publish, may be available under open-source licences. Those licences govern your use of that code, and nothing in these Terms limits your rights under them. You're responsible for complying with the licences of any software, images and dependencies you deploy.</p>
+
+<h2 id="changes">14. Changes to these Terms</h2>
+<p>We may update these Terms from time to time. We'll change the effective date at the top, and for material changes we'll give you at least 30 days' notice by email or in the dashboard before they take effect, unless a change is needed sooner for legal or security reasons. If you keep using the Service after the changes take effect, you accept them. If you don't agree, stop using the Service and close your account before then.</p>
+
+<h2 id="law">15. Governing law and disputes</h2>
+<p>These Terms, and any dispute or claim arising out of or in connection with them or the Service (including non-contractual disputes), are governed by the laws of the United Arab Emirates.</p>
+<p>Before starting any formal proceedings, please contact us at <a href="mailto:legal@aloof.si">legal@aloof.si</a> so we can try to resolve the dispute informally. If it isn't resolved within 30 days, either party may bring it before the competent courts of the United Arab Emirates, which will have exclusive jurisdiction. Either party may still seek urgent interim relief in any competent court.</p>
+<p>If you're a consumer, you may also have the right to bring a claim in the courts where you live, and the mandatory consumer protection laws of your country continue to apply.</p>
+
+<h2 id="general">16. General</h2>
+<ul>
+<li><b>Entire agreement.</b> These Terms, the Privacy Policy and any policies they refer to are the whole agreement between you and us about the Service, and replace any earlier agreements on the same subject.</li>
+<li><b>Force majeure.</b> Neither party is liable for a delay or failure caused by events beyond its reasonable control, such as natural disasters, wars, power or network failures, provider outages, or government action. This doesn't excuse payment obligations.</li>
+<li><b>Assignment.</b> You can't transfer these Terms without our written consent. We may transfer them to an affiliate or as part of a merger, acquisition or sale of assets, and we'll tell you if we do.</li>
+<li><b>Severability and waiver.</b> If part of these Terms is unenforceable, the rest stays in effect. If we don't enforce a right, we haven't waived it.</li>
+<li><b>Notices.</b> We'll send notices to the email address on your account or show them in the dashboard. Send legal notices to <a href="mailto:legal@aloof.si">legal@aloof.si</a>.</li>
+<li><b>Language.</b> These Terms are written in English. If they're translated, the English version prevails, unless the law requires otherwise.</li>
+</ul>
+
+<h2 id="contact">17. Contact</h2>
+<p>Legal questions and notices: <a href="mailto:legal@aloof.si">legal@aloof.si</a>. Privacy: <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>. Security reports: <a href="mailto:security@aloof.si">security@aloof.si</a>.</p>"""),
 "status": ("Status", """<p id=st class=muted>Checking…</p><div class=scroll><table class=tbl id=stt><tr><th>Component</th><th>Status</th></tr></table></div>
 <script>(async()=>{const rows=[['API','/healthz'],['Plans','/v1/plans'],['Docs','/llms.txt']];let ok=0;for(const [n,u] of rows){let s='down';try{const t=performance.now();const r=await fetch(u);s=r.ok?'operational ('+Math.round(performance.now()-t)+' ms)':'degraded';if(r.ok)ok++}catch(e){}
 stt.insertAdjacentHTML('beforeend','<tr><td>'+n+'</td><td><span class="status '+(s.startsWith('op')?'s-running':'s-failed')+'">'+s+'</span></td></tr>')}st.textContent=ok==rows.length?'All systems operational.':'Some checks failed.';st.className=ok==rows.length?'ok':'bad'})()</script>

@@ -99,7 +99,7 @@ def test_support_doc_fixes():
     p = c.get("/docs/postgres").text; assert "aloof proxy 5432 -a pg-" in p and "max_connections" in p and "id=resize" in p and "Support will resize" in p
     assert "Support contact: pending" in c.get("/docs/support").text and "Remix" in c.get("/guides").text
 def test_terms_billing_section():
-    t = c.get("/terms").text; assert "Billing, cancellation and refunds" in t and "/docs/billing#cancel" in t
+    t = c.get("/terms").text; assert "Fees and billing" in t and "Draft" not in t and "/docs/billing#cancel" in t
     assert "$5 of prepaid credit" in c.get("/docs/quickstart").text
 def test_seo_examples_sitemap_title():
     r = c.get("/customers", follow_redirects=False); assert r.status_code == 301 and r.headers["location"] == "/examples"
@@ -117,7 +117,7 @@ def test_analytics_on_with_key(monkeypatch):
     monkeypatch.setattr(site, "posthog_key", lambda: "phc_testkey1234567890")
     h = c.get("/").text; assert "/static/analytics.js" in h and "eu.i.posthog.com" in h and 'data-cta=deploy_free' in h and "data-cta=connect_mcp" in h
     assert c.get("/v1/config").json()["posthog"]["key"] == "phc_testkey1234567890"
-    assert "PostHog Cloud EU" in c.get("/privacy").text
+    p = c.get("/privacy").text; assert "PostHog Cloud EU" in p and "Draft" not in p
 def test_client_events_no_server_duplicates():
     import os
     r = os.path.join(os.path.dirname(__file__), "..")
