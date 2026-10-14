@@ -351,3 +351,14 @@ html[data-theme=light] .hero.v5{background:radial-gradient(900px 520px at 15% 10
 a:focus-visible,.btn:focus-visible,summary:focus-visible{outline:2px solid var(--acc);outline-offset:3px;border-radius:6px}
 @media (max-width:860px){.v5-split,.flow{grid-template-columns:1fr}.flow li:after{display:none}.hero.v5{padding:72px 0}.v5s{padding:64px 0}}
 @media (prefers-reduced-motion:reduce){.hv-l,.hv-bars i{transition:none}}
+/* template logos */
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.tcard{display:flex;gap:14px;align-items:flex-start;padding:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);color:var(--fg);text-decoration:none;transition:border-color .15s,transform .15s}
+.tcard:hover{border-color:color-mix(in srgb,var(--acc) 55%,var(--line));transform:translateY(-1px)}
+.tcard h3{margin:2px 0 4px;font-size:16px;letter-spacing:-.01em;color:var(--fg)}.tcard p{margin:0;color:var(--fg2);font-size:14px;line-height:1.45}
+.tlogo{flex:none;width:44px;height:44px;border-radius:11px;display:grid;place-items:center;background:linear-gradient(160deg,color-mix(in srgb,var(--acc) 14%,var(--bg)),color-mix(in srgb,var(--acc) 4%,var(--bg)));border:1px solid color-mix(in srgb,var(--acc) 30%,var(--line))}
+.tlogo svg{width:24px;height:24px;display:block}.tlogo.sm{width:32px;height:32px;border-radius:9px}.tlogo.sm svg{width:18px;height:18px}
+.tlogo.lg{width:56px;height:56px;border-radius:14px}.tlogo.lg svg{width:30px;height:30px}
+.tlogo-mono{font:700 14px var(--mono);color:var(--acc);letter-spacing:.02em}.tlogo.sm.tlogo-mono{font-size:12px}
+.thead{display:flex;align-items:center;gap:14px}
+@media(max-width:560px){.tgrid{grid-template-columns:1fr}}

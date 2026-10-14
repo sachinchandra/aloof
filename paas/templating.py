@@ -245,14 +245,30 @@ def llms_templates():
     for t in registry().values(): lines.append(f"- [{t['name']}](https://www.aloof.si/templates/{t['id']}) (`{t['id']}`): {t['description']}")
     return "\n".join(lines) + "\n"
 
+# Template logos: committed SVGs in paas/static/logos (sources and licenses in LICENSES.md), inlined so they stay crisp.
+LOGO_DIR = os.path.join(os.path.dirname(__file__), "static", "logos")
+LOGO_COLOR = {"n8n": "#ea4b71", "uptime-kuma": "#5cdd8b", "ntfy": "#3fa58f", "pocketbase": "#b8dbe4"}
+@functools.lru_cache(maxsize=64)
+def _logo_svg(f): return re.sub(r"<title>.*?</title>", "", open(f).read().strip())
+def tpl_logo(tid, name=None, size=""):
+    """Uniform Ember tile with the project's logo; amber monogram when no logo file exists."""
+    f = os.path.join(LOGO_DIR, re.sub(r"[^a-z0-9-]", "", tid) + ".svg")
+    cls = f"tlogo {size}".strip()
+    if os.path.isfile(f):
+        svg, c = _logo_svg(f), LOGO_COLOR.get(tid, "var(--fg)")
+        return f"<span class='{cls}' style='color:{c}' aria-hidden=true>{svg}</span>"
+    words = re.split(r"[\s_-]+", (name or tid).strip()) or ["?"]
+    mono = (words[0][:1] + (words[1][:1] if len(words) > 1 else words[0][1:2])).upper() if words[0] else "?"
+    return f"<span class='{cls} tlogo-mono' aria-hidden=true>{html.escape(mono)}</span>"
+
 def _page(path, title, desc, inner):
     from . import www
     return www.render(path, title, desc, www.shell("Templates", html.escape(title), html.escape(desc), inner, narrow=True))
 
 @R.get("/templates", response_class=HTMLResponse)
 def templates_page():
-    cards = "".join(f"<a class=card href='/templates/{t['id']}'><h3>{html.escape(t['name'])}</h3><p class=muted>{html.escape(t['description'])}</p></a>" for t in registry().values())
-    return _page("/templates", "One-click templates", "Deploy open-source apps on Aloof in one click. Machine-readable: /v1/templates.", f"<div class=grid3>{cards}</div>")
+    cards = "".join(f"<a class=tcard href='/templates/{t['id']}'>{tpl_logo(t['id'], t['name'])}<div><h3>{html.escape(t['name'])}</h3><p>{html.escape(t['description'])}</p></div></a>" for t in registry().values())
+    return _page("/templates", "One-click templates", "Deploy open-source apps on Aloof in one click. Machine-readable: /v1/templates.", f"<div class=tgrid>{cards}</div>")
 
 @R.get("/templates/{tid}", response_class=HTMLResponse)
 def template_page(tid: str):
@@ -262,7 +278,7 @@ def template_page(tid: str):
     envs = "".join(f"<li><code>{e(x['name'])}</code> · {e(x['kind'])}{' · ' + e(x['description']) if x['description'] else ''}</li>" for x in p["env"]) or "<li>none</li>"
     vols = "".join(f"<li>{e(v['size_gb'])} GB at <code>{e(v['path'])}</code></li>" for v in p["volumes"]) or "<li>none</li>"
     src = p["source"].get("image") or p["source"].get("repo")
-    inner = (f"<p><a class='btn' href='{e(p['deploy_button'])}'>Deploy on Aloof</a></p><h2>What gets created</h2><ul><li>App from <code>{e(src)}</code> on port {p['port']}, plan <code>{e(p['default_plan'])}</code>, region {e(p['region'])}</li>"
+    inner = (f"<p class=thead>{tpl_logo(p['id'], p['name'], 'lg')}<a class='btn' href='{e(p['deploy_button'])}'>Deploy on Aloof</a></p><h2>What gets created</h2><ul><li>App from <code>{e(src)}</code> on port {p['port']}, plan <code>{e(p['default_plan'])}</code>, region {e(p['region'])}</li>"
              f"{'<li>Managed Postgres (' + e(p['postgres']['plan']) + '), connection in <code>' + e(', '.join(p['postgres']['env'])) + '</code></li>' if p['postgres'] else ''}</ul>"
              f"<h3>Environment</h3><ul>{envs}</ul><h3>Volumes</h3><ul>{vols}</ul>"
              f"<h3>CLI / API / MCP</h3><pre>aloof deploy --template {e(p['id'])} &lt;app-name&gt;\ncurl -X POST https://api.aloof.si/v1/templates/{e(p['id'])}/deploy -H 'Authorization: Bearer $ALOOF_API_KEY' -d '{{\"name\":\"my-{e(p['id'])}\"}}'\nMCP: deploy_template(template=\"{e(p['id'])}\", name=...)</pre>"

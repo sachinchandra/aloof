@@ -38,7 +38,7 @@ def head(title, desc):
 <meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
 <link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
-<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=19">{THEME_JS}</head>"""
+<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=20">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a></nav>
@@ -165,8 +165,6 @@ def _selfdriving_doc():
 <p>More on the <a href="/security">security page</a>. Found an issue? Email <a href="mailto:security@aloof.si">security@aloof.si</a>.</p>
 <h2 id=soon>Coming soon</h2><p>Not live yet: predictive scaling, auto right-sizing, AI auto-fix, GPUs (<a href="/pricing#gpus">waitlist</a>) and more regions.</p>
 <h2 id=faq>FAQ</h2>{faqh}"""
-TPL_ICON = {"n8n": ("n8n", "#ea4b71"), "uptime-kuma": ("UK", "#5cdd8b"), "umami": ("U", "#e8e8e8"), "vaultwarden": ("VW", "#175ddc"),
-            "ntfy": ("nt", "#3a9784"), "pocketbase": ("PB", "#b8dbe4"), "linkding": ("ld", "#5856e0")}
 TPL_NAME = {"n8n": "n8n", "uptime-kuma": "Uptime Kuma", "umami": "Umami", "vaultwarden": "Vaultwarden", "ntfy": "ntfy", "pocketbase": "PocketBase", "linkding": "linkding"}
 HERO_JS = """<script>(function(){var t=document.getElementById('hv');if(!t)return;var L=[].slice.call(t.querySelectorAll('[data-s]')),c=document.getElementById('hv-chart');
 var R=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -191,7 +189,8 @@ def landing(brand, base, api, mcp):
         ("shield", "Self-healing deploys", "Bad release? It rolls back on its own."),
         ("globe", "Smart load balancing", "Traffic avoids failing instances automatically."),
         ("scale", "Scales to zero", "Busy, it scales up. Idle, you pay nothing.")))
-    tpl = "".join(f"<a class=tpl href='/templates/{t}' aria-label='{TPL_NAME.get(t, t)} template'><span class=mono style='--c:{TPL_ICON.get(t, (t[:2], '#888'))[1]}' aria-hidden=true>{TPL_ICON.get(t, (t[:2], ''))[0]}</span>{TPL_NAME.get(t, t)}</a>" for t in d["templates"])
+    from .templating import tpl_logo
+    tpl = "".join(f"<a class=tpl href='/templates/{t}' aria-label='{TPL_NAME.get(t, t)} template'>{tpl_logo(t, TPL_NAME.get(t, t), 'sm')}{TPL_NAME.get(t, t)}</a>" for t in d["templates"])
     price = lambda k, name, sub: f"<a class='card pc{' hl' if k == 'hobby' else ''}' href='/pricing'><span>{name}</span><b>${T[k]['fee_usd']:g}<small>/mo</small></b><em>{sub}</em></a>"
     faq4 = [x for x in _faq_full() if x[0].startswith(("What does", "Will automatic", "Can an AI", "Where does"))]
     faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq4)
