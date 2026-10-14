@@ -532,6 +532,10 @@ def node_bootstrap(node: str, token: str):
     n = q("select * from nodes where id=?", (node,), one=True)
     if not n: raise HTTPException(404, "unknown node")
     return bootstrap.render(node, n["provider"], n["plan"], token, bool(n["gpus"]))
+@app.get("/v1/admin/autoscaler", dependencies=[Depends(admin)])
+def admin_autoscaler(limit: int = 200):
+    """Autoscaler config, managed nodes per region, estimated monthly spend and the latest decisions (incl. refusals)."""
+    from . import autoscaler; return autoscaler.view(max(1, min(limit, 1000)))
 @app.get("/v1/admin/nodes", dependencies=[Depends(admin)])
 def admin_nodes(): return q("select id,provider,provider_ref,status,region,public_ip,wg_ip,vcpu,mem_mb,gpus,gpu_model,plan,created,last_seen,error from nodes order by created desc")
 @app.get("/v1/admin/edge/wireguard", dependencies=[Depends(admin)], response_class=PlainTextResponse)

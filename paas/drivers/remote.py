@@ -169,7 +169,8 @@ def place(pool, plan_id, app, spec):
             if best is None or cpu > best[1]: best = (n, cpu)
         if best: return best[0]
         if pinned: raise ProvisionError(f"volume node {pinned.pop()} has no capacity or is offline")
-        node_id = provision(pool, plan_id, region)
+        from .. import autoscaler
+        node_id = autoscaler.scale_up(pool, plan_id, region, reason=f"no capacity for {app} ({plan_id})", key=f"{app}:{region}") if autoscaler.manages(pool) else provision(pool, plan_id, region)
     return wait_ready(node_id)
 def _nets(spec):
     """Private networks on the node: <app>.internal resolves between one account's apps placed on the same node."""
@@ -187,6 +188,7 @@ class RemoteDriver(Driver):
         region = R.canonical(region)
         if any(R.canonical(n.get("region")) == region for n in db.q("select region from nodes where provider=? and status='ready'", (self.name,))):
             return True, f"ready nodes in {region}"
+        if self.name == "vultr" and R.provider_for(region) != "vultr": return False, f"region {region} is configured for {R.provider_for(region)}, not vultr"
         if region not in provision_regions(): return False, f"no ready node in {region} and auto-provisioning is off there"
         if self.prov.regions and region not in self.prov.regions and "any" not in self.prov.regions: return False, f"pool has no {region} location"
         return self.prov.available()
@@ -264,6 +266,8 @@ def node_tick():
                 db.q("update nodes set status='lost' where id=?", (n["id"],)); db.event(f"node:{n['id']}", "lost (no heartbeat 5 min)")
             continue
         if n["provider"] == "self-hosted": continue
+        from .. import autoscaler
+        if autoscaler.manages(n["provider"]): continue   # the autoscaler drains and scales these down (with its guardrails)
         cnt, _, _ = node_load(n["id"])
         if cnt: db.kv_del("idle", n["id"]); continue
         since = float(db.kv_get("idle", n["id"]) or now)

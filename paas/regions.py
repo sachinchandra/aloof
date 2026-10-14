@@ -20,6 +20,16 @@ ALIASES = {"eu-de": "nbg1", "eu-central": "nbg1", "local": "nbg1", "nuremberg": 
 # Provider id per region (machine-readable; nodes carry their own pool/provider too). US/SG: OVHcloud VPS-4, not yet contracted.
 PROVIDER = {"nbg1": "hetzner", "fsn1": "hetzner", "hel1": "hetzner", "us-east": "ovh", "us-west": "ovh", "sg": "ovh"}
 # Optional per-region egress policy. None = no cap. SG VPS throttles after 3 TB/month per node.
+VULTR_LOCATIONS = {"us-east": "ewr", "us-west": "sjc", "sg": "sgp"}   # Vultr New Jersey / Silicon Valley / Singapore
+def provider_for(region):
+    """Provider configured for a region. Default PROVIDER (OVH planned for US/SG); override per region with
+    PAAS_REGION_PROVIDER_<REGION>=vultr (e.g. PAAS_REGION_PROVIDER_US_EAST=vultr)."""
+    r = canonical(region)
+    return (os.environ.get(f"PAAS_REGION_PROVIDER_{r.upper().replace('-', '_')}") or PROVIDER[r]).strip().lower()
+def provider_label(region):
+    r = canonical(region); p = provider_for(r)
+    if p == "vultr": return f"Vultr ({VULTR_LOCATIONS.get(r, '?')})"
+    return CATALOG[r]["provider"]
 EGRESS = {"sg": {"cap_tb_month": 3, "over_cap": "throttled", "overage_usd_gb": None}}
 DEFAULT = "nbg1"
 NODE_STALE = 300   # a node unseen for 5 min is not healthy (node_tick marks it 'lost' at the same threshold)
@@ -50,7 +60,7 @@ def status(now=None):
         nodes = h.get(rid, 0); local = rid == hm and local_capacity()
         live = bool(nodes or local)
         out.append({"id": rid, "name": f"{c['city']}, {c['country']}", "city": c["city"], "country": c["country"], "country_code": c["cc"], "area": c["area"],
-                    "provider": c["provider"], "provider_id": PROVIDER[rid], "egress": EGRESS.get(rid), "status": "live" if live else "coming_soon", "live": live, "healthy_nodes": nodes,
+                    "provider": provider_label(rid), "provider_id": provider_for(rid), "egress": EGRESS.get(rid), "status": "live" if live else "coming_soon", "live": live, "healthy_nodes": nodes,
                     "control_plane": rid == hm, "aliases": sorted(a for a, t in ALIASES.items() if t == rid)})
     return out
 def live_ids(now=None): return [r["id"] for r in status(now) if r["live"]]
@@ -119,7 +129,7 @@ def region_prices(region):
         out[k] = round(p["price_usd_month"] * multiplier(r, plan_class(p)), 2)
     um = multiplier(r, "usage")
     return {"region": r, "multipliers": REGION_PRICING[_area(r)], "draft": PRICING_DRAFT and _area(r) != "eu",
-            "allowed": REGION_ALLOWED[_area(r)], "provider": PROVIDER[r], "egress": EGRESS.get(r), "plans_usd_month": out,
+            "allowed": REGION_ALLOWED[_area(r)], "provider": provider_for(r), "egress": EGRESS.get(r), "plans_usd_month": out,
             "rates": {k: round(v * um, 4) for k, v in RATES.items()}}
 
 

@@ -7,6 +7,7 @@ Endpoints follow the providers' public docs/SDKs (checked Oct 2026):
               search_instances, delete_instance_async (x-region header); IAM /iam/v1/signInAsRootUser
   AWS EC2 ap-south-1 spot (boto3 RunInstances InstanceMarketOptions=spot, AMI via SSM public parameters)
   Hetzner Cloud  https://docs.hetzner.cloud  (POST/GET/DELETE /v1/servers, /v1/firewalls; Bearer HCLOUD_TOKEN; user_data = cloud-init)
+  Vultr          https://www.vultr.com/api/  (POST/GET/DELETE /v2/instances, GET /v2/plans; Bearer VULTR_API_KEY; user_data = base64 cloud-init)
   Hyperstack     https://docs.hyperstack.cloud  (infrahub-api.nexgencloud.com/v1/core/virtual-machines; header api_key)"""
 import os, time, base64, json, threading, logging, httpx
 from ..plans import PLANS
@@ -255,6 +256,73 @@ class HetznerCPXProvisioner(HetznerProvisioner):
     """Fallback when the CX line can't be ordered: CPX42 (8 vCPU / 16 GB AMD). Its cost is ~4x CX43, so the margin floor
     refuses the shared plans here; only plans that still clear 30% get scheduled."""
     name = "hetzner-cpx"; DEFAULT_SIZES = {"cpu-node": "cpx42"}
+# ---------------- Vultr (US/SG candidate; enabled per region via PAAS_REGION_PROVIDER_<REGION>=vultr) ----------------
+class VultrProvisioner(Provisioner):
+    """CPU nodes on Vultr Cloud Compute. Regions map ewr->us-east, sjc->us-west, sgp->sg. Every instance is tagged `aloof` and
+    labelled `aloof-<node id>` so reconcile can find orphans. Optional VULTR_FIREWALL_GROUP_ID (allow nothing inbound but ICMP;
+    the agent dials out over WireGuard to the Nuremberg hub)."""
+    name = "vultr"; supports_gpu = False; env = ["VULTR_API_KEY"]; TAG = "aloof"
+    regions = ["us-east", "us-west", "sg"]
+    LOCATIONS = {"us-east": "ewr", "us-west": "sjc", "sg": "sgp"}   # same as regions.VULTR_LOCATIONS
+    docs = "https://www.vultr.com/api/#tag/instances/operation/create-instance"
+    DEFAULT_SIZES = {"cpu-node": "vc2-4c-8gb"}   # 4 vCPU / 8 GB, $40/mo; PAAS_VULTR_PLAN_CPU_NODE / PAAS_VULTR_PLAN_<PLAN> override
+    OS_UBUNTU_2404 = 2284
+    base = property(lambda s: E("VULTR_API_BASE", "https://api.vultr.com/v2"))
+    _prices = {}
+    def _h(self): return {"Authorization": f"Bearer {E('VULTR_API_KEY')}", "Content-Type": "application/json"}
+    def node_size(self, plan_id):
+        return E("PAAS_VULTR_PLAN_CPU_NODE") or (super().node_size(plan_id) if plan_id in PLANS else self.DEFAULT_SIZES["cpu-node"])
+    def location(self, region):
+        loc = E(f"VULTR_REGION_{(region or '').upper().replace('-', '_')}") or self.LOCATIONS.get(region)
+        if not loc: raise ProvisionError(f"vultr: no location for region {region}")
+        return loc
+    def body(self, node_id, size, region, script):
+        b = {"region": self.location(region), "plan": size, "os_id": int(E("VULTR_OS_ID", str(self.OS_UBUNTU_2404))),
+             "label": f"aloof-{node_id}", "hostname": f"aloof-{node_id}", "tags": [self.TAG, f"aloof-node:{node_id}"],
+             "user_data": base64.b64encode(script.encode()).decode(), "backups": "disabled", "enable_ipv6": True, "activation_email": False}
+        if E("VULTR_FIREWALL_GROUP_ID"): b["firewall_group_id"] = E("VULTR_FIREWALL_GROUP_ID")
+        if E("VULTR_SSH_KEY_ID"): b["sshkey_id"] = [E("VULTR_SSH_KEY_ID")]
+        return b
+    def find(self, node_id):
+        """Idempotency: an instance already created for this node id (a retried create must not buy a second one)."""
+        for i in self.list_tagged():
+            if i.get("label") == f"aloof-{node_id}": return i
+        return None
+    def create(self, node_id, plan_id, script, gpu, region=None):
+        if gpu: raise ProvisionError("vultr: GPU nodes not supported here")
+        region = region or "us-east"
+        ex = self.find(node_id)
+        if ex: return str(ex["id"])
+        with self.http() as c:
+            d = _raise(c.post(f"{self.base}/instances", headers=self._h(), json=self.body(node_id, self.node_size(plan_id), region, script)), "vultr create instance")
+        return str(d["instance"]["id"])
+    def status(self, ref):
+        with self.http() as c: r = c.get(f"{self.base}/instances/{ref}", headers=self._h())
+        if r.status_code == 404: return {"state": "gone"}
+        i = _raise(r, "vultr get instance")["instance"]
+        st, ps = i.get("status"), i.get("power_status")
+        ip = i.get("main_ip") if i.get("main_ip") not in (None, "", "0.0.0.0") else None
+        state = "running" if st == "active" and ps == "running" else "provisioning" if st in ("pending", "active") else "failed"
+        return {"state": state, "public_ip": ip, "raw_status": f"{st}/{ps}/{i.get('server_status')}"}
+    def destroy(self, ref):
+        with self.http() as c: r = c.delete(f"{self.base}/instances/{ref}", headers=self._h())
+        if r.status_code not in (200, 202, 204, 404): _raise(r, "vultr delete instance")
+    def list_tagged(self):
+        out, cursor = [], ""
+        with self.http() as c:
+            for _ in range(20):
+                d = _raise(c.get(f"{self.base}/instances", headers=self._h(), params={"tag": self.TAG, "per_page": 100, **({"cursor": cursor} if cursor else {})}), "vultr list instances")
+                out += d.get("instances", []); cursor = ((d.get("meta") or {}).get("links") or {}).get("next") or ""
+                if not cursor: break
+        return [i for i in out if self.TAG in (i.get("tags") or [])]
+    def hourly_usd(self, size):
+        """Hourly price of a Vultr plan (cached); used by the autoscaler's monthly spend cap."""
+        if size not in self._prices:
+            with self.http() as c:
+                d = _raise(c.get(f"{self.base}/plans", headers=self._h(), params={"per_page": 500}), "vultr plans")
+            for p in d.get("plans", []): self._prices[p["id"]] = float(p.get("hourly_cost") or (p.get("monthly_cost", 0) / 730))
+        if size not in self._prices: raise ProvisionError(f"vultr: unknown plan {size}")
+        return self._prices[size]
 # ---------------- Hyperstack (phase 2 GPU VMs; behind PAAS_GPU_ENABLED) ----------------
 class HyperstackProvisioner(Provisioner):
     name = "hyperstack"; supports_gpu = True; env = ["HYPERSTACK_API_KEY", "HYPERSTACK_ENVIRONMENT"]; regions = ["ca-mtl", "eu-no", "us"]
@@ -294,4 +362,4 @@ class SelfHostedProvisioner(Provisioner):
     def create(self, *a): raise ProvisionError("self-hosted pool cannot auto-provision; add a node with POST /v1/admin/nodes")
     def status(self, ref): return {"state": "running"}
     def destroy(self, ref): pass
-PROVISIONERS = {p.name: p for p in (HetznerProvisioner(), HetznerCPXProvisioner(), HyperstackProvisioner(), E2EProvisioner(), JarvislabsProvisioner(), KrutrimProvisioner(), AWSSpotProvisioner(), SelfHostedProvisioner())}
+PROVISIONERS = {p.name: p for p in (HetznerProvisioner(), HetznerCPXProvisioner(), VultrProvisioner(), HyperstackProvisioner(), E2EProvisioner(), JarvislabsProvisioner(), KrutrimProvisioner(), AWSSpotProvisioner(), SelfHostedProvisioner())}

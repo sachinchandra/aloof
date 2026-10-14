@@ -12,7 +12,7 @@ E = lambda k, d: os.environ.get(k, d)
 CURRENCY = "USD"
 COST_USD_INR = float(E("PAAS_COST_USD_INR", "83"))     # worst-case FX for costs
 USD_INR = float(E("PAAS_USD_INR", "88"))               # only for legacy INR conversions (Razorpay, v3->v4 migration)
-CPU_POOLS = [p for p in E("PAAS_CPU_POOLS", "hetzner,hetzner-cpx,e2e").split(",") if p]   # tried in order; floor refuses under-margin pools
+CPU_POOLS = [p for p in E("PAAS_CPU_POOLS", "hetzner,hetzner-cpx,e2e,vultr").split(",") if p]   # tried in order; floor refuses under-margin pools
 GPU_ENABLED = E("PAAS_GPU_ENABLED", "0") == "1"
 GPU_UNLOCK_PAID_CUSTOMERS = int(E("PAAS_GPU_UNLOCK_PAID_CUSTOMERS", "10"))
 def gpu_status():
@@ -90,6 +90,7 @@ HETZNER_BUFFER = 1.10   # EUR/USD swings, billing rounding; list prices from doc
 CPU_HOSTS = {
   "hetzner":             {"usd_hr": (18.49 + 0.60) * HETZNER_BUFFER / 720, "vcpu": 8, "mem_gb": 16, "src": "Hetzner CX43 8 vCPU/16GB $18.49/mo + IPv4, x1.1"},
   "hetzner-cpx":         {"usd_hr": (81.99 + 0.60) * HETZNER_BUFFER / 720, "vcpu": 8, "mem_gb": 16, "src": "Hetzner CPX42 8 vCPU/16GB $81.99/mo + IPv4, x1.1 (fallback)"},
+  "vultr":               {"usd_hr": 40.0 * 1.1 / 720, "vcpu": 4, "mem_gb": 8, "src": "Vultr vc2-4c-8gb 4 vCPU/8GB $40/mo (ewr/sjc/sgp), x1.1"},
   "e2e":                 {"inr_hr": 2.25 * COST_BUFFER, "vcpu": 4, "mem_gb": 12, "src": "E2E C2 4vCPU/12GB ₹2.25/hr x1.5 buffer"},
   "krutrim":             {"inr_hr": 13.0, "vcpu": 4, "mem_gb": 16, "src": "Krutrim 4vCPU/16GB ₹13/hr"},
   "aws-ap-south-1-spot": {"usd_hr": 0.1504 * 1.1, "vcpu": 4, "mem_gb": 16, "src": "t3a.xlarge on-demand $0.1504/hr +10%"},

@@ -106,6 +106,11 @@ update pg_dbs set region='nbg1' where region is null;
 update nodes set region='nbg1' where region is null;
 create unique index if not exists nodes_wg_pubkey_live on nodes(wg_pubkey) where wg_pubkey is not null and status!='destroyed';
 """)
+    # v11: autoscaler decision log (multi-region uses v10)
+    ,(11, """
+create table if not exists autoscale_events(id AUTOPK, ts REAL, action TEXT, pool TEXT, region TEXT, node_id TEXT, reason TEXT, detail TEXT);
+create index if not exists autoscale_events_ts on autoscale_events(ts);
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
