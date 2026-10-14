@@ -81,10 +81,6 @@ create index if not exists cron_runs_app on cron_runs(app, id);
     ,(7, """
 alter table accounts add column is_admin int default 0;
 alter table accounts add column is_test int default 0;
-alter table accounts add column signup_attribution TEXT;
-alter table accounts add column lowbal_alerts int default 1;
-alter table accounts add column lowbal_threshold_usd REAL;
-alter table accounts add column lowbal_sent TEXT default '';
 alter table sessions add column mfa_verified int default 0;
 create table if not exists status_checks(id AUTOPK, ts REAL, component TEXT, ok int, ms REAL, code int, error TEXT);
 create index if not exists status_checks_c on status_checks(component, ts);
@@ -109,6 +105,14 @@ update pg_dbs set region='nbg1' where region is null;
 update nodes set region='nbg1' where region is null;
 create unique index if not exists nodes_wg_pubkey_live on nodes(wg_pubkey) where wg_pubkey is not null and status!='destroyed';
 """)
+    # v11: signup attribution (first-touch UTM/referrer) and low-balance alert state/settings
+    ,(11, """
+alter table accounts add column signup_attribution TEXT;
+alter table accounts add column lowbal_alerts int default 1;
+alter table accounts add column lowbal_threshold_usd REAL;
+alter table accounts add column lowbal_sent TEXT default '';
+""")
+
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
