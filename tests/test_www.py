@@ -105,7 +105,7 @@ def test_seo_examples_sitemap_title():
     r = c.get("/customers", follow_redirects=False); assert r.status_code == 301 and r.headers["location"] == "/examples"
     sm = c.get("/sitemap.xml").text; assert "/login<" not in sm and "/examples<" in sm and "/customers" not in sm
     import re as _r; assert _r.findall(r"<lastmod>(\d{4}-\d\d-\d\d)</lastmod>", sm)
-    h = c.get("/").text; assert "<title>Aloof: EU backend hosting, scale to zero, deploy via MCP</title>" in h and "superintelligence" in h
+    h = c.get("/").text; assert "<title>Aloof: the self-driving cloud for your backends</title>" in h and "superintelligence" in h
     d = c.get("/docs").text; assert 'content="Aloof documentation: quickstart' in d
 def test_analytics_off_without_key(monkeypatch):
     monkeypatch.delenv("POSTHOG_KEY", raising=False)
@@ -126,7 +126,7 @@ def test_client_events_no_server_duplicates():
     assert "aloofIdentify(String(me.id))" in js and "auth/magic',{{method:'POST'" in js and js.count("attribution:window.aloofAttribution") == 2
 def test_hero_and_footer_copy():
     h = c.get("/").text
-    assert "Backends your AI can deploy and run on its own. Idle apps cost nothing, busy ones scale up." in h and "They run in the EU" not in h
+    assert "Aloof is the self-driving cloud for your backends." in h and "They run in the EU" not in h
     for pth in ("/", "/pricing", "/docs", "/examples", "/terms"): assert "The cloud for apps your AI ships." in c.get(pth).text, pth
 def test_llms_txt_tools_and_copy():
     import re, os
@@ -139,3 +139,11 @@ def test_llms_txt_tools_and_copy():
     assert f"Tools ({len(names)}" in t and ", ".join(names) in t and ", ".join(names) in c.get("/docs/mcp").text
     for bad in ("fly.io", "Fly.io", "Render", "Railway", "Heroku", "per workspace", "/workspace", "Unlimited seats", "for teams"): assert bad not in t, bad
     assert "$20/mo for 1 user" in t and "/v1/templates" in t and "/v1/billing/runway" in t and "/v1/regions" in t and "coming_soon" in t
+def test_landing_v4_numbers_from_code():
+    from paas import selfheal, lb, engine, site
+    h = c.get("/").text; sh, l = selfheal.cfg(), lb.cfg()
+    assert f"For {int(sh['window_s']//60)} minutes after every deploy" in h and f"at least {sh['min_requests']} requests" in h and f"from at least {sh['min_ips']} IPs" in h
+    assert f"backing off up to {int(l['cooldown_max_s']//60)} minutes" in h and f"take an instance out for {int(l['cooldown_s'])} seconds" in h
+    assert f"last {engine.RELEASE_KEEP} releases" in h and f"{len(site.mcp_tool_names())} MCP tools" in h
+    assert h.count("Coming soon") >= 5 and "PLACEHOLDER" not in h and "babysitting" in h
+    for comp in ("Fly", "Render", "Railway", "Heroku"): assert comp not in h

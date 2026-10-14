@@ -38,7 +38,7 @@ def head(title, desc):
 <meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
 <link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
-<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=17">{THEME_JS}</head>"""
+<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=18">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a></nav>
@@ -126,44 +126,72 @@ def landing(brand, base, api, mcp):
     cpu = [k for k, p in PLANS.items() if p["kind"] == "cpu" and not p["legacy"] and p["cpu_class"] == "shared"]
     pcards = "".join(f"<div class='card reveal'><h3><code>{k}</code></h3><div class=price>{_money(PLANS[k]['price_usd_month'])}<small>/mo</small></div><p>{PLANS[k]['vcpu']:g} shared vCPU · {_gb(PLANS[k]['memory_mb'])} GB RAM · per second</p></div>" for k in cpu[:4])
     T = TIERS; p0 = PLANS["shared-1x-256mb"]["price_usd_month"]
-    faq = [("Where does my code run?", "On Hetzner Cloud in Nuremberg, Germany. The control plane runs there too, and encrypted off-site backups are stored in Helsinki, Finland."),
+    from . import selfheal as _sh, lb as _lb, engine as _eng
+    sh, lbc = _sh.cfg(), _lb.cfg(); ntools = len(mcp_tool_names())
+    tdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+    tpls = sorted(f[:-5] for f in os.listdir(tdir) if f.endswith(".toml")) if os.path.isdir(tdir) else []
+    order = ["uptime-kuma", "n8n", "umami", "vaultwarden", "ntfy", "pocketbase", "linkding"]
+    tpls = [t for t in order if t in tpls] + [t for t in tpls if t not in order]
+    tlist = ", ".join(tpls[:-1]) + (" or " + tpls[-1] if len(tpls) > 1 else "".join(tpls))
+    win_min = int(sh["window_s"] // 60); cd0, cdmax = int(lbc["cooldown_s"]), int(lbc["cooldown_max_s"])
+    ex = 'double' if sh['err_x'] == 2 else f"{sh['err_x']:g}×"; px = 'double' if sh['p95_x'] == 2 else f"{sh['p95_x']:g}×"
+    cdmax_t = f"{cdmax // 60} minutes" if cdmax % 60 == 0 else f"{cdmax} seconds"
+    fine = f"a rollback needs at least {sh['min_requests']} requests and at least {sh['min_bad']} bad requests from at least {sh['min_ips']} IPs, so low-traffic apps aren't covered."
+    faq = [("What does “self-driving” mean today?", "Aloof rolls back deploys that raise errors or latency, replaces instances that fail health checks, routes traffic away from failing instances and autoscales, all without you stepping in. Predictive scaling, auto right-sizing and AI auto-fix are coming soon and not live yet."),
+           ("Will automatic rollback cover my app?", f"Only if it gets enough traffic in the {win_min} minutes after a deploy: at least {sh['min_requests']} requests, with at least {sh['min_bad']} bad requests from at least {sh['min_ips']} IPs. Low-traffic apps aren't covered, but health-gated deploys and one-command rollback still are. You can turn automatic rollback off per app."),
+           ("Does <code>diagnose_app</code> send my data to an AI model?", "No. It's a read-only MCP tool that applies rules to your app's recent errors, health checks, deploys, rollbacks, restarts and exit codes, and redacts secrets. Your own assistant reads the result and explains it."),
+           ("Can an AI agent deploy for me safely?", "Yes. Agents use OAuth 2.1 with PKCE and get scoped tokens that you can revoke at any time."),
            ("What can I deploy?", "Any Docker image, or a git repo with a Dockerfile. This covers Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP and static sites."),
            ("How does scale-to-zero affect latency?", "Idle apps sleep and wake on the next request in about a second."),
            ("How are secrets handled?", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes."),
-           ("Can an AI agent deploy for me safely?", "Yes. Agents use OAuth 2.1 with PKCE and get scoped tokens that you can revoke at any time."),
-           ("Do you support GPUs?", "GPUs are coming soon: L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist</a>." if not _plans.GPU_ENABLED else "Yes: L4, L40, A100 80GB and H100 on dedicated nodes, billed per second. See <a href='/pricing#gpus'>GPU pricing</a>.")]
+           ("Where does my code run?", "On Hetzner Cloud in Nuremberg, Germany. The control plane runs there too, and encrypted off-site backups are stored in Helsinki, Finland. More regions are coming soon."),
+           ("Do you support GPUs?", "Not yet. GPUs are coming soon: L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist</a>." if not _plans.GPU_ENABLED else "Yes: L4, L40, A100 80GB and H100 on dedicated nodes, billed per second. See <a href='/pricing#gpus'>GPU pricing</a>.")]
     faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq)
     tier = lambda k, name, who: f"<div class='card reveal{' hl' if k == 'pro' else ''}'><h3>{name}</h3><div class=price>${T[k]['fee_usd']}<small>/mo</small></div><p>{'Includes $' + str(T[k]['included_usage_usd']) + '/month of usage.' if k == 'free' else 'Includes $' + str(T[k]['included_usage_usd']) + ' of usage.'} {who}</p></div>"
+    pc4 = "".join(f"<div class='card reveal'><h3><code>{k}</code></h3><div class=price>{_money(PLANS[k]['price_usd_month'])}<small>/mo</small></div><p>{PLANS[k]['vcpu']:g} shared vCPU · {_gb(PLANS[k]['memory_mb'])} GB RAM · per second</p></div>" for k in cpu[:4])
+    soon = [("Predictive scaling", "Scale up before the traffic arrives."), ("Auto right-sizing", "Instance sizes that adjust to what your app actually uses."),
+            ("AI auto-fix", "Go from diagnosis to a proposed fix."), ("GPUs", "L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist →</a>"),
+            ("More regions", "More places to run your apps.")]
+    soonh = "".join(f"<div class='card reveal soon'><span class=tag>Coming soon</span><h3>{a}</h3><p>{b}</p></div>" for a, b in soon if not (a == "GPUs" and _plans.GPU_ENABLED))
     body = f"""<section class=hero><div class=wrap><div>
+<div class=eyebrow>The self-driving cloud</div>
 <h1>Infrastructure for the age of <span class=grad>superintelligence.</span></h1>
-<p class=lead>Backends your AI can deploy and run on its own. Idle apps cost nothing, busy ones scale up.</p>
+<p class=lead>Aloof is the self-driving cloud for your backends. It rolls back bad deploys, routes around failing instances and scales itself, so you don't have to watch it. When something breaks, ask Claude, ChatGPT or Cursor why.</p>
 <div class=cta><a class="btn pri" href="/login#register" data-cta=deploy_free data-cta-loc=hero>Deploy free</a><a class="btn ghost" href="/docs/mcp" data-cta=connect_mcp data-cta-loc=hero>Connect your AI assistant (MCP)</a></div>
-<div class=trust><span>{svg("lock")} TLS on every app</span><span>{svg("key")} Secrets encrypted at rest</span><span>{svg("eu")} EU hosting</span><span>{svg("bolt")} Per-second billing in USD</span></div></div>
+<div class=trust><span>{svg("shield")} Automatic rollback</span><span>{svg("bolt")} Zero-downtime deploys</span><span>{svg("scale")} Scale to zero</span><span>{svg("card")} Per-second billing in USD</span></div></div>
 {_term(base)}</div></section>
 <div class=wrap><div class=works aria-label="Works with">{stack_row()}</div></div>
-<section class=s id=features><div class=wrap><div class=eyebrow>Platform</div><h2 class=t>What's built in</h2>
-<div class="grid g3">{_feat("git", "Deploy from git or an image", "Push a repo with a Dockerfile or point at any image: Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP or static sites. Redeploys only switch over after the new instance passes its health check.")}
-{_feat("scale", "Pay nothing while it's idle", "Scale on in-flight requests or CPU. Idle apps sleep and wake on the next request in about a second.")}
+<section class=s id=features><div class=wrap><div class=eyebrow>Self-driving</div><h2 class=t>It drives itself</h2>
+<div class="grid g3">{_feat("shield", "Bad deploys roll themselves back", f"For {win_min} minutes after every deploy, Aloof compares the new release with the previous one. If the 5xx rate is more than {sh['err_pp']:g} points higher and more than {ex}, or p95 latency is more than {px} and over {sh['p95_ms']:g} ms slower, it rolls back with zero downtime and records why. You see the reason in release history, the CLI, the dashboard, over MCP and in the audit log. You can turn it off per app.<small class=fine>Fine print: {fine}</small>")}
+{_feat("bot", "Ask your assistant why it broke", "The <code>diagnose_app</code> MCP tool gathers recent errors, failed health checks, deploys, rollbacks, restarts and exit codes, then names the likely cause and fix. Your assistant explains it in plain language. It's read-only and redacts secrets. The causes come from rules, not an AI model.")}
+{_feat("globe", "Traffic routes around failing instances", f"Requests go to the instance with the fewest open connections. {['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'][lbc['fails']] if lbc['fails'] <= 10 else lbc['fails']} failures in a row (connection errors, timeouts, 502 to 504) take an instance out for {cd0} seconds, backing off up to {cdmax_t}. {['Zero','One','Two','Three','Four','Five'][lbc['health_fails']] if lbc['health_fails'] <= 5 else lbc['health_fails']} failed health checks also take it out. Aloof never removes more than half your instances, or the last one. This applies when you run 2 or more instances.")}
+{_feat("git", "Deploys that only switch over when healthy", f"Redeploys only take traffic after the new instance passes its health check, with zero downtime. Health checks run every 5 seconds and replace unhealthy instances automatically. Roll back to any of your last {_eng.RELEASE_KEEP} releases with one command.")}
+{_feat("scale", "Scales itself, down to zero", "Autoscaling checks in-flight requests every 3 seconds. Idle apps sleep and wake on the next request in about a second, and you pay nothing while they sleep.")}
+{_feat("term", "Your AI assistant has the wheel", f"{ntools} MCP tools let Claude, ChatGPT or Cursor deploy, scale, debug and launch templates. A remote MCP server with OAuth 2.1 gives them scoped tokens you can revoke at any time. There's also <a href='/llms.txt'>llms.txt</a> and an <a href='/api/docs'>OpenAPI spec</a>.")}
+{_feat("apps", "One-click templates", f"Deploy {tlist} in one click, or add a “Deploy on Aloof” button to your own repo's README.")}</div></div></section>
+<section class=s id=basics><div class=wrap><div class=eyebrow>Platform</div><h2 class=t>The basics, handled</h2>
+<div class="grid g3">{_feat("git", "Deploy from git or an image", "Push a repo with a Dockerfile or point at any image: Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP or static sites.")}
 {_feat("disk", "State that survives", "Persistent volumes survive restarts and redeploys, billed per provisioned GB-month.")}
-{_feat("globe", "Your domain, with TLS handled", "Add one TXT record and a CNAME. We issue and renew certificates for you.")}
-{_feat("bot", "Let your AI assistant run deploys", "A remote MCP server with OAuth 2.1 lets Claude, ChatGPT or Cursor deploy, read logs, scale and add domains. You get scoped tokens you can revoke at any time, plus <a href='/llms.txt'>llms.txt</a> and an OpenAPI spec.")}
-{gpu_card}</div></div></section>
-<section class=s id=how><div class=wrap><div class=eyebrow>How it works</div><h2 class=t>How a deploy works</h2>
+{_feat("lock", "Your domain, with TLS handled", "Add one TXT record and a CNAME. We issue and renew certificates for you.")}</div></div></section>
+<section class=s id=soon><div class=wrap><div class=eyebrow>Roadmap</div><h2 class=t>Coming soon <span class=muted style="font-weight:500;font-size:.55em">(not live yet)</span></h2>
+<div class="grid g3">{soonh}</div></div></section>
+<section class=s id=how><div class=wrap><div class=eyebrow>How it works</div><h2 class=t>How it works</h2>
 <div class="grid g3"><div class="card reveal"><div class=ico>1</div><h3>Bring your code.</h3><p>Use a git repo with a Dockerfile or any container image.</p></div>
 <div class="card reveal"><div class=ico>2</div><h3>Deploy.</h3><p>Run one CLI command, use the dashboard or REST API, or ask your assistant over MCP.</p></div>
-<div class="card reveal"><div class=ico>3</div><h3>Go live.</h3><p>You get an HTTPS URL on <code>.{base}</code> (or your own domain), autoscaling and logs, billed per second.</p></div></div></div></section>
+<div class="card reveal"><div class=ico>3</div><h3>Let it drive.</h3><p>You get an HTTPS URL on <code>.{base}</code> (or your own domain). From there Aloof health-checks, scales and rolls back on its own, billed per second.</p></div></div></div></section>
 <section class=s id=security><div class=wrap><div class=eyebrow>Security</div><h2 class=t>Security defaults</h2><p class=t>What the platform does today. We hold no certifications yet.</p>
 <div class="grid g3">{_feat("lock", "TLS everywhere", "Every app, API and MCP endpoint is served over HTTPS with automatically issued certificates. Certificates are only requested for hosts we know.")}
 {_feat("key", "Encrypted secrets", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes.")}
 {_feat("box", "Isolated containers", "Each app runs in its own container with CPU and memory limits. Nodes join over WireGuard and expose no inbound ports.")}</div>
 <p class=muted style="margin-top:22px">Read more on the <a href="/security">security page</a>. Found an issue? Email <a href="mailto:security@aloof.si">security@aloof.si</a>.</p></div></section>
 <section class=s id=pricing><div class=wrap><div class=eyebrow>Pricing</div><h2 class=t>Pricing</h2>
-<div class="grid g3">{tier("free", "Free", "Good for side projects and trying Aloof.")}{tier("hobby", "Hobby", "For personal apps that need to stay on.")}{tier("pro", "Pro", "For one developer running production backends.")}</div>
+<div class="grid g3">{tier("free", "Free", "Good for side projects and trying Aloof.")}{tier("hobby", "Hobby", "For personal apps that need to stay on.")}{tier("pro", "Pro", "For one developer (1 user) running production backends.")}</div>
 <p class=t style="margin-top:20px">Usage beyond that is billed per second. Instance sizes start at <code>shared-1x-256mb</code> ({_money(p0)}/mo if run all month). Prices are in USD and exclude tax. Payments are handled by Stripe.</p>
-<div class="grid">{pcards}</div><p style="margin-top:20px"><a href="/pricing">Performance CPUs, volumes, egress and tiers →</a></p></div></section>
+<div class="grid">{pc4}</div><p style="margin-top:20px"><a href="/pricing">Performance CPUs, volumes, egress and tiers →</a></p></div></section>
 <section class=s id=faq><div class=wrap style="max-width:820px"><div class=eyebrow>FAQ</div><h2 class=t>FAQ</h2>{faqh}</div></section>
-<section class=ctaband><h2>Give your superintelligence a stronger engine.</h2><p class=sub style="margin:0 0 26px">Deploy your first backend free in one command.</p><div class=cta style="justify-content:center"><a class="btn pri" data-cta=deploy_free data-cta-loc=footer_band href="/login#register">Deploy free</a><a class="btn ghost" href="/docs">Read the docs</a></div></section>"""
-    return page(f"{brand}: EU backend hosting, scale to zero, deploy via MCP", body, brand)
+<section class=ctaband><h2>Stop babysitting servers.</h2><p class=sub style="margin:0 0 26px">Deploy your first backend free and let it drive itself.</p><div class=cta style="justify-content:center"><a class="btn pri" data-cta=deploy_free data-cta-loc=footer_band href="/login#register">Deploy free</a><a class="btn ghost" href="/docs">Read the docs</a></div></section>"""
+    return page(f"{brand}: the self-driving cloud for your backends", body, brand,
+                desc="Backends that roll back bad deploys, route around failing instances and scale to zero on their own. Drive it from Claude, ChatGPT or Cursor.")
 def _pg_rows():
     from .plans import PG_PLANS
     return "".join(f"<tr><td><code>{k}</code> <span class=muted>{p['note']}</span></td><td>{p['vcpu']:g} {'shared' if p['compute'].startswith('shared') else 'dedicated'} vCPU / {p['memory_mb'] if p['memory_mb'] < 1024 else p['memory_mb'] // 1024}{' MB' if p['memory_mb'] < 1024 else ' GB'}</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items())
