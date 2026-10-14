@@ -215,7 +215,7 @@ def docs(pg, brand, base, api, mcp):
     EDGE_TXT = ' or '.join(f'<code>{x}</code>' for x in os.environ.get('PAAS_EDGE_IPS', '').split(',') if x.strip() and ':' not in x) or 'our edge IP (<code>aloof ips &lt;app&gt;</code>)'
     from .site_devx import pages as _devx_pages
     c = ({
-"quickstart": f"""<h1>Quickstart</h1><ol><li><a href="/login#register">Create an account</a>. The Free plan includes $1/month of usage with a hard cap; top up or pick Hobby/Pro when you need more.</li>
+"quickstart": f"""<h1>Quickstart</h1><ol><li><a href="/login#register">Create an account</a>. New accounts start with <b>$5 of prepaid credit</b>, and the Free plan includes $1/month of usage with a hard cap. Top up or pick Hobby/Pro when you need more.</li>
 <li>Install the CLI. It's a single Python 3 script and runs on <b>macOS and Linux</b>. On <b>Windows</b>, use it inside <a href="https://learn.microsoft.com/windows/wsl/install" rel=noopener>WSL</a>.
 <pre># system-wide (asks for your password)
 sudo curl -fsSL {api}/cli/aloof -o /usr/local/bin/aloof && sudo chmod +x /usr/local/bin/aloof
@@ -364,7 +364,7 @@ curl -fsSL '{api}/v1/nodes/bootstrap.sh?node=n-…&token=jt_…' | sudo bash</pr
 <p>The bootstrap installs Docker, the NVIDIA container toolkit (on GPU nodes) and WireGuard, registers the node and starts <code>aloof-agent</code> under systemd.</p>"""} | _devx_pages(brand, base, api))[pg]
     if pg == "postgres":
         from .plans import PG_PLANS
-        c = c.replace("{PGROWS}", "".join(f"<tr><td><code>{k}</code></td><td>{p['vcpu']:g} {'shared' if p['compute'].startswith('shared') else 'dedicated'} vCPU / {p['memory_mb']} MB</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items()))
+        c = c.replace("{PGROWS}", "".join(f"<tr><td><code>{k}</code></td><td>{p['vcpu']:g} {'shared' if p['compute'].startswith('shared') else 'dedicated'} vCPU / {_gb(p['memory_mb'])} GB</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items()))
     groups = [("Getting started", ["quickstart", "cli", "deploy", "config", "releases"]), ("Source & CI", ["private", "github", "ci"]), ("Apps", ["processes", "networking"]), ("Platform", ["autoscaling", "volumes", "postgres", "domains", "gpu"]), ("Operate", ["console", "logs"]), ("Account", ["billing"]), ("Integrations", ["mcp", "api", "nodes"])]
     navh = "".join(f"<h4>{g}</h4>" + "".join(f'<a href="/docs/{d}" class="{"on" if d == pg else ""}"{" aria-current=page" if d == pg else ""}>{TITLES[d]}</a>' for d in ds) for g, ds in groups)
     c = c.replace("<table>", "<div class=scroll><table class=tbl>").replace("</table>", "</table></div>")

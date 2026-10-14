@@ -100,6 +100,9 @@ def to_spec(cfg, name=None):
         spec["cron"] = [{"name": c.get("name") or f"job{i}", "schedule": c["schedule"], "command": c["command"]} for i, c in enumerate(crons)]
     regs = cfg.get("regions") or ([cfg["primary_region"]] if cfg.get("primary_region") else [])
     if len(regs) > 1: w.append("multi-region placement is not available yet: the app runs in one region (EU, Hetzner nbg1)")
+    from .plans import REGIONS as _R
+    for r in regs:
+        if r not in _R: w.append(f"unknown region {r!r}: the only live region is {next(iter(_R))} ({_R[next(iter(_R))]}); the app runs there")
     from .engine import NAME_RE
     if not NAME_RE.match(app): raise ValueError("app name must be 3-32 chars, lowercase letters/digits/hyphens")
     return spec, mounts, w

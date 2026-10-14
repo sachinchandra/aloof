@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from paas import api, engine, appconfig, launch, cron, creds, github_app, crypto
 from paas.db import q
 from test_parity import Fake, fake, user, wait, deploy   # noqa: F401 (fixtures)
-TOML = {"app": "cfg-app", "primary_region": "eu-central", "build": {"dockerfile": "Dockerfile.prod", "build_args": {"V": 1}},
+TOML = {"app": "cfg-app", "primary_region": "eu-de", "build": {"dockerfile": "Dockerfile.prod", "build_args": {"V": 1}},
         "env": {"LOG": "info"}, "processes": {"web": "gunicorn app:app", "worker": "celery -A app worker"},
         "http_service": {"internal_port": 8000, "force_https": True, "auto_stop_machines": "stop", "min_machines_running": 1,
                          "concurrency": {"soft_limit": 25}, "checks": [{"path": "/health", "interval": "15s"}]},
@@ -219,3 +219,8 @@ def test_named_api_keys():
     assert c.delete("/v1/auth/keys/primary").status_code == 400
     assert c.delete(f"/v1/auth/keys/{row['id']}").json()["ok"]
     assert c.get("/v1/auth/me", headers={"Authorization": f"Bearer {n['api_key']}"}).status_code == 401
+def test_unknown_region_warns():
+    from paas import appconfig
+    w = appconfig.validate({"app": "reg-one", "primary_region": "eu-central", "build": {"image": "nginx"}})["warnings"]
+    assert any("unknown region 'eu-central'" in x and "eu-de" in x for x in w)
+    assert not any("unknown region" in x for x in appconfig.validate({"app": "reg-two", "primary_region": "eu-de", "build": {"image": "nginx"}})["warnings"])

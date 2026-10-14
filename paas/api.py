@@ -77,7 +77,7 @@ class Source(BaseModel):
     upload: str|None=None; dockerfile: str|None=None; build_args: dict[str,str]|None=None; github_installation: int|None=None
 class DeployReq(BaseModel):
     name: str; source: Source; plan: str="shared-1x-1gb"; port: int=8080; env: dict[str,str]={}; instances: int=1
-    command: list[str]|None=None; region: str="local"; provider: str|None=None
+    command: list[str]|None=None; region: str="eu-de"; provider: str|None=None
     volumes: list[dict]=[]; autoscale: dict|None=None; health: dict|None=None
     processes: dict[str, str|list[str]]|None=None; process_counts: dict[str,int]|None=None; cron: list[dict]|None=None; release_command: str|list[str]|None=None
 @app.post("/v1/signup")
