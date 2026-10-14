@@ -1,0 +1,27 @@
+id = "vaultwarden"
+name = "Vaultwarden"
+description = "Lightweight Bitwarden-compatible password manager server."
+category = "Security"
+website = "https://github.com/dani-garcia/vaultwarden"
+[source]
+image = "vaultwarden/server:latest"
+[app]
+port = 80
+plan = "shared-1x-256mb"
+region = "nbg1"
+[[env]]
+name = "ADMIN_TOKEN"
+generate = "secret:48"
+description = "Token for the /admin panel. Shown once after deploy; also in the app's env."
+[[env]]
+name = "DOMAIN"
+value = "${APP_URL}"
+[[env]]
+name = "SIGNUPS_ALLOWED"
+value = "true"
+required = false
+description = "Set to false after creating your account."
+[[volumes]]
+name = "data"
+path = "/data"
+size_gb = 1

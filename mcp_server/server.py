@@ -92,6 +92,15 @@ def get_usage(api_key: str = "") -> dict:
     """Usage hours and USD cost so far, plus remaining credit (credit_usd)."""
     return _r("GET","/v1/usage", api_key)
 @mcp.tool()
+def list_templates() -> dict:
+    """One-click templates (Uptime Kuma, n8n, Umami, ...): id, description, required env vars, volumes, Postgres needs, default plan."""
+    return _r("GET", "/v1/templates")
+@mcp.tool()
+def deploy_template(template: str, name: str, env: dict[str,str] | None = None, plan: str = "", api_key: str = "") -> dict:
+    """Deploy a one-click template (id from list_templates) as app `name`. Creates the volumes and managed Postgres it needs,
+    generates its secrets (returned once in generated_secrets), and starts the deploy. Pass required env vars in `env`."""
+    return _r("POST", f"/v1/templates/{template}/deploy", api_key, json={"name": name, "env": env or {}, **({"plan": plan} if plan else {})})
+@mcp.tool()
 def create_volume(name: str, size_gb: int = 1, api_key: str = "") -> dict:
     """Create a persistent volume. Attach it to an app with attach_volume; data survives redeploys."""
     return _r("POST","/v1/volumes", api_key, json={"name": name, "size_gb": size_gb})

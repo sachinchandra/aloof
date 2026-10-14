@@ -1,0 +1,22 @@
+id = "ntfy"
+name = "ntfy"
+description = "Push notifications to your phone or desktop via simple HTTP PUT/POST."
+category = "Automation"
+website = "https://ntfy.sh"
+[source]
+image = "binwiederhier/ntfy:latest"
+command = ["serve"]
+[app]
+port = 80
+plan = "shared-1x-256mb"
+region = "nbg1"
+[[env]]
+name = "NTFY_BASE_URL"
+value = "${APP_URL}"
+[[env]]
+name = "NTFY_CACHE_FILE"
+value = "/var/cache/ntfy/cache.db"
+[[volumes]]
+name = "cache"
+path = "/var/cache/ntfy"
+size_gb = 1

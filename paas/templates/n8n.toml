@@ -1,0 +1,31 @@
+id = "n8n"
+name = "n8n"
+description = "Workflow automation with 400+ integrations, backed by managed Postgres."
+category = "Automation"
+website = "https://n8n.io"
+[source]
+image = "n8nio/n8n:latest"
+[app]
+port = 5678
+plan = "shared-1x-1gb"
+region = "nbg1"
+[[env]]
+name = "N8N_ENCRYPTION_KEY"
+generate = "secret:32"
+description = "Encrypts stored credentials. Keep it; losing it makes saved credentials unreadable."
+[[env]]
+name = "DB_TYPE"
+value = "postgresdb"
+[[env]]
+name = "WEBHOOK_URL"
+value = "${APP_URL}"
+[[env]]
+name = "N8N_PORT"
+value = "5678"
+[postgres]
+plan = "pg-dev"
+var = "DB_POSTGRESDB_CONNECTION_URL"
+[[volumes]]
+name = "data"
+path = "/home/node/.n8n"
+size_gb = 1

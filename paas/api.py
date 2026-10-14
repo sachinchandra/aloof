@@ -789,6 +789,7 @@ def admin_backups_run(verify: bool=False):
 from . import devx
 app.include_router(devx.R)
 app.include_router(www.R)
+from . import templating as _tpl; app.include_router(_tpl.R)
 from . import waitlist as _wl; app.include_router(_wl.R)
 try: _wl.migrate_kv()
 except Exception as _e: logging.getLogger('paas').error('waitlist kv migration failed: %s', _e)

@@ -75,6 +75,17 @@ def wait_deploy(name, t0):
         if rel.get("created", 0) >= t0 - 2 and rel.get("status") in ("active", "failed"): break
     return call("GET", f"/v1/apps/{name}")
 def cmd_deploy(o):
+    if o.template:
+        name = o.app_opt or o.name
+        if not name: sys.exit("app name? `aloof deploy --template <id> <name>`")
+        env = dict(e.split("=", 1) for e in o.env)
+        r = call("POST", f"/v1/templates/{o.template}/deploy", {"name": name, "env": env, **({"plan": o.plan} if o.plan else {})})
+        print("deploying", r["app"]["name"], "from template", r["template"])
+        for k, v in (r.get("generated_secrets") or {}).items(): print(f"generated {k}={v}  (shown once; also in the app env)")
+        if o.no_wait: return
+        r = wait_deploy(name, time.time() - 1); print(r.get("error") or f"live: {r['url']}")
+        if r["status"] == "failed": sys.exit(1)
+        return
     cfg = load_toml(os.path.join(o.dir, o.config) if not os.path.isabs(o.config) else o.config)
     name = o.app_opt or o.name or cfg.get("app")
     if not name: sys.exit("app name? `aloof deploy <name>` or set app = \"...\" in aloof.toml (aloof launch creates one)")
@@ -144,10 +155,11 @@ a = s.add_parser("signup"); a.add_argument("email")
 s.add_parser("plans"); s.add_parser("apps"); s.add_parser("usage")
 a = s.add_parser("deploy", help="deploy the current directory (aloof.toml + Dockerfile/auto-detect), an image, or a git repo")
 a.add_argument("name", nargs="?"); g = a.add_mutually_exclusive_group()
-g.add_argument("--image"); g.add_argument("--git"); a.add_argument("--ref"); a.add_argument("--plan")
+g.add_argument("--image"); g.add_argument("--git"); g.add_argument("--template", help="one-click template id (see `aloof templates`)"); a.add_argument("--ref"); a.add_argument("--plan")
 a.add_argument("--port", type=int); a.add_argument("-e","--env", action="append", default=[]); a.add_argument("-n","--instances", type=int)
 a.add_argument("--no-wait", action="store_true"); a.add_argument("-c", "--config", default="aloof.toml"); a.add_argument("--dir", default=".")
 a.add_argument("-a", "--app", dest="app_opt")
+s.add_parser("templates", help="list one-click templates")
 for c in ("status","logs","destroy"):
     x = s.add_parser(c); x.add_argument("name", nargs="?"); x.add_argument("-a", "--app", dest="app_opt")
     if c == "logs": x.add_argument("-f", "--follow", action="store_true"); x.add_argument("-n", "--lines", type=int, default=200)
@@ -225,6 +237,8 @@ elif o.cmd == "plans":
     for pl in call("GET","/v1/plans")["plans"]: print(f"{pl['id']:<11} {pl['kind']} {pl['vcpu']:>5} vCPU {pl['memory_mb']:>7}MB {pl['gpu'] or '':<18} ${pl['price_usd_hr']:.4f}/hr  via {pl['provider']}")
 elif o.cmd == "apps":
     for x in call("GET","/v1/apps"): print(f"{x['name']:<20} {x['status']:<9} {len(x['instances'])} inst  {x['url']}")
+elif o.cmd == "templates":
+    for t in call("GET", "/v1/templates")["templates"]: print(f"{t['id']:14} {t['description']}")
 elif o.cmd == "deploy": cmd_deploy(o)
 elif o.cmd == "status": cmd_status(o)
 elif o.cmd == "logs": cmd_logs(o)
