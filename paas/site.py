@@ -38,7 +38,7 @@ def head(title, desc):
 <meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
 <link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
-<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=18">{THEME_JS}</head>"""
+<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=19">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a></nav>
@@ -119,77 +119,106 @@ function tick(){{if(i>=L.length){{setTimeout(function(){{i=0;out='';tick()}},400
  if(l[0]=='p'){{if(j<=l[2].length){{el.innerHTML=out+'<span class=p>'+esc(l[1])+'</span>'+esc(l[2].slice(0,j))+'<span class=cursor></span>';j++;setTimeout(tick,28);return}}}}
  out+=line(i);el.innerHTML=out+'<span class=cursor></span>';i++;j=0;setTimeout(tick,l[0]=='p'?380:520)}}tick()}})();</script>"""
 def _feat(icon, title, body): return f'<div class="card reveal"><div class=ico>{svg(icon)}</div><h3>{title}</h3><p>{body}</p></div>'
-def landing(brand, base, api, mcp):
-    g = {k: PLANS[k]["price_usd_hr"] for k in ("gpu-l4", "gpu-l40s", "gpu-a100", "gpu-h100")}
-    gpu_card = (f"<div class=card><h3>GPUs by the second</h3><p>L4 ${g['gpu-l4']:.2f}/hr, A100 80GB ${g['gpu-a100']:.2f}/hr, H100 ${g['gpu-h100']:.2f}/hr on dedicated nodes.</p></div>"
-                if _plans.GPU_ENABLED else _feat("bolt", "GPUs: coming soon", "L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist →</a>"))
-    cpu = [k for k, p in PLANS.items() if p["kind"] == "cpu" and not p["legacy"] and p["cpu_class"] == "shared"]
-    pcards = "".join(f"<div class='card reveal'><h3><code>{k}</code></h3><div class=price>{_money(PLANS[k]['price_usd_month'])}<small>/mo</small></div><p>{PLANS[k]['vcpu']:g} shared vCPU · {_gb(PLANS[k]['memory_mb'])} GB RAM · per second</p></div>" for k in cpu[:4])
-    T = TIERS; p0 = PLANS["shared-1x-256mb"]["price_usd_month"]
+def _sd():
+    """Self-driving numbers, read from the code (selfheal/lb/engine/MCP registry/templates) so docs and homepage can't drift."""
     from . import selfheal as _sh, lb as _lb, engine as _eng
-    sh, lbc = _sh.cfg(), _lb.cfg(); ntools = len(mcp_tool_names())
+    sh, lbc = _sh.cfg(), _lb.cfg()
     tdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
-    tpls = sorted(f[:-5] for f in os.listdir(tdir) if f.endswith(".toml")) if os.path.isdir(tdir) else []
-    order = ["uptime-kuma", "n8n", "umami", "vaultwarden", "ntfy", "pocketbase", "linkding"]
-    tpls = [t for t in order if t in tpls] + [t for t in tpls if t not in order]
-    tlist = ", ".join(tpls[:-1]) + (" or " + tpls[-1] if len(tpls) > 1 else "".join(tpls))
-    win_min = int(sh["window_s"] // 60); cd0, cdmax = int(lbc["cooldown_s"]), int(lbc["cooldown_max_s"])
-    ex = 'double' if sh['err_x'] == 2 else f"{sh['err_x']:g}×"; px = 'double' if sh['p95_x'] == 2 else f"{sh['p95_x']:g}×"
-    cdmax_t = f"{cdmax // 60} minutes" if cdmax % 60 == 0 else f"{cdmax} seconds"
-    fine = f"a rollback needs at least {sh['min_requests']} requests and at least {sh['min_bad']} bad requests from at least {sh['min_ips']} IPs, so low-traffic apps aren't covered."
-    faq = [("What does “self-driving” mean today?", "Aloof rolls back deploys that raise errors or latency, replaces instances that fail health checks, routes traffic away from failing instances and autoscales, all without you stepping in. Predictive scaling, auto right-sizing and AI auto-fix are coming soon and not live yet."),
-           ("Will automatic rollback cover my app?", f"Only if it gets enough traffic in the {win_min} minutes after a deploy: at least {sh['min_requests']} requests, with at least {sh['min_bad']} bad requests from at least {sh['min_ips']} IPs. Low-traffic apps aren't covered, but health-gated deploys and one-command rollback still are. You can turn automatic rollback off per app."),
-           ("Does <code>diagnose_app</code> send my data to an AI model?", "No. It's a read-only MCP tool that applies rules to your app's recent errors, health checks, deploys, rollbacks, restarts and exit codes, and redacts secrets. Your own assistant reads the result and explains it."),
-           ("Can an AI agent deploy for me safely?", "Yes. Agents use OAuth 2.1 with PKCE and get scoped tokens that you can revoke at any time."),
-           ("What can I deploy?", "Any Docker image, or a git repo with a Dockerfile. This covers Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP and static sites."),
-           ("How does scale-to-zero affect latency?", "Idle apps sleep and wake on the next request in about a second."),
-           ("How are secrets handled?", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes."),
-           ("Where does my code run?", "On Hetzner Cloud in Nuremberg, Germany. The control plane runs there too, and encrypted off-site backups are stored in Helsinki, Finland. More regions are coming soon."),
-           ("Do you support GPUs?", "Not yet. GPUs are coming soon: L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist</a>." if not _plans.GPU_ENABLED else "Yes: L4, L40, A100 80GB and H100 on dedicated nodes, billed per second. See <a href='/pricing#gpus'>GPU pricing</a>.")]
-    faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq)
-    tier = lambda k, name, who: f"<div class='card reveal{' hl' if k == 'pro' else ''}'><h3>{name}</h3><div class=price>${T[k]['fee_usd']}<small>/mo</small></div><p>{'Includes $' + str(T[k]['included_usage_usd']) + '/month of usage.' if k == 'free' else 'Includes $' + str(T[k]['included_usage_usd']) + ' of usage.'} {who}</p></div>"
-    pc4 = "".join(f"<div class='card reveal'><h3><code>{k}</code></h3><div class=price>{_money(PLANS[k]['price_usd_month'])}<small>/mo</small></div><p>{PLANS[k]['vcpu']:g} shared vCPU · {_gb(PLANS[k]['memory_mb'])} GB RAM · per second</p></div>" for k in cpu[:4])
-    soon = [("Predictive scaling", "Scale up before the traffic arrives."), ("Auto right-sizing", "Instance sizes that adjust to what your app actually uses."),
-            ("AI auto-fix", "Go from diagnosis to a proposed fix."), ("GPUs", "L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist →</a>"),
-            ("More regions", "More places to run your apps.")]
-    soonh = "".join(f"<div class='card reveal soon'><span class=tag>Coming soon</span><h3>{a}</h3><p>{b}</p></div>" for a, b in soon if not (a == "GPUs" and _plans.GPU_ENABLED))
-    body = f"""<section class=hero><div class=wrap><div>
+    have = sorted(f[:-5] for f in os.listdir(tdir) if f.endswith(".toml")) if os.path.isdir(tdir) else []
+    order = ["n8n", "uptime-kuma", "umami", "vaultwarden", "ntfy", "pocketbase", "linkding"]
+    tpls = [t for t in order if t in have] + [t for t in have if t not in order]
+    cdmax = int(lbc["cooldown_max_s"])
+    return {"sh": sh, "lb": lbc, "win_min": int(sh["window_s"] // 60), "cd0": int(lbc["cooldown_s"]),
+            "cdmax_t": f"{cdmax // 60} minutes" if cdmax % 60 == 0 else f"{cdmax} seconds",
+            "ex": "double" if sh["err_x"] == 2 else f"{sh['err_x']:g}×", "px": "double" if sh["p95_x"] == 2 else f"{sh['p95_x']:g}×",
+            "releases": _eng.RELEASE_KEEP, "tools": len(mcp_tool_names()), "templates": tpls}
+_WORD = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+def _w(n, cap=False): w = _WORD[n] if 0 <= n <= 10 else str(n); return w.capitalize() if cap else w
+FAQ_FULL = None
+def _faq_full():
+    d = _sd(); sh = d["sh"]
+    return [("What does “self-driving” mean today?", "Aloof rolls back deploys that raise errors or latency, replaces instances that fail health checks, routes traffic away from failing instances and autoscales, all without you stepping in. Predictive scaling, auto right-sizing and AI auto-fix are coming soon and not live yet."),
+            ("Will automatic rollback cover my app?", f"Only if it gets enough traffic in the {d['win_min']} minutes after a deploy: at least {sh['min_requests']} requests, with at least {sh['min_bad']} bad requests from at least {sh['min_ips']} IPs. Low-traffic apps aren't covered, but health-gated deploys and one-command rollback still are. You can turn automatic rollback off per app."),
+            ("Does <code>diagnose_app</code> send my data to an AI model?", "No. It's a read-only MCP tool that applies rules to your app's recent errors, health checks, deploys, rollbacks, restarts and exit codes, and redacts secrets. Your own assistant reads the result and explains it."),
+            ("Can an AI agent deploy for me safely?", "Yes. Agents use OAuth 2.1 with PKCE and get scoped tokens that you can revoke at any time."),
+            ("What can I deploy?", "Any Docker image, or a git repo with a Dockerfile. This covers Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP and static sites."),
+            ("How does scale-to-zero affect latency?", "Idle apps sleep and wake on the next request in about a second."),
+            ("How are secrets handled?", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes."),
+            ("Where does my code run?", "On Hetzner Cloud in Nuremberg, Germany. The control plane runs there too, and encrypted off-site backups are stored in Helsinki, Finland. More regions are coming soon."),
+            ("Do you support GPUs?", "Not yet. GPUs are coming soon: L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. <a href='/pricing#gpus'>Join the waitlist</a>." if not _plans.GPU_ENABLED else "Yes: L4, L40, A100 80GB and H100 on dedicated nodes, billed per second. See <a href='/pricing#gpus'>GPU pricing</a>.")]
+def _selfdriving_doc():
+    d = _sd(); sh, l = d["sh"], d["lb"]
+    faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in _faq_full())
+    return f"""<h1>How self-driving works</h1><p>What Aloof does on its own today, with the exact limits it uses. These numbers come straight from the platform code.</p>
+<h2 id=rollback>Bad deploys roll themselves back</h2><p>For {d['win_min']} minutes after every deploy, Aloof compares the new release with the previous one. If the 5xx rate is more than {sh['err_pp']:g} points higher and more than {d['ex']}, or p95 latency is more than {d['px']} and over {sh['p95_ms']:g} ms slower, it rolls back with zero downtime and records why. You see the reason in release history, the CLI, the dashboard, over MCP and in the audit log. You can turn it off per app (<code>set_self_heal</code> over MCP).</p>
+<div class=note><b>Fine print:</b> a rollback needs at least {sh['min_requests']} requests and at least {sh['min_bad']} bad requests from at least {sh['min_ips']} IPs, so low-traffic apps aren't covered.</div>
+<h2 id=diagnose>Ask your assistant why it broke</h2><p>The <code>diagnose_app</code> MCP tool gathers recent errors, failed health checks, deploys, rollbacks, restarts and exit codes, then names the likely cause and fix. Your assistant explains it in plain language. It's read-only and redacts secrets. The causes come from rules, not an AI model.</p>
+<h2 id=lb>Traffic routes around failing instances</h2><p>Requests go to the instance with the fewest open connections. {_w(l['fails'], True)} failures in a row (connection errors, timeouts, 502 to 504) take an instance out for {d['cd0']} seconds, backing off up to {d['cdmax_t']}. {_w(l['health_fails'], True)} failed health checks also take it out. Aloof never removes more than half your instances, or the last one. This applies when you run 2 or more instances.</p>
+<h2 id=health>Deploys that only switch over when healthy</h2><p>Redeploys only take traffic after the new instance passes its health check, with zero downtime. Health checks run every 5 seconds and replace unhealthy instances automatically. Roll back to any of your last {d['releases']} releases with one command.</p>
+<h2 id=scale>Scales itself, down to zero</h2><p>Autoscaling checks in-flight requests every 3 seconds. Idle apps sleep and wake on the next request in about a second, and you pay nothing while they sleep.</p>
+<h2 id=mcp>Your AI assistant has the wheel</h2><p>{d['tools']} MCP tools let Claude, ChatGPT or Cursor deploy, scale, debug and launch templates. A remote MCP server with OAuth 2.1 gives them scoped tokens you can revoke at any time. There's also <a href="/llms.txt">llms.txt</a> and an <a href="/api/docs">OpenAPI spec</a>.</p>
+<h2 id=templates>One-click templates</h2><p>Deploy {", ".join(d['templates'])} in one click from <a href="/templates">templates</a>, or add a “Deploy on Aloof” button to your own repo's README.</p>
+<h2 id=security>Security defaults</h2><p>What the platform does today. We hold no certifications yet.</p><ul>
+<li><b>TLS everywhere.</b> Every app, API and MCP endpoint is served over HTTPS with automatically issued certificates. Certificates are only requested for hosts we know.</li>
+<li><b>Encrypted secrets.</b> Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes.</li>
+<li><b>Isolated containers.</b> Each app runs in its own container with CPU and memory limits. Nodes join over WireGuard and expose no inbound ports.</li></ul>
+<p>More on the <a href="/security">security page</a>. Found an issue? Email <a href="mailto:security@aloof.si">security@aloof.si</a>.</p>
+<h2 id=soon>Coming soon</h2><p>Not live yet: predictive scaling, auto right-sizing, AI auto-fix, GPUs (<a href="/pricing#gpus">waitlist</a>) and more regions.</p>
+<h2 id=faq>FAQ</h2>{faqh}"""
+TPL_ICON = {"n8n": ("n8n", "#ea4b71"), "uptime-kuma": ("UK", "#5cdd8b"), "umami": ("U", "#e8e8e8"), "vaultwarden": ("VW", "#175ddc"),
+            "ntfy": ("nt", "#3a9784"), "pocketbase": ("PB", "#b8dbe4"), "linkding": ("ld", "#5856e0")}
+TPL_NAME = {"n8n": "n8n", "uptime-kuma": "Uptime Kuma", "umami": "Umami", "vaultwarden": "Vaultwarden", "ntfy": "ntfy", "pocketbase": "PocketBase", "linkding": "linkding"}
+HERO_JS = """<script>(function(){var t=document.getElementById('hv');if(!t)return;var L=[].slice.call(t.querySelectorAll('[data-s]')),c=document.getElementById('hv-chart');
+var R=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+function show(n){L.forEach(function(e){e.classList.toggle('on',+e.dataset.s<=n)});t.dataset.step=n}
+if(R){show(9);return}var n=0;function tick(){show(n);n=n>=9?0:n+1;setTimeout(tick,n==0?3200:n==1?600:1100)}
+var io=window.IntersectionObserver&&new IntersectionObserver(function(es){if(es[0].isIntersecting){io.disconnect();tick()}});io?io.observe(t):tick()})();</script>"""
+def _hero_visual(base):
+    # step 1-3 deploy, 4-5 spike, 6-8 rollback; chart bars react via [data-step]
+    rows = [(1, "p", "$", "aloof deploy api"), (2, "m", "", "→ building v42 · pushing image"), (3, "ok", "✓", f"v42 live at https://api.{base}"),
+            (4, "warn", "!", "5xx rate 0.4% → 18% · p95 120 → 940 ms"), (5, "m", "", "self-heal: v42 worse than v41 baseline"),
+            (6, "ok", "↺", "rolled back to v41 · zero downtime"), (7, "m", "", "reason: 5xx rate 18.2% vs 0.4% baseline (1,240 requests)"), (8, "ok", "✓", "healthy · recorded in release history")]
+    lines = "".join(f"<div class='hv-l {c}' data-s={s}><span class=hv-p>{p}</span>{html.escape(t)}</div>" for s, c, p, t in rows)
+    bars = "".join(f"<i style='--h:{h}' class='{'sp' if k in (6,7,8) else ''}'></i>" for k, h in enumerate([18, 22, 16, 24, 20, 26, 88, 94, 80, 22, 18, 20, 16, 22]))
+    return f"""<div class=hv id=hv data-step=0 role=img aria-label="Animation: a deploy goes live, its error rate spikes, and Aloof rolls it back automatically and records the reason.">
+<div class=hv-bar aria-hidden=true><i></i><i></i><i></i><b>aloof · api</b><span class=hv-pill>self-heal on</span></div>
+<div class=hv-body aria-hidden=true>{lines}</div>
+<div class=hv-chart id=hv-chart aria-hidden=true><span>5xx rate</span><div class=hv-bars>{bars}</div></div></div>"""
+def landing(brand, base, api, mcp):
+    T = TIERS; p0 = PLANS["shared-1x-256mb"]["price_usd_month"]; d = _sd()
+    ic = lambda n: f"<div class=ico>{svg(n)}</div>"
+    cards = "".join(f"<div class='card reveal v5c'>{ic(i)}<h3>{t}</h3><p>{b}</p></div>" for i, t, b in (
+        ("shield", "Self-healing deploys", "Bad release? It rolls back on its own."),
+        ("globe", "Smart load balancing", "Traffic avoids failing instances automatically."),
+        ("scale", "Scales to zero", "Busy, it scales up. Idle, you pay nothing.")))
+    tpl = "".join(f"<a class=tpl href='/templates/{t}' aria-label='{TPL_NAME.get(t, t)} template'><span class=mono style='--c:{TPL_ICON.get(t, (t[:2], '#888'))[1]}' aria-hidden=true>{TPL_ICON.get(t, (t[:2], ''))[0]}</span>{TPL_NAME.get(t, t)}</a>" for t in d["templates"])
+    price = lambda k, name, sub: f"<a class='card pc{' hl' if k == 'hobby' else ''}' href='/pricing'><span>{name}</span><b>${T[k]['fee_usd']:g}<small>/mo</small></b><em>{sub}</em></a>"
+    faq4 = [x for x in _faq_full() if x[0].startswith(("What does", "Will automatic", "Can an AI", "Where does"))]
+    faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq4)
+    body = f"""<section class="hero v5"><div class=wrap><div>
 <div class=eyebrow>The self-driving cloud</div>
 <h1>Infrastructure for the age of <span class=grad>superintelligence.</span></h1>
-<p class=lead>Aloof is the self-driving cloud for your backends. It rolls back bad deploys, routes around failing instances and scales itself, so you don't have to watch it. When something breaks, ask Claude, ChatGPT or Cursor why.</p>
-<div class=cta><a class="btn pri" href="/login#register" data-cta=deploy_free data-cta-loc=hero>Deploy free</a><a class="btn ghost" href="/docs/mcp" data-cta=connect_mcp data-cta-loc=hero>Connect your AI assistant (MCP)</a></div>
-<div class=trust><span>{svg("shield")} Automatic rollback</span><span>{svg("bolt")} Zero-downtime deploys</span><span>{svg("scale")} Scale to zero</span><span>{svg("card")} Per-second billing in USD</span></div></div>
-{_term(base)}</div></section>
-<div class=wrap><div class=works aria-label="Works with">{stack_row()}</div></div>
-<section class=s id=features><div class=wrap><div class=eyebrow>Self-driving</div><h2 class=t>It drives itself</h2>
-<div class="grid g3">{_feat("shield", "Bad deploys roll themselves back", f"For {win_min} minutes after every deploy, Aloof compares the new release with the previous one. If the 5xx rate is more than {sh['err_pp']:g} points higher and more than {ex}, or p95 latency is more than {px} and over {sh['p95_ms']:g} ms slower, it rolls back with zero downtime and records why. You see the reason in release history, the CLI, the dashboard, over MCP and in the audit log. You can turn it off per app.<small class=fine>Fine print: {fine}</small>")}
-{_feat("bot", "Ask your assistant why it broke", "The <code>diagnose_app</code> MCP tool gathers recent errors, failed health checks, deploys, rollbacks, restarts and exit codes, then names the likely cause and fix. Your assistant explains it in plain language. It's read-only and redacts secrets. The causes come from rules, not an AI model.")}
-{_feat("globe", "Traffic routes around failing instances", f"Requests go to the instance with the fewest open connections. {['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'][lbc['fails']] if lbc['fails'] <= 10 else lbc['fails']} failures in a row (connection errors, timeouts, 502 to 504) take an instance out for {cd0} seconds, backing off up to {cdmax_t}. {['Zero','One','Two','Three','Four','Five'][lbc['health_fails']] if lbc['health_fails'] <= 5 else lbc['health_fails']} failed health checks also take it out. Aloof never removes more than half your instances, or the last one. This applies when you run 2 or more instances.")}
-{_feat("git", "Deploys that only switch over when healthy", f"Redeploys only take traffic after the new instance passes its health check, with zero downtime. Health checks run every 5 seconds and replace unhealthy instances automatically. Roll back to any of your last {_eng.RELEASE_KEEP} releases with one command.")}
-{_feat("scale", "Scales itself, down to zero", "Autoscaling checks in-flight requests every 3 seconds. Idle apps sleep and wake on the next request in about a second, and you pay nothing while they sleep.")}
-{_feat("term", "Your AI assistant has the wheel", f"{ntools} MCP tools let Claude, ChatGPT or Cursor deploy, scale, debug and launch templates. A remote MCP server with OAuth 2.1 gives them scoped tokens you can revoke at any time. There's also <a href='/llms.txt'>llms.txt</a> and an <a href='/api/docs'>OpenAPI spec</a>.")}
-{_feat("apps", "One-click templates", f"Deploy {tlist} in one click, or add a “Deploy on Aloof” button to your own repo's README.")}</div></div></section>
-<section class=s id=basics><div class=wrap><div class=eyebrow>Platform</div><h2 class=t>The basics, handled</h2>
-<div class="grid g3">{_feat("git", "Deploy from git or an image", "Push a repo with a Dockerfile or point at any image: Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP or static sites.")}
-{_feat("disk", "State that survives", "Persistent volumes survive restarts and redeploys, billed per provisioned GB-month.")}
-{_feat("lock", "Your domain, with TLS handled", "Add one TXT record and a CNAME. We issue and renew certificates for you.")}</div></div></section>
-<section class=s id=soon><div class=wrap><div class=eyebrow>Roadmap</div><h2 class=t>Coming soon <span class=muted style="font-weight:500;font-size:.55em">(not live yet)</span></h2>
-<div class="grid g3">{soonh}</div></div></section>
-<section class=s id=how><div class=wrap><div class=eyebrow>How it works</div><h2 class=t>How it works</h2>
-<div class="grid g3"><div class="card reveal"><div class=ico>1</div><h3>Bring your code.</h3><p>Use a git repo with a Dockerfile or any container image.</p></div>
-<div class="card reveal"><div class=ico>2</div><h3>Deploy.</h3><p>Run one CLI command, use the dashboard or REST API, or ask your assistant over MCP.</p></div>
-<div class="card reveal"><div class=ico>3</div><h3>Let it drive.</h3><p>You get an HTTPS URL on <code>.{base}</code> (or your own domain). From there Aloof health-checks, scales and rolls back on its own, billed per second.</p></div></div></div></section>
-<section class=s id=security><div class=wrap><div class=eyebrow>Security</div><h2 class=t>Security defaults</h2><p class=t>What the platform does today. We hold no certifications yet.</p>
-<div class="grid g3">{_feat("lock", "TLS everywhere", "Every app, API and MCP endpoint is served over HTTPS with automatically issued certificates. Certificates are only requested for hosts we know.")}
-{_feat("key", "Encrypted secrets", "Environment variables are encrypted at rest and never shown back. API keys are stored only as SHA-256 hashes.")}
-{_feat("box", "Isolated containers", "Each app runs in its own container with CPU and memory limits. Nodes join over WireGuard and expose no inbound ports.")}</div>
-<p class=muted style="margin-top:22px">Read more on the <a href="/security">security page</a>. Found an issue? Email <a href="mailto:security@aloof.si">security@aloof.si</a>.</p></div></section>
-<section class=s id=pricing><div class=wrap><div class=eyebrow>Pricing</div><h2 class=t>Pricing</h2>
-<div class="grid g3">{tier("free", "Free", "Good for side projects and trying Aloof.")}{tier("hobby", "Hobby", "For personal apps that need to stay on.")}{tier("pro", "Pro", "For one developer (1 user) running production backends.")}</div>
-<p class=t style="margin-top:20px">Usage beyond that is billed per second. Instance sizes start at <code>shared-1x-256mb</code> ({_money(p0)}/mo if run all month). Prices are in USD and exclude tax. Payments are handled by Stripe.</p>
-<div class="grid">{pc4}</div><p style="margin-top:20px"><a href="/pricing">Performance CPUs, volumes, egress and tiers →</a></p></div></section>
-<section class=s id=faq><div class=wrap style="max-width:820px"><div class=eyebrow>FAQ</div><h2 class=t>FAQ</h2>{faqh}</div></section>
-<section class=ctaband><h2>Stop babysitting servers.</h2><p class=sub style="margin:0 0 26px">Deploy your first backend free and let it drive itself.</p><div class=cta style="justify-content:center"><a class="btn pri" data-cta=deploy_free data-cta-loc=footer_band href="/login#register">Deploy free</a><a class="btn ghost" href="/docs">Read the docs</a></div></section>"""
+<p class=lead>Deploy your backend. Aloof keeps it running: it rolls back bad deploys, routes around failures and scales itself.</p>
+<div class=cta><a class="btn pri" href="/login#register" data-cta=deploy_free data-cta-loc=hero>Deploy free</a><a class="btn ghost" href="/docs/mcp" data-cta=connect_mcp data-cta-loc=hero>Connect your AI</a></div>
+<p class=v5-small>Free plan · No credit card · Billed per second</p></div>
+{_hero_visual(base)}</div></section>
+<section class="s v5s" id=features><div class=wrap><h2 class="t c">It drives itself</h2><div class="grid g3">{cards}</div>
+<p class=c style="margin-top:22px"><a href="/docs/self-driving">How self-driving works →</a></p></div></section>
+<section class="s v5s" id=ai><div class="wrap v5-split"><div><div class=eyebrow>AI ops</div><h2 class=t>Your AI runs ops</h2><p class=lead2>Connect Claude, ChatGPT or Cursor. They deploy, debug and scale for you.</p>
+<p><a class="btn ghost sm" href="/docs/mcp" data-cta=connect_mcp data-cta-loc=ai_ops>Connect your AI</a></p></div>
+<div class="chat reveal" role=img aria-label="Chat: you ask why your app is down; the assistant uses diagnose_app and answers that it ran out of memory after the last deploy, and offers to scale to 512 MB.">
+<div class="msg you" aria-hidden=true>Why is my app down?</div>
+<div class=tool aria-hidden=true>{svg("term")} diagnose_app <span>api</span></div>
+<div class="msg ai" aria-hidden=true>It ran out of memory after the last deploy (exit 137). Scale to 512 MB?</div>
+<div class=chips aria-hidden=true><span>Scale to 512 MB</span><span>Show logs</span></div></div></div></section>
+<section class="s v5s" id=how><div class=wrap><h2 class="t c">Ship in 3 steps</h2><ol class=flow>
+<li><b>1</b><span>Bring a repo or Docker image</span></li><li><b>2</b><span>Run <code>aloof deploy</code>, or ask your AI to do it</span></li><li><b>3</b><span>You're live on HTTPS</span></li></ol></div></section>
+<section class="s v5s" id=templates><div class=wrap><h2 class="t c">One-click apps</h2><div class=tpls>{tpl}</div><p class=c style="margin-top:22px"><a href="/templates">See all templates →</a></p></div></section>
+<section class="s v5s" id=pricing><div class=wrap><h2 class="t c">Pricing</h2><div class="grid g3 pcs">{price("free", "Free", f"includes ${T['free']['included_usage_usd']:g} usage")}{price("hobby", "Hobby", f"includes ${T['hobby']['included_usage_usd']:g} usage")}{price("pro", "Pro", f"includes ${T['pro']['included_usage_usd']:g} usage · 1 user")}</div>
+<p class="c muted" style="margin-top:18px">Pay per second. Smallest app from {_money(p0)}/mo. <a href="/pricing">Full pricing →</a></p>
+<p class="c muted soonline">Coming soon: predictive scaling · auto right-sizing · GPUs · more regions · <a href="/pricing#gpus">Join waitlist</a></p></div></section>
+<section class="s v5s" id=faq><div class=wrap style="max-width:760px"><h2 class="t c">FAQ</h2>{faqh}<p class=c style="margin-top:16px"><a href="/docs/self-driving#faq">All questions →</a></p></div></section>
+<section class="ctaband v5cta"><h2>Stop babysitting servers.</h2><div class=cta style="justify-content:center"><a class="btn pri" data-cta=deploy_free data-cta-loc=footer_band href="/login#register">Deploy free</a></div></section>{HERO_JS}"""
     return page(f"{brand}: the self-driving cloud for your backends", body, brand,
                 desc="Backends that roll back bad deploys, route around failing instances and scale to zero on their own. Drive it from Claude, ChatGPT or Cursor.")
 def _pg_rows():
@@ -266,8 +295,8 @@ def pricing(brand):
 <h2 class=pp-h id=faq>Pricing FAQ</h2><div class=pp-faq>{faqh}</div>
 <div class=pp-end><h2>Start free, upgrade when you need to.</h2><p class=muted>{free['max_apps']} apps and ${free['included_usage_usd']:g} of usage a month on Free. No card required.</p><a class="btn pri" href="/login#register" data-cta=deploy_free data-cta-loc=pricing_end>Create an account</a> <a class="btn ghost" href="/docs/billing">Billing docs</a></div>
 </div></section>""", brand, desc="Aloof pricing: Free, Hobby $5/month and Pro $20/month, each with the fee back as included usage. Compute billed per second in Nuremberg, Germany; volumes, egress and managed Postgres in USD.")
-DOCS = ["quickstart", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "mcp", "api", "nodes", "troubleshooting", "support"]
-TITLES = {"quickstart": "Quickstart", "cli": "CLI", "deploy": "Deploying apps", "config": "aloof.toml reference", "private": "Private registries & repos", "github": "GitHub App: push-to-deploy & previews", "ci": "Deploy tokens & CI", "processes": "Workers, release commands & cron", "networking": "Private networking, proxy, IPs & certs", "gpu": "GPU workloads", "volumes": "Volumes", "autoscaling": "Autoscaling & scale to zero",
+DOCS = ["quickstart", "self-driving", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "mcp", "api", "nodes", "troubleshooting", "support"]
+TITLES = {"quickstart": "Quickstart", "self-driving": "How self-driving works", "cli": "CLI", "deploy": "Deploying apps", "config": "aloof.toml reference", "private": "Private registries & repos", "github": "GitHub App: push-to-deploy & previews", "ci": "Deploy tokens & CI", "processes": "Workers, release commands & cron", "networking": "Private networking, proxy, IPs & certs", "gpu": "GPU workloads", "volumes": "Volumes", "autoscaling": "Autoscaling & scale to zero",
           "domains": "Custom domains", "releases": "Releases & rollback", "postgres": "Managed Postgres", "console": "SSH & exec console", "logs": "Logs, retention & drains", "billing": "Billing, invoices & tax", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes", "troubleshooting": "Troubleshooting & FAQ", "support": "Support"}
 def docs(pg, brand, base, api, mcp):
     if pg not in DOCS: return None
@@ -439,7 +468,7 @@ aloof autoscale preview --min 0 --max 2 --idle 120    # scale to zero after 2 id
 <pre>curl -X POST {api}/v1/admin/nodes -H "Authorization: Bearer $ADMIN" -d '{{"pool":"self-hosted","plan":"gpu-h100","gpu":true}}'
 # run the returned one-liner on the server:
 curl -fsSL '{api}/v1/nodes/bootstrap.sh?node=n-…&token=jt_…' | sudo bash</pre>
-<p>The bootstrap installs Docker, the NVIDIA container toolkit (on GPU nodes) and WireGuard, registers the node and starts <code>aloof-agent</code> under systemd.</p>"""} | _devx_pages(brand, base, api))[pg]
+<p>The bootstrap installs Docker, the NVIDIA container toolkit (on GPU nodes) and WireGuard, registers the node and starts <code>aloof-agent</code> under systemd.</p>"""} | _devx_pages(brand, base, api) | {"self-driving": _selfdriving_doc()})[pg]
     if pg == "postgres":
         from .plans import PG_PLANS
         c = c.replace("{PGROWS}", "".join(f"<tr><td><code>{k}</code></td><td>{p['vcpu']:g} {'shared' if p['compute'].startswith('shared') else 'dedicated'} vCPU / {_gb(p['memory_mb'])} GB</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items()))

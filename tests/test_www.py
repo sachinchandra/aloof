@@ -126,7 +126,7 @@ def test_client_events_no_server_duplicates():
     assert "aloofIdentify(String(me.id))" in js and "auth/magic',{{method:'POST'" in js and js.count("attribution:window.aloofAttribution") == 2
 def test_hero_and_footer_copy():
     h = c.get("/").text
-    assert "Aloof is the self-driving cloud for your backends." in h and "They run in the EU" not in h
+    assert "The self-driving cloud" in h and "Infrastructure for the age of" in h and "They run in the EU" not in h
     for pth in ("/", "/pricing", "/docs", "/examples", "/terms"): assert "The cloud for apps your AI ships." in c.get(pth).text, pth
 def test_llms_txt_tools_and_copy():
     import re, os
@@ -139,11 +139,19 @@ def test_llms_txt_tools_and_copy():
     assert f"Tools ({len(names)}" in t and ", ".join(names) in t and ", ".join(names) in c.get("/docs/mcp").text
     for bad in ("fly.io", "Fly.io", "Render", "Railway", "Heroku", "per workspace", "/workspace", "Unlimited seats", "for teams"): assert bad not in t, bad
     assert "$20/mo for 1 user" in t and "/v1/templates" in t and "/v1/billing/runway" in t and "/v1/regions" in t and "coming_soon" in t
-def test_landing_v4_numbers_from_code():
+def test_selfdriving_doc_numbers_from_code():
     from paas import selfheal, lb, engine, site
-    h = c.get("/").text; sh, l = selfheal.cfg(), lb.cfg()
+    h = c.get("/docs/self-driving").text; sh, l = selfheal.cfg(), lb.cfg()
     assert f"For {int(sh['window_s']//60)} minutes after every deploy" in h and f"at least {sh['min_requests']} requests" in h and f"from at least {sh['min_ips']} IPs" in h
     assert f"backing off up to {int(l['cooldown_max_s']//60)} minutes" in h and f"take an instance out for {int(l['cooldown_s'])} seconds" in h
     assert f"last {engine.RELEASE_KEEP} releases" in h and f"{len(site.mcp_tool_names())} MCP tools" in h
-    assert h.count("Coming soon") >= 5 and "PLACEHOLDER" not in h and "babysitting" in h
+    assert "Coming soon" in h and "PLACEHOLDER" not in h and "/pricing#gpus" in h and "TLS everywhere" in h and h.count("<details class=faq>") == 9
     for comp in ("Fly", "Render", "Railway", "Heroku"): assert comp not in h
+def test_home_v5():
+    import re
+    h = c.get("/").text; b = re.sub(r"<script.*?</script>|<style.*?</style>", "", h, flags=re.S)
+    assert "babysitting" in h and "Coming soon" in h and "/pricing#gpus" in h and "/docs/self-driving" in h and 'href="/templates"' in h
+    for t in ("uptime-kuma", "n8n", "umami", "vaultwarden", "ntfy", "pocketbase", "linkding"): assert f"/templates/{t}" in h, t
+    assert h.count("<details class=faq>") <= 4 and "diagnose_app" in h and 'role=img aria-label="Animation' in h and "prefers-reduced-motion" in h
+    for comp in ("Fly", "Render", "Railway", "Heroku", "testimonial"): assert comp not in b
+    assert len(h.encode()) < 40000
