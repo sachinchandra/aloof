@@ -44,7 +44,7 @@ def test_validate_rejects():
         with pytest.raises(T.TemplateError): T.validate(base | mut)
 
 def test_deploy_template(fake):
-    c = _client("tpl1@example.in")
+    c = _client("tpl1@example.in"); q("update accounts set tier='hobby' where email='tpl1@example.in'")   # n8n's default plan needs a paid tier
     r = c.post("/v1/templates/n8n/deploy", json={"name": "myflow"}); assert r.status_code == 200, r.text
     j = r.json(); s = fake["spec"]
     assert len(j["generated_secrets"]["N8N_ENCRYPTION_KEY"]) > 30 and s["env"]["N8N_ENCRYPTION_KEY"] == j["generated_secrets"]["N8N_ENCRYPTION_KEY"]

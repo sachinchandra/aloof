@@ -564,7 +564,10 @@ def docs_page(page: str = "quickstart"):
     if h is None: raise HTTPException(404, "no such docs page")
     return h
 @app.get("/login", response_class=HTMLResponse)
-def login_page(): return www.at("/login", "default", site.login, BRAND)
+def login_page(request: Request):
+    n = request.query_params.get("next")
+    if n is not None and auth.safe_next(n, None) is None: return RedirectResponse("/login", 303)   # F1: drop unsafe next server-side
+    return www.at("/login", "default", site.login, BRAND)
 @app.get("/static/aloof.css", include_in_schema=False)
 def static_css(): return FileResponse(os.path.join(ROOT, "paas", "static", "aloof.css"), media_type="text/css", headers={"Cache-Control": "public, max-age=3600"})
 @app.get("/privacy", response_class=HTMLResponse)

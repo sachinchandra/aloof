@@ -99,7 +99,9 @@ def list_templates() -> dict:
 def deploy_template(template: str, name: str, env: dict[str,str] | None = None, plan: str = "", api_key: str = "") -> dict:
     """Deploy a one-click template (id from list_templates) as app `name`. Creates the volumes and managed Postgres it needs,
     generates its secrets (returned once in generated_secrets), and starts the deploy. Pass required env vars in `env`."""
-    return _r("POST", f"/v1/templates/{template}/deploy", api_key, json={"name": name, "env": env or {}, **({"plan": plan} if plan else {})})
+    import re as _re, urllib.parse as _up
+    if not _re.match(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$", template or ""): return {"error": "unknown template id; use list_templates"}   # F3: same as templating.ID_RE
+    return _r("POST", f"/v1/templates/{_up.quote(template, safe='')}/deploy", api_key, json={"name": name, "env": env or {}, **({"plan": plan} if plan else {})})
 @mcp.tool()
 def create_volume(name: str, size_gb: int = 1, api_key: str = "") -> dict:
     """Create a persistent volume. Attach it to an app with attach_volume; data survives redeploys."""

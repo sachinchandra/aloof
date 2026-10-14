@@ -125,7 +125,9 @@ def _gen(g):
     kind, n = g.split(":"); n = int(n)
     return secrets.token_hex(n) if kind == "hex" else secrets.token_urlsafe(n)
 
+REF_RE = re.compile(r"^[\w./@^~+-]+$")   # same rule as creds.clone
 def repo_template(repo, ref=None, port=8080, plan=None):
+    if ref is not None and (not REF_RE.match(ref) or ref.startswith("-") or len(ref) > 200): raise TemplateError("bad git ref")
     return validate({"id": "from-repo", "name": "Repository", "description": repo, "source": {"repo": check_repo(repo), **({"ref": ref} if ref else {})},
                      "app": {"port": int(port or 8080), "plan": plan or "shared-1x-512mb"}})
 
@@ -152,23 +154,42 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
     src = {"image": s["image"]} if s.get("image") else {"git": s["repo"], **({"ref": s["ref"]} if s.get("ref") else {}), **({"subdir": s["subdir"]} if s.get("subdir") else {})}
     spec = {"name": name, "source": src, "plan": plan, "port": t["app"]["port"], "env": out_env, "instances": 1, "template": t["id"]}
     if s.get("command"): spec["command"] = s["command"]
-    vols = []
-    for v in t.get("volumes", []):
-        vn = f"{name}-{v['name']}"[:32].rstrip("-"); engine.create_volume(account_id, vn, v.get("size_gb", 1))
-        q("update volumes set app=?, mount_path=? where name=?", (name, v["path"], vn)); vols.append({"name": vn, "path": v["path"]})
-    if vols: spec["volumes"] = vols
-    pg = None
-    if "postgres" in t:
-        pgn = f"{name}-db"; vmap = pg_vars(t["postgres"]); var = next(iter(vmap))
-        pg = parity.pg_create(account_id, pgn, t["postgres"].get("plan", "pg-dev"))
-        row = q("select * from pg_dbs where name=?", (pgn,), one=True)
-        url = parity.pg_url(row); u = urllib.parse.urlsplit(url)
-        parts = {"url": url, "host": u.hostname, "port": str(u.port or 5432), "database": u.path.lstrip("/"),
-                 "user": urllib.parse.unquote(u.username or ""), "password": urllib.parse.unquote(u.password or "")}
-        spec["networks"] = [parity.pg_net(pgn)]
-        for k, f in vmap.items(): spec["env"][k] = parts[f]
-        q("update pg_dbs set attached=? where name=?", (json.dumps([{"app": name, "var": var}]), pgn))
-    r = engine.deploy(account_id, spec)
+    # F4: plan/tier/quota/image checks before anything billable exists; roll back whatever we created if the deploy still fails
+    import copy
+    pre = copy.deepcopy(spec); pre_vols = [{"name": f"{name}-{v['name']}"[:32].rstrip("-"), "size_gb": v.get("size_gb", 1)} for v in t.get("volumes", [])]
+    pre = engine.validate(pre); engine._check_platform_image(account_id, pre); engine.apply_tier_limits(account_id, pre, redeploy=False)
+    for v in pre_vols:
+        if q("select 1 from volumes where name=?", (v["name"],), one=True): raise PermissionError("volume exists")
+    if "postgres" in t and q("select 1 from pg_dbs where name=?", (f"{name}-db",), one=True): raise PermissionError("postgres name taken")
+    created_vols, created_pg = [], None
+    try:
+        vols = []
+        for v in t.get("volumes", []):
+            vn = f"{name}-{v['name']}"[:32].rstrip("-"); engine.create_volume(account_id, vn, v.get("size_gb", 1)); created_vols.append(vn)
+            q("update volumes set app=?, mount_path=? where name=?", (name, v["path"], vn)); vols.append({"name": vn, "path": v["path"]})
+        if vols: spec["volumes"] = vols
+        pg = None
+        if "postgres" in t:
+            pgn = f"{name}-db"; vmap = pg_vars(t["postgres"]); var = next(iter(vmap))
+            pg = parity.pg_create(account_id, pgn, t["postgres"].get("plan", "pg-dev")); created_pg = pgn
+            row = q("select * from pg_dbs where name=?", (pgn,), one=True)
+            url = parity.pg_url(row); u = urllib.parse.urlsplit(url)
+            parts = {"url": url, "host": u.hostname, "port": str(u.port or 5432), "database": u.path.lstrip("/"),
+                     "user": urllib.parse.unquote(u.username or ""), "password": urllib.parse.unquote(u.password or "")}
+            spec["networks"] = [parity.pg_net(pgn)]
+            for k, f in vmap.items(): spec["env"][k] = parts[f]
+            q("update pg_dbs set attached=? where name=?", (json.dumps([{"app": name, "var": var}]), pgn))
+        r = engine.deploy(account_id, spec)
+    except Exception:
+        if created_pg:
+            try: parity.pg_destroy(created_pg)
+            except Exception: q("delete from pg_dbs where name=?", (created_pg,))
+        for vn in created_vols:
+            try: q("update volumes set app=null, mount_path=null where name=?", (vn,)); engine.delete_volume(vn)
+            except Exception: pass
+        raise
+    from .db import audit as _audit   # F5
+    _audit(account_id, name, "template.deploy" if t["id"] != "from-repo" else "repo.deploy", json.dumps({"template": t["id"], "source": src, "plan": plan}))
     return {"app": r, "template": t["id"], "generated_secrets": generated, "volumes": vols, "postgres": pg and pg["name"],
             "note": "generated secrets are shown once here and stored in the app's env"}
 
@@ -180,7 +201,13 @@ class RepoDeploy(BaseModel):
     name: str; repo: str; ref: str | None = None; port: int = 8080; plan: str | None = None; env: dict[str, str] = {}
 
 def _acct(request):
-    from . import api; return api.acct(request, request.headers.get("authorization"))
+    """F2: these endpoints create new apps, volumes and billable Postgres, so deploy tokens (dt_..., app-scoped or account-wide) are refused."""
+    from . import api
+    authz = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+    if authz.startswith("dt_"): raise HTTPException(403, "deploy tokens can't create apps from templates or repos")
+    a = api.acct(request, request.headers.get("authorization"))
+    if a.get("_token") or a.get("_scope_app"): raise HTTPException(403, "deploy tokens can't create apps from templates or repos")
+    return a
 
 def _run(a, t, b):
     from . import api
@@ -251,7 +278,7 @@ def deploy_button(request: Request, template: str | None = None, repo: str | Non
     except ValueError as x: raise HTTPException(400, str(x))
     if not auth.session_account(request.cookies.get(auth.COOKIE)):
         here = "/deploy?" + urllib.parse.urlencode({"template": template} if template else {"repo": repo})
-        return RedirectResponse("/login?next=" + urllib.parse.quote(here, safe=""), 303)
+        return RedirectResponse("/login?next=" + urllib.parse.quote(auth.safe_next(here, "/templates"), safe=""), 303)
     e = lambda x: html.escape(str(x), quote=True)
     req = [x for x in (p["env"] if p else []) if x["kind"] == "required"]
     fields = "".join(f"<label>{e(x['name'])}<input name='env_{e(x['name'])}' required></label>" for x in req)
@@ -259,7 +286,7 @@ def deploy_button(request: Request, template: str | None = None, repo: str | Non
     extra = "" if p else "<label>Port<input name=port type=number value=8080></label>"
     title = f"Deploy {p['name']}" if p else "Deploy repository"
     inner = f"""<p>{e(p['description']) if p else 'From <code>' + e(repo) + '</code>'}</p>
-<form id=f class=card><label>App name<input name=name required pattern='[a-z0-9][a-z0-9-]{{1,38}}[a-z0-9]'></label>{fields}{extra}<button class=btn>Deploy</button></form><pre id=o></pre>
+<form id=f class=card><label>App name<input name=name required pattern='[a-z][a-z0-9\-]{{1,21}}[a-z0-9]' minlength=3 maxlength=23 title='3-23 chars: lowercase letters, digits, hyphens; starts with a letter'></label>{fields}{extra}<button class=btn>Deploy</button></form><pre id=o></pre>
 <script>document.getElementById('f').onsubmit=async function(ev){{ev.preventDefault();var fd=new FormData(this),b={{name:fd.get('name'),env:{{}}}};
 for(var [k,v] of fd.entries()){{if(k.indexOf('env_')==0)b.env[k.slice(4)]=v}}{'' if p else "b.repo=" + json.dumps(repo) + ";b.port=+fd.get('port');"}
 var r=await fetch({json.dumps(ep)},{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json','X-Aloof-CSRF':'1'}},body:JSON.stringify(b)}});

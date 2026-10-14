@@ -84,3 +84,12 @@ def end_session(tok): q("delete from sessions where token_hash=?", (sha256(tok o
 def set_password(account_id, password):
     if len(password or "") < 10: raise ValueError("password must be at least 10 characters")
     q("update accounts set password_hash=? where id=?", (hash_password(password), account_id))
+
+def safe_next(n, default="/dashboard"):
+    """Post-login redirect target: only same-site paths that start with exactly one '/' and contain no backslash,
+    control characters or whitespace (browsers strip TAB/CR/LF, turning '/\t/evil.com' into '//evil.com')."""
+    import re as _re, urllib.parse as _u
+    if not isinstance(n, str) or not n or len(n) > 2000: return default
+    if _re.search(r"[\x00-\x20\x7f\\]", n) or not n.startswith("/") or n.startswith("//"): return default
+    if _u.urlsplit(n).netloc or _u.urlsplit(n).scheme: return default
+    return n

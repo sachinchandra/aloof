@@ -74,7 +74,7 @@ def test_admin_access_control_and_metrics():
     aid = q("select id from accounts where email like 'z%@x.com' order by id desc limit 1", one=True)["id"]
     assert o.post(f"/v1/admin/accounts/{aid}/test", json={"is_test": True}, headers={"X-Aloof-CSRF": "1"}).status_code == 200
 def test_login_next_redirect_js_has_no_backslash_regex():
-    h = c.get("/login?next=/admin").text; assert "get('next')" in h and "fromCharCode(92)" in h and "/^\\/" not in h
+    h = c.get("/login?next=/admin").text; assert "get('next')" in h and "u.origin===location.origin" in h and "/^\\/" not in h
 def test_qa_head_404_docs():
     from fastapi.testclient import TestClient
     from paas import api
