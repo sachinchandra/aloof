@@ -181,9 +181,11 @@ def _set_release(name, version, status, image=None, spec=None):
     q("update releases set status=?" + (", image=?" if image else "") + (", spec=?" if spec else "") + " where app=? and version=?",
       (status, *([image] if image else []), *([dump_spec(spec)] if spec else []), name, version))
 def releases(name):
+    from . import selfheal
     return [{k: r[k] for k in ("version", "image", "status", "reason", "created")} | {"plan": load_spec(r["spec"]).get("plan"), "env_keys": sorted(load_spec(r["spec"]).get("env", {}))}
+            | {"auto_rollback": selfheal.auto_rollback_info(name, r["version"])}
             for r in q("select * from releases where app=? order by version desc limit 50", (name,))]
-def rollback(name, version=None):
+def rollback(name, version=None, reason=None, only_if_latest=None):
     """Redeploy an earlier release's image + config (env, plan, port, command, scale, health). Volumes, Postgres attachments and
     domains stay as they are now. No rebuild, so it's fast; zero-downtime like any deploy."""
     cur = q("select version from releases where app=? and status='active' order by version desc", (name,), one=True)
@@ -192,7 +194,12 @@ def rollback(name, version=None):
               (name, *([cur["version"]] if cur else [])), one=True)
     else: r = q("select * from releases where app=? and version=?", (name, int(version)), one=True)
     if not r or not r["image"]: raise ValueError("no earlier release to roll back to" if version is None else f"release v{version} not found or never built")
-    app = q("select * from apps where name=?", (name,), one=True); now_spec = load_spec(app["spec"]); spec = load_spec(r["spec"])
+    app = q("select * from apps where name=?", (name,), one=True)
+    if not app or app["status"] == "destroyed": raise ValueError("app was deleted")
+    if only_if_latest is not None:   # auto-rollback: only if the watched release is still the newest and the app is idle/running
+        top = q("select max(version) v from releases where app=?", (name,), one=True)["v"]
+        if top != only_if_latest or app["status"] not in ("running", "idle"): raise ValueError(f"v{only_if_latest} is no longer the latest release")
+    now_spec = load_spec(app["spec"]); spec = load_spec(r["spec"])
     for k in ("volumes", "networks"): spec[k] = now_spec.get(k, [])
     for db in q("select attached from pg_dbs"):   # keep live database attachments (their URLs) as they are now
         for x in json.loads(db["attached"] or "[]"):
@@ -200,7 +207,7 @@ def rollback(name, version=None):
     spec["_image"] = r["image"]
     q("update apps set spec=?, status='queued', updated=?, error=null where name=?", (dump_spec(spec), time.time(), name))
     event(name, f"rollback to v{r['version']} queued")
-    threading.Thread(target=_run_deploy, args=(name, r["image"], f"rollback to v{r['version']}"), daemon=True).start()
+    threading.Thread(target=_run_deploy, args=(name, r["image"], reason or f"rollback to v{r['version']}", only_if_latest), daemon=True).start()
     return get_app(name)
 def _prune_images(name, drv):
     keep = {r["image"] for r in q("select image from releases where app=? order by version desc limit ?", (name, RELEASE_KEEP))}
@@ -225,12 +232,16 @@ def _track_deploy(app, spec, ver, reason):
         if analytics.enabled() and analytics.once(app["account_id"], "first_deploy_succeeded"):
             analytics.capture(app["account_id"], "first_deploy_succeeded", {k: p[k] for k in ("app_id", "region", "source_type")})
     except Exception: pass
-def _run_deploy(name, image=None, reason=None):
+def _run_deploy(name, image=None, reason=None, only_if_latest=None):
     """Zero-downtime: new instances start and must pass readiness (HTTP health path, or TCP for databases) before the old ones
     stop. If any new instance fails, the new ones are removed and the previous release keeps serving. Apps with a volume are
     single-writer, so the old instance stops first (a brief gap) and a failed start is reported."""
     with _lock(name):
-        app = q("select * from apps where name=?", (name,), one=True); spec = load_spec(app["spec"])
+        app = q("select * from apps where name=?", (name,), one=True)
+        if not app or app["status"] == "destroyed": return   # deleted while queued: never resurrect
+        if only_if_latest is not None and (q("select max(version) v from releases where app=?", (name,), one=True)["v"] or 0) != only_if_latest:
+            event(name, f"self-heal: auto-rollback dropped (a newer deploy superseded v{only_if_latest})"); return
+        spec = load_spec(app["spec"])
         drv = get_drivers()[app["provider"]]; log = lambda m: event(name, m)
         prev = q("select * from releases where app=? and status='active' order by version desc", (name,), one=True)
         src = spec.get("source") or {}
@@ -263,6 +274,11 @@ def _run_deploy(name, image=None, reason=None):
             q("update apps set status=?, updated=?, error=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(),
               (f"{len(bad)} instance(s) not ready" if bad else None), name))
             _set_release(name, ver, "active"); log(f"deploy complete (v{ver} live)")
+            try:
+                from . import selfheal
+                rid = (q("select id from releases where app=? and version=?", (name, ver), one=True) or {}).get("id")
+                selfheal.on_active(name, ver, prev["version"] if prev else None, reason or "deploy", rid)
+            except Exception as e: log(f"self-heal: {e}")
             _track_deploy(app, spec, ver, reason)
             try: _sync_groups(name, app["account_id"], spec, image)
             except Exception as e: log(f"process groups: {e}")
@@ -289,7 +305,7 @@ def deploy_progress(name):
     rel = q("select version, status, reason, created, image from releases where app=? order by version desc limit 1", (name,), one=True)
     if rel and rel["created"] < t0 - 1: rel = None   # this deploy's release row isn't written yet
     st = app["status"]; src = load_spec(app["spec"]).get("source") or {}
-    from_image = bool(src.get("image")) or bool(rel and (rel["reason"] or "").startswith("rollback"))
+    from_image = bool(src.get("image")) or bool(rel and (rel["reason"] or "").startswith(("rollback", "auto-rollback")))
     pushed = any(e["msg"].startswith("pushed ") for e in evs)
     if rel and rel["status"] == "active": phase = "live"
     elif rel and rel["status"] == "failed": phase = "failed"
@@ -409,6 +425,8 @@ def destroy(name):
     with _lock(name):
         for o in q("select * from instances where app=? and status='running'", (name,)): _stop(o)
     q("update apps set status='destroyed' where name=?", (name,)); event(name, "destroyed")
+    try: from . import selfheal; selfheal.forget(name)
+    except Exception: pass
 def get_app(name):
     a = q("select * from apps where name=?", (name,), one=True)
     if not a: return None
