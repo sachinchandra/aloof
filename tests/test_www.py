@@ -128,3 +128,14 @@ def test_hero_and_footer_copy():
     h = c.get("/").text
     assert "Backends your AI can deploy and run on its own. Idle apps cost nothing, busy ones scale up." in h and "They run in the EU" not in h
     for pth in ("/", "/pricing", "/docs", "/examples", "/terms"): assert "The cloud for apps your AI ships." in c.get(pth).text, pth
+def test_llms_txt_tools_and_copy():
+    import re, os
+    t = c.get("/llms.txt").text
+    from paas import site
+    src = open(os.path.join(os.path.dirname(__file__), "..", "mcp_server", "server.py")).read(); live = None
+    assert len(site.mcp_tool_names()) == src.count("@mcp.tool(")
+    names = site.mcp_tool_names(); assert "diagnose_app" in names and "list_templates" in names and "deploy_template" in names
+    if live is not None: assert names == live
+    assert f"Tools ({len(names)}" in t and ", ".join(names) in t and ", ".join(names) in c.get("/docs/mcp").text
+    for bad in ("fly.io", "Fly.io", "Render", "Railway", "Heroku", "per workspace", "/workspace", "Unlimited seats", "for teams"): assert bad not in t, bad
+    assert "$20/mo for 1 user" in t and "/v1/templates" in t and "/v1/billing/runway" in t and "/v1/regions" in t and "coming_soon" in t

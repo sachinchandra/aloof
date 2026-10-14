@@ -608,8 +608,11 @@ def _llms_gpu():
         return "GPU per hour: " + ", ".join(f"{k} ${v['price_usd_hr']:.2f}" for k, v in PLANS.items() if v["kind"] == "gpu")
     return ("GPUs: COMING SOON (phase 2: " + ", ".join(k for k, v in PLANS.items() if v["kind"] == "gpu") + "). Not deployable yet; "
             "join the waitlist: POST {{API}}/v1/waitlist {\"email\":\"...\",\"gpu\":\"gpu-h100\"}")
+def mcp_tool_names(): return site.mcp_tool_names()
 @app.get("/llms.txt", response_class=PlainTextResponse)
-def llms(): return open(os.path.join(ROOT,"llms.txt")).read().replace("{{GPU}}", _llms_gpu()).replace("{{API}}", PUBLIC_API_URL).replace("{{MCP}}", PUBLIC_MCP_URL).replace("{{DOMAIN}}", URL_DOMAIN).replace("{{BRAND}}", BRAND)
+def llms():
+    t = mcp_tool_names()
+    return open(os.path.join(ROOT,"llms.txt")).read().replace("{{MCP_TOOL_COUNT}}", str(len(t))).replace("{{MCP_TOOLS}}", ", ".join(t)).replace("{{GPU}}", _llms_gpu()).replace("{{API}}", PUBLIC_API_URL).replace("{{MCP}}", PUBLIC_MCP_URL).replace("{{DOMAIN}}", URL_DOMAIN).replace("{{BRAND}}", BRAND)
 @app.get("/.well-known/mcp.json")
 def mcp_manifest():
     m = json.load(open(os.path.join(ROOT,"mcp_server","manifest.json")))

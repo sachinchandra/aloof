@@ -52,6 +52,12 @@ def footer(brand):
 <div><h5>Company</h5><a href="/about">About</a><a href="/security">Security</a><a href="/status">Status</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
 <div><h5>Account</h5><a href="/login">Log in</a><a href="/login#register">Sign up</a><a href="/dashboard">Dashboard</a></div></div>
 <div class=base><span>© 2026 {brand}</span><span>Prices in USD, excluding tax.</span></div></div></footer>"""
+def mcp_tool_names():
+    """Tool names registered with @mcp.tool() in mcp_server/server.py, in order. Parsed (not imported) so the web process
+    doesn't load the MCP server; llms.txt and the MCP docs use this so the list can't drift from the code."""
+    try: src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp_server", "server.py")).read()
+    except OSError: return []
+    return re.findall(r"@mcp\.tool\([^)]*\)\s*\n(?:@[^\n]*\n)*\s*(?:async\s+)?def\s+(\w+)", src)
 def posthog_key():
     k = (os.environ.get("POSTHOG_KEY") or os.environ.get("POSTHOG_API_KEY") or "").strip()
     if not k:
@@ -375,7 +381,7 @@ aloof autoscale preview --min 0 --max 2 --idle 120    # scale to zero after 2 id
 <p><b>Remote (OAuth 2.1)</b>: add <code>{mcp}</code> as a connector in Claude, ChatGPT or Cursor. The assistant registers itself (dynamic client registration), sends you to {brand} to approve, and gets a scoped token (PKCE).</p>
 <p><b>Local (stdio)</b>:</p><pre>{{"mcpServers": {{"aloof": {{"command": "python3", "args": ["mcp_server/server.py"],
   "env": {{"ALOOF_API_URL": "{api}", "ALOOF_API_KEY": "pk_..."}}}}}}}}</pre>
-<p>Tools: list_plans, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain, list_releases, rollback_app, create_postgres, list_postgres, attach_postgres, backup_postgres, snapshot_volume, restore_volume, exec_command, add_log_drain, list_offsite_backups, restore_offsite_backup, registry_login, add_git_credential, deploy_with_config, app_status, create_deploy_token.</p>
+<p>Tools ({len(mcp_tool_names())}): {", ".join(mcp_tool_names())}.</p>
 <p>Discovery: <a href="/llms.txt">/llms.txt</a>, <a href="/.well-known/mcp.json">/.well-known/mcp.json</a>.</p>""",
 "api": f"""<h1>REST API</h1><p>Base URL <code>{api}</code>. Authenticate with <code>Authorization: Bearer pk_...</code>. The full interactive reference is at <a href="/api/docs">/api/docs</a>.</p>
 <pre>curl -X POST {api}/v1/apps -H "Authorization: Bearer $ALOOF_API_KEY" -H "Content-Type: application/json" \\
