@@ -1,32 +1,70 @@
 """diagnose_app: a read-only report of what's wrong with an app and the likely fix. Never mutates anything (no restarts,
 no health probes, no scaling). Log lines and events are redacted: env values of the app, and anything key/token-shaped."""
-import re, time, json
+import re, time, json, base64, urllib.parse
 from .db import q
 from .crypto import load_spec
 from .drivers import get_drivers
 
 ERR_RE = re.compile(r"(error|exception|traceback|fatal|panic|critical|killed|out of memory|oom|segfault|refused|cannot|failed|EADDRINUSE|unhandled)", re.I)
-SECRETISH = re.compile(r"(?i)\b(sk|rk|pk|whsec|ghp|gho|github_pat|xox[abp]|dt|re)_[A-Za-z0-9_\-]{8,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{5,}"
-                       r"|(?i:(password|passwd|secret|token|api[_-]?key|authorization|bearer)[\"']?\s*[:=]\s*[\"']?)[^\s\"',;]+"
-                       r"|[a-z][a-z0-9+.\-]*://[^/\s:@]+:[^@\s/]+@")
+_R = [   # (pattern, replacement), applied in order
+    (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*"), "[redacted private key]"),
+    (re.compile(r"(?i)\b((?:proxy-)?authorization|cookie|set-cookie|x-api-key|x-auth-token|api-key)(\s*[:=]\s*)[^\r\n]*"), r"\1\2[redacted]"),
+    (re.compile(r"(?i)\bbearer\s+[^\s\"',;]+"), "Bearer [redacted]"),
+    (re.compile(r"(?i)\b(basic)\s+[A-Za-z0-9+/=]{8,}"), r"\1 [redacted]"),
+    (re.compile(r"(?i)([a-z][a-z0-9+.\-]*://)[^@\s/]*:[^@\s/]+@"), r"\1[redacted]@"),
+    (re.compile(r"(?i)(--?(?:password|passwd|pwd|token|secret|api-key)(?:=|\s+))(\"[^\"]*\"|'[^']*'|\S+)"), r"\1[redacted]"),
+    (re.compile(r"(?i)([\"']?\b(?:password|passwd|pwd|pass|secret|client[_-]?secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key|access[_-]?key|private[_-]?key|session)[\"']?)"
+                r"(\s*[:=]\s*|\s+is\s+)(\"[^\"]*\"|'[^']*'|[^\s&,;]+)"), r"\1\2[redacted]"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b|\bASIA[0-9A-Z]{16}\b"), "[redacted]"),
+    (re.compile(r"\b(?:sk|rk|pk|whsec|ghp|gho|ghu|ghs|ghr|github_pat|dt|re|rzp_live|rzp_test|phc|phx)_[A-Za-z0-9_]{8,}"), "[redacted]"),
+    (re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"), "[redacted]"),
+    (re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{8,}"), "[redacted]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{4,}"), "[redacted]"),
+    # generic high-entropy token: >=24 chars with upper, lower and digit (AWS secret keys, random API keys)
+    (re.compile(r"(?<![A-Za-z0-9/+_\-])(?=[A-Za-z0-9/+_\-=]*[A-Z])(?=[A-Za-z0-9/+_\-=]*[a-z])(?=[A-Za-z0-9/+_\-=]*[0-9])[A-Za-z0-9/+_\-]{24,}={0,2}"), "[redacted]"),
+]
 LISTEN_RE = re.compile(r"(?i)(listening|running|started|serving|bound)\D{0,40}(?:port\s*|:)(\d{2,5})\b")
 
-def redactor(env):
-    vals = sorted({str(v) for v in (env or {}).values() if v is not None and len(str(v)) >= 4}, key=len, reverse=True)
+def _decodings(tok):
+    out = []
+    try: out.append(urllib.parse.unquote_plus(tok))
+    except Exception: pass
+    t = tok.strip("\"'.,;:()[]{}")
+    if len(t) >= 8 and re.fullmatch(r"[A-Za-z0-9+/_\-]+=*", t):
+        for f in (base64.b64decode, base64.urlsafe_b64decode):
+            try: out.append(f(t + "=" * (-len(t) % 4)).decode("utf-8", "ignore"))
+            except Exception: pass
+    return out
+
+def redactor(*envs):
+    """Redact env values (verbatim, URL-encoded and base64 forms), then key/token/password-shaped strings."""
+    vals = sorted({str(v) for env in envs for v in (env or {}).values() if v is not None and len(str(v)) >= 4}, key=len, reverse=True)
     def r(s):
         for v in vals: s = s.replace(v, "[redacted]")
-        return SECRETISH.sub(lambda m: (m.group(2) + "=[redacted]") if m.group(2) else ("[redacted]@" if "://" in m.group(0) else "[redacted]"), s)
+        if vals:
+            toks = s.split()
+            for t in set(toks):
+                if any(v in d for d in _decodings(t) for v in vals): s = s.replace(t, "[redacted]")
+        for pat, rep in _R: s = pat.sub(rep, s)
+        return s
     return r
 
+_cache = {}   # app -> (ts, report): at most one full diagnosis (log fetches) per app every few seconds
 def _exit_info(drv, iid):
     try: return drv.exit_info(iid) if hasattr(drv, "exit_info") else None
     except Exception: return None
 
-def diagnose(name, log_lines=300, now=None):
+def diagnose(name, log_lines=300, now=None, cache_s=5):
+    c = _cache.get(name)
+    if cache_s and c and time.time() - c[0] < cache_s: return c[1]
+    rep = _diagnose(name, log_lines, now); _cache[name] = (time.time(), rep); return rep
+def _diagnose(name, log_lines=300, now=None):
     from . import controller, billing
     now = now or time.time()
     app = q("select * from apps where name=?", (name,), one=True)
-    spec = load_spec(app["spec"]); red = redactor(spec.get("env")); drivers = get_drivers()
+    spec = load_spec(app["spec"]); drivers = get_drivers()
+    old_envs = [load_spec(r["spec"]).get("env") for r in q("select spec from releases where app=? order by version desc limit 10", (name,))]
+    red = redactor(spec.get("env"), *old_envs)
     events = q("select ts, msg from events where app=? and ts>? order by id desc limit 200", (name, now - 86400))
     ev = [{"ts": e["ts"], "msg": red(e["msg"])} for e in events][::-1]
     pick = lambda *pats: [e for e in ev if any(p in e["msg"] for p in pats)]
