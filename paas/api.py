@@ -1,4 +1,4 @@
-import os, json, itertools, httpx, time, asyncio, socket, logging
+import os, json, itertools, httpx, time, asyncio, socket, logging, weakref
 from fastapi import FastAPI, Header, HTTPException, Request, Depends, Cookie, WebSocket, BackgroundTasks
 log = logging.getLogger("paas.api")
 from fastapi.responses import PlainTextResponse, HTMLResponse, FileResponse, StreamingResponse, Response, RedirectResponse, JSONResponse
@@ -871,33 +871,48 @@ async def edge(path: str, request: Request):
     qs = f"?{request.url.query}" if request.url.query else ""
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     hdrs = {k:v for k,v in request.headers.items() if k.lower() not in HOP} | {"x-forwarded-host": host, "x-forwarded-proto": proto}
-    controller.M.begin(name); body_bytes = await request.body(); r = None
-    for attempt in range(3):
-        url = f"http://{i['host']}:{i['port']}/{path}" + qs
-        try:
-            lb.begin(i["id"])
-            r = await client.send(client.build_request(request.method, url, headers=hdrs, content=body_bytes), stream=True); break
-        except httpx.ConnectError as e:
-            err = e; lb.end(i["id"]); lb.failure(name, i["id"], insts, "connection refused"); tried.add(i["id"])
-            # instance restarting / port remapped: refresh endpoints and retry on the least-loaded other instance
-            await asyncio.sleep(0.5 * attempt)
-            await asyncio.to_thread(controller.health_tick)
-            insts = q("select id,host,port from instances where app=? and status='running'", (name,)) or insts
-            i = lb.pick(name, insts, exclude=tried)
-        except httpx.HTTPError as e:
-            err = e; lb.end(i["id"]); lb.failure(name, i["id"], insts, type(e).__name__); break
-    if r is None:
-        controller.M.end(name); return PlainTextResponse(f"upstream error: {err}", 502)
-    if r.status_code >= 500: lb.failure(name, i["id"], insts, f"HTTP {r.status_code}")
-    else: lb.success(i["id"])
-    iid = i["id"]
+    held = {"m": True, "lb": None}
+    def release():   # idempotent: every exit path (errors, cancellation, finished or abandoned body) releases its counters once
+        if held["lb"]: lb.end(held["lb"]); held["lb"] = None
+        if held["m"]: controller.M.end(name); held["m"] = False
+    controller.M.begin(name); r = None; err = None
+    try:
+        body_bytes = await request.body()
+        for attempt in range(3):
+            url = f"http://{i['host']}:{i['port']}/{path}" + qs
+            lb.begin(i["id"]); held["lb"] = i["id"]
+            try:
+                r = await client.send(client.build_request(request.method, url, headers=hdrs, content=body_bytes), stream=True); break
+            except httpx.ConnectError as e:
+                err = e; lb.end(i["id"]); held["lb"] = None; lb.failure(name, i["id"], insts, "connection refused"); tried.add(i["id"])
+                # instance restarting / port remapped: refresh endpoints and retry on the least-loaded other instance
+                await asyncio.sleep(0.5 * attempt)
+                await asyncio.to_thread(controller.health_tick)
+                insts = q("select id,host,port from instances where app=? and status='running'", (name,)) or insts
+                i = lb.pick(name, insts, exclude=tried)
+            except httpx.HTTPError as e:
+                err = e; lb.end(i["id"]); held["lb"] = None
+                if isinstance(e, httpx.TimeoutException): lb.failure(name, i["id"], insts, "timeout")
+                break
+        if r is None:
+            release(); return PlainTextResponse(f"upstream error: {err}", 502)
+        if r.status_code in lb.EJECT_STATUSES: lb.failure(name, i["id"], insts, f"HTTP {r.status_code}")
+        elif r.status_code < 500: lb.success(i["id"])
+    except BaseException:
+        release()
+        if r is not None: await r.aclose()
+        raise
     async def body():
         try:
             async for chunk in r.aiter_raw():
                 EGRESS[name] = EGRESS.get(name, 0) + len(chunk); yield chunk
         finally:
-            await r.aclose(); controller.M.end(name); lb.end(iid)
-    return StreamingResponse(body(), status_code=r.status_code, headers={k:v for k,v in r.headers.items() if k.lower() not in HOP} | {"x-paas-instance": str(i["port"])})
+            try: await r.aclose()
+            finally: release()
+    gen = body(); weakref.finalize(gen, release)   # body never iterated (client gone before streaming): release on GC
+    from starlette.background import BackgroundTask
+    return StreamingResponse(gen, status_code=r.status_code, background=BackgroundTask(release),
+                             headers={k:v for k,v in r.headers.items() if k.lower() not in HOP} | {"x-paas-instance": str(i["port"])})
 
 # Branded 404 for browsers; API/JSON clients keep {"detail": ...}
 from starlette.exceptions import HTTPException as _StarHTTP
