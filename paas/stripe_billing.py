@@ -17,6 +17,23 @@ E = lambda k, d=None: os.environ.get(k, d)
 API = lambda: E("STRIPE_API_BASE", "https://api.stripe.com/v1")
 MIN_TOPUP, MAX_TOPUP = 10, 5000
 def configured(): return bool(E("STRIPE_SECRET_KEY"))
+PAYMENTS_TTL = 600; _acct = {"t": 0.0, "open": None}
+PAYMENTS_SOON = "Paid plans are opening soon: card payments aren't enabled on our Stripe account yet. Nothing was charged."
+def payments_open(client=None, now=None):
+    """True when Stripe can take card payments (account charges_enabled). Cached 10 min. If Stripe can't be reached, the last
+    known answer is kept (or True on first boot) so a Stripe blip never hides billing; checkout will still report errors."""
+    if not configured(): return False
+    now = now or time.time()
+    if _acct["open"] is not None and now - _acct["t"] < PAYMENTS_TTL: return _acct["open"]
+    try:
+        c = client or httpx.Client(timeout=10)
+        r = c.get(f"{API()}/account", headers={"Authorization": f"Bearer {E('STRIPE_SECRET_KEY')}", "Stripe-Version": E("STRIPE_API_VERSION", "2024-06-20")})
+        r.raise_for_status(); _acct.update(t=now, open=bool(r.json().get("charges_enabled")))
+    except Exception as e:
+        log.warning("stripe account check failed: %s", e); _acct.update(t=now, open=True if _acct["open"] is None else _acct["open"])
+    return _acct["open"]
+def require_payments_open():
+    if not payments_open(): raise RuntimeError(PAYMENTS_SOON)
 def tax_enabled(): return E("STRIPE_TAX", "0") == "1"
 def tier_price(tier): return E(f"STRIPE_PRICE_{tier.upper()}")
 def _flat(d, pre=""):

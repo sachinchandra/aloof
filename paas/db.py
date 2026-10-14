@@ -95,16 +95,39 @@ def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
     return sql.replace("AUTOPK", "integer primary key autoincrement")
 _lock = threading.RLock()
+import psycopg, logging, time as _t
+_log = logging.getLogger("paas.db")
+def wait_for_db(url=DB_URL, timeout=None, connect=None, sleep=_t.sleep, now=_t.monotonic):
+    """Block until Postgres accepts connections (it runs in Docker and may still be starting after a reboot or a dockerd
+    restart). Exponential backoff 0.5 s -> 5 s, up to PAAS_DB_WAIT_SECONDS (default 120); then raise so supervisord retries."""
+    timeout = float(os.environ.get("PAAS_DB_WAIT_SECONDS", "120")) if timeout is None else timeout
+    connect = connect or (lambda: psycopg.connect(url, connect_timeout=5).close())
+    end, delay, n = now() + timeout, 0.5, 0
+    while True:
+        n += 1
+        try: connect(); (n > 1 and _log.warning("database ready after %d attempts", n)); return n
+        except psycopg.OperationalError as e:
+            if now() >= end: raise RuntimeError(f"database not reachable after {timeout:.0f}s ({n} attempts): {e}") from e
+            if n == 1 or n % 5 == 0: _log.warning("waiting for database (attempt %d): %s", n, str(e).splitlines()[0])
+            sleep(min(delay, max(0.0, end - now()))); delay = min(delay * 2, 5.0)
 if PG:
     from psycopg_pool import ConnectionPool
     from psycopg.rows import dict_row
-    _pool = ConnectionPool(DB_URL, min_size=2, max_size=20, kwargs={"autocommit": True, "row_factory": dict_row}, open=True)
+    wait_for_db()
+    _pool = ConnectionPool(DB_URL, min_size=2, max_size=20, kwargs={"autocommit": True, "row_factory": dict_row}, open=True, check=ConnectionPool.check_connection)
     import atexit; atexit.register(_pool.close)
-    def q(sql, args=(), one=False):
-        with _pool.connection() as c:
-            cur = c.execute(sql.replace("?", "%s"), args)
-            rows = cur.fetchall() if cur.description else []
-        return (rows[0] if rows else None) if one else rows
+    def q(sql, args=(), one=False, _retries=3):
+        """Connection-level failures (DB restarting, connection killed) are retried with backoff; the statement is autocommit,
+        so a statement cut off by a disconnect was rolled back and is safe to re-run."""
+        for attempt in range(_retries + 1):
+            try:
+                with _pool.connection() as c:
+                    cur = c.execute(sql.replace("?", "%s"), args)
+                    rows = cur.fetchall() if cur.description else []
+                return (rows[0] if rows else None) if one else rows
+            except (psycopg.OperationalError, psycopg.errors.AdminShutdown) as e:
+                if attempt == _retries: raise
+                _log.warning("db connection error, retrying (%d/%d): %s", attempt + 1, _retries, str(e).splitlines()[0]); _t.sleep(0.5 * 2 ** attempt)
     def executescript(sql):
         with _pool.connection() as c:
             for stmt in [s for s in sql.split(";") if s.strip()]: c.execute(stmt)

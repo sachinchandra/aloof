@@ -251,7 +251,7 @@ class CheckoutReq(BaseModel): credit_usd: float
 @app.post("/v1/billing/checkout")
 def billing_checkout(o: CheckoutReq, a=Depends(acct)):
     """Stripe Checkout for a prepaid USD top-up ($10–$5,000). Returns {url}; the wallet is credited by the webhook."""
-    try: return stripe_billing.create_topup_session(a, o.credit_usd)
+    try: stripe_billing.require_payments_open(); return stripe_billing.create_topup_session(a, o.credit_usd)
     except ValueError as e: raise HTTPException(400, str(e))
     except RuntimeError as e: raise HTTPException(503, str(e))
 class SubReq(BaseModel): tier: str
@@ -259,7 +259,7 @@ class SubReq(BaseModel): tier: str
 def billing_subscribe(o: SubReq, a=Depends(acct)):
     """Stripe Checkout (subscription) for the Hobby or Pro tier; the tier switches when Stripe confirms."""
     if o.tier in TIERS and not TIERS[o.tier]["fee_usd"]: raise HTTPException(400, "Free needs no subscription; cancel in the customer portal")
-    try: return stripe_billing.create_subscription_session(a, o.tier)
+    try: stripe_billing.require_payments_open(); return stripe_billing.create_subscription_session(a, o.tier)
     except ValueError as e: raise HTTPException(400, str(e))
     except RuntimeError as e: raise HTTPException(503, str(e))
 @app.post("/v1/billing/portal")
@@ -297,7 +297,7 @@ async def billing_webhook(request: Request):
 @app.get("/v1/billing")
 def billing_summary(a=Depends(acct)):
     a = q("select * from accounts where id=?", (a["id"],), one=True)
-    return _wallet(a) | {"currency": "USD", "stripe": stripe_billing.configured(), "stripe_tax": stripe_billing.tax_enabled(), "topup_min_usd": stripe_billing.MIN_TOPUP, "topup_max_usd": stripe_billing.MAX_TOPUP, "rates": RATES, "razorpay": rzp.enabled(),
+    return _wallet(a) | {"currency": "USD", "stripe": stripe_billing.configured(), "payments_open": stripe_billing.payments_open(), "stripe_tax": stripe_billing.tax_enabled(), "topup_min_usd": stripe_billing.MIN_TOPUP, "topup_max_usd": stripe_billing.MAX_TOPUP, "rates": RATES, "razorpay": rzp.enabled(),
             "subscription": a.get("stripe_subscription"), "month": billing.month_summary(a["id"]), "tiers": TIERS,
             "profile": {k: a.get(k) for k in ("billing_name", "country", "tax_id")},
             "payments": q("select id,kind,credit_cents,amount_cents,tier,status,invoice_url,created from stripe_sessions where account_id=? order by created desc limit 50", (a["id"],)),
