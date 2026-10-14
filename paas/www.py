@@ -53,7 +53,7 @@ def rss():
 def guides_index():
     cards = "".join(f"<a class='card reveal post-card' href='/guides/{k}'><div class=meta><span class=tag>{v[1]}</span></div><h3>{v[0]}</h3><p>Detected from {v[2]}. {('Release command: <code>' + v[4] + '</code>.') if v[4] else ''}</p><span class=more>Open guide →</span></a>" for k, v in GUIDES.items())
     return render("/guides", "Framework guides · Aloof", "Quickstarts for FastAPI, Django, Flask, Next.js, Express, Rails, Go and any Docker image.",
-                  shell("Guides", "Framework quickstarts", "Each guide uses <code>aloof launch</code> to generate config, then <code>aloof deploy</code>. Same workflow for every stack.", f"<div class=grid>{cards}</div>"), og="guides")
+                  shell("Guides", "Framework quickstarts", "Each guide uses <code>aloof launch</code> to generate config, then <code>aloof deploy</code>. Same workflow for every stack.", f"<div class=grid>{cards}</div><p class=muted style='margin-top:28px;max-width:760px'>These guides cover eight stacks. <code>aloof launch</code> also detects Remix, Nuxt, Rust, PHP/Laravel, Java (Maven/Gradle), Elixir/Phoenix and static sites and writes a Dockerfile for them; until they have their own guide, follow the <a href='/guides/docker'>Docker guide</a> after running <code>aloof launch</code>. See <a href='/docs/deploy'>Deploying apps</a>.</p>"), og="guides")
 @R.get("/guides/{slug}", response_class=HTMLResponse)
 def guide(slug: str):
     if slug not in GUIDES: raise HTTPException(404, "no such guide")

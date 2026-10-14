@@ -207,19 +207,28 @@ def pricing(brand):
 <h2 class=pp-h id=faq>Pricing FAQ</h2><div class=pp-faq>{faqh}</div>
 <div class=pp-end><h2>Start free, upgrade when you need to.</h2><p class=muted>{T['free']['max_apps']} apps and ${free['included_usage_usd']:g} of usage a month on the Free plan. No card required.</p><a class="btn pri" href="/login#register">Create an account</a> <a class="btn ghost" href="/docs/billing">Billing docs</a></div>
 </div></section>""", brand, desc="Aloof pricing: Free, Hobby $5 and Pro $20 per workspace with usage included. Compute billed per second; volumes, egress and managed Postgres in USD.")
-DOCS = ["quickstart", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "mcp", "api", "nodes"]
+DOCS = ["quickstart", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "mcp", "api", "nodes", "troubleshooting", "support"]
 TITLES = {"quickstart": "Quickstart", "cli": "CLI", "deploy": "Deploying apps", "config": "aloof.toml reference", "private": "Private registries & repos", "github": "GitHub App: push-to-deploy & previews", "ci": "Deploy tokens & CI", "processes": "Workers, release commands & cron", "networking": "Private networking, proxy, IPs & certs", "gpu": "GPU workloads", "volumes": "Volumes", "autoscaling": "Autoscaling & scale to zero",
-          "domains": "Custom domains", "releases": "Releases & rollback", "postgres": "Managed Postgres", "console": "SSH & exec console", "logs": "Logs, retention & drains", "billing": "Billing, invoices & tax", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes"}
+          "domains": "Custom domains", "releases": "Releases & rollback", "postgres": "Managed Postgres", "console": "SSH & exec console", "logs": "Logs, retention & drains", "billing": "Billing, invoices & tax", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes", "troubleshooting": "Troubleshooting & FAQ", "support": "Support"}
 def docs(pg, brand, base, api, mcp):
     if pg not in DOCS: return None
+    EDGE_TXT = ' or '.join(f'<code>{x}</code>' for x in os.environ.get('PAAS_EDGE_IPS', '').split(',') if x.strip() and ':' not in x) or 'our edge IP (<code>aloof ips &lt;app&gt;</code>)'
     from .site_devx import pages as _devx_pages
     c = ({
 "quickstart": f"""<h1>Quickstart</h1><ol><li><a href="/login#register">Create an account</a>. The Free plan includes $1/month of usage with a hard cap; top up or pick Hobby/Pro when you need more.</li>
-<li>Install the CLI: <code>curl -fsSL {api}/cli/aloof -o /usr/local/bin/aloof && chmod +x /usr/local/bin/aloof</code></li>
-<li>Log in: <code>aloof signup you@company.com</code>, or paste the API key from the dashboard into <code>~/.aloof.json</code>.</li>
+<li>Install the CLI. It's a single Python 3 script and runs on <b>macOS and Linux</b>. On <b>Windows</b>, use it inside <a href="https://learn.microsoft.com/windows/wsl/install" rel=noopener>WSL</a>.
+<pre># system-wide (asks for your password)
+sudo curl -fsSL {api}/cli/aloof -o /usr/local/bin/aloof && sudo chmod +x /usr/local/bin/aloof
+
+# or without sudo, into ~/.local/bin (make sure it's on your PATH)
+mkdir -p ~/.local/bin && curl -fsSL {api}/cli/aloof -o ~/.local/bin/aloof && chmod +x ~/.local/bin/aloof</pre>
+Check it with <code>aloof --help</code>. It needs <code>python3</code>, which macOS and most Linux distributions already have.</li>
+<li>Log in. New here? <code>aloof signup you@company.com</code> creates an account and saves the key for you. Already have an account? Copy your API key from Dashboard → API keys and save it in <code>~/.aloof.json</code>:
+<pre>{{"api": "{api}", "key": "pk_..."}}</pre>
+Then <code>chmod 600 ~/.aloof.json</code>, since the key has full access to your account. In CI, set <code>ALOOF_API_URL</code> and <code>ALOOF_API_TOKEN</code> (a <a href="/docs/ci">deploy token</a>) instead.</li>
 <li>Deploy: <pre>aloof deploy hello --image nginx:alpine --port 80
 live: https://hello.{base}/</pre></li></ol>
-<p>Your app must listen on <code>$PORT</code> (default 8080) over HTTP. Configure it with env vars, and keep persistent data on a <a href="/docs/volumes">volume</a>.</p>""",
+<p>Your app must listen on <code>$PORT</code> (default 8080) over HTTP. Configure it with env vars, and keep persistent data on a <a href="/docs/volumes">volume</a>. If something goes wrong, see <a href="/docs/troubleshooting">Troubleshooting</a>.</p>""",
 "cli": """<h1>CLI</h1><pre>aloof plans | apps | usage
 aloof deploy &lt;app&gt; --image IMG | --git URL [--ref main] [--plan shared-1x-1gb] [--port 8080] [-e K=V] [-n 2]
 aloof status|logs|destroy &lt;app&gt;
@@ -268,7 +277,14 @@ aloof pg url shop-db                   # prints the connection URL (audited)</pr
 <p><b>Backups</b>: a <code>pg_dump</code> runs daily; the last 7 are kept on the edge host's disk, with on-demand backups and restore whenever you need them. Backup storage costs $0.22 per GB-month. These local copies are logical backups, not point-in-time recovery.</p>
 <p><b>Off-site</b>: once a day each database is also encrypted on our side (AES-256-GCM) and uploaded to S3-compatible object storage in a different location. Retention is 7 daily, 4 weekly and 3 monthly copies, and the newest copy is test-restored into a scratch Postgres every week. List and restore with <code>aloof pg offsite shop-db</code> and <code>aloof pg offsite-restore shop-db &lt;id&gt;</code>, or from Dashboard → Postgres.</p>
 <table><tr><th>Plan</th><th>CPU / RAM</th><th>Disk</th><th>Price</th></tr>{PGROWS}</table>
-<p>Not yet: high availability/replicas, point-in-time recovery, extensions beyond the official image, or attaching to apps on remote nodes.</p>""",
+<p>Not yet: high availability/replicas, point-in-time recovery, extensions beyond the official image, or attaching to apps on remote nodes.</p>
+<h2 id=local>Connecting from your laptop</h2><p>Databases are never on the public internet. Open a tunnel with the CLI, then connect to <code>localhost</code>:</p>
+<pre>aloof pg url shop-db                    # user, password and database name (audited)
+aloof proxy 5432 -a pg-shop-db          # forwards localhost:5432 to the database; leave it running
+psql "postgres://aloof:&lt;password&gt;@localhost:5432/&lt;database&gt;"</pre>
+<p>The tunnel runs over your API key, and each session is written to the audit log. If port 5432 is taken locally, use <code>aloof proxy 15432:5432 -a pg-shop-db</code> and connect to port 15432.</p>
+<h2 id=limits>Connections and limits</h2><p>Each database runs the stock Postgres 16 configuration, so <code>max_connections</code> is Postgres's default of 100, shared by every app and tunnel connected to it. On the smaller plans memory runs out well before that, so use a connection pool in your app (most frameworks have one) and keep it to a few connections per instance. Storage is the plan's disk size, listed above.</p>
+<h2 id=resize>Changing plan or disk size</h2><p>Resizing a database in place isn't available yet, and backups restore only into the database they came from. To move to a bigger plan today, copy the data over a tunnel: create the new database (<code>aloof pg create shop-db2 --plan pg-standard</code>), run <code>pg_dump</code> against the old one through <code>aloof proxy</code> and <code>pg_restore</code> into the new one the same way, then attach the new database to your app (which updates <code>DATABASE_URL</code> and redeploys it) and destroy the old one when you're happy. If you'd rather not do that yourself, <a href="/docs/support">contact support</a>.</p>""",
 "console": """<h1>SSH &amp; exec console</h1><pre>aloof ssh api                 # interactive shell (bash or sh) in a running instance
 aloof ssh api --instance 3f2a…
 aloof exec api -- ls -la /data   # one command, prints output, exits with its code</pre>
@@ -286,20 +302,32 @@ aloof drains api list | remove drn_…</pre>
 aloof autoscale preview --min 0 --max 2 --idle 120    # scale to zero after 2 idle minutes</pre>
 <p>With <code>min 0</code>, the first request after idle is held at the edge while an instance starts (about 1s for a small CPU app).</p>""".replace("{brand}", brand),
 "domains": f"""<h1>Custom domains</h1><p>Every app gets <code>https://&lt;app&gt;.{base}</code>. To add your own domain:</p>
-<pre>aloof domains api add api.example.in</pre><p>Then create the two DNS records it prints:</p>
+<pre>aloof domains api add api.example.com</pre><p>Then create the DNS records it prints at your DNS provider:</p>
 <table><tr><th>Type</th><th>Name</th><th>Value</th><th>Purpose</th></tr>
-<tr><td>TXT</td><td><code>_aloof-challenge.api.example.in</code></td><td><code>aloof-verify=&lt;token&gt;</code></td><td>proves you own the domain</td></tr>
-<tr><td>CNAME</td><td><code>api.example.in</code></td><td><code>&lt;app&gt;.{base}</code></td><td>routes traffic (or an A record to our edge IP)</td></tr></table>
-<p>Run <code>aloof domains api verify api.example.in</code>. Once both records check out, the certificate is issued automatically on the first HTTPS request.</p>""",
-"billing": """<h1>Billing, invoices &amp; tax</h1><p>Everything is priced and billed in <b>US dollars</b>. Two ways to pay, both through <b>Stripe</b>:</p>
-<ul><li><b>Prepaid wallet</b>: top up $10–$5,000 with Stripe Checkout (<code>POST /v1/billing/checkout {"credit_usd": 25}</code> or Dashboard → Billing). Credit is added the moment Stripe confirms the payment.</li>
-<li><b>Monthly plan</b>: subscribe to Hobby ($5) or Pro ($20 per workspace) via <code>POST /v1/billing/subscribe {"tier":"pro"}</code>. Manage cards, invoices and cancellation in the Stripe customer portal (<code>POST /v1/billing/portal</code>).</li></ul>
-<p><b>Invoices and tax</b>: Stripe issues an invoice for every payment. Prices exclude tax; VAT, GST or US sales tax is calculated at checkout from your billing address, and you can enter a VAT/GST ID for reverse charge where applicable.</p>
-<p><b>What is metered</b> (per second, in cents): compute while an instance runs (plan $/hr ÷ 3600); volumes per provisioned GB-month ($0.22, attached or not); egress at $0.06/GB.
-Usage up to your tier's included amount (Free $1, Hobby $5, Pro $20) isn't deducted, which is the same model as Railway. Wallet-paid tier switches are pro-rated: <code>PUT /v1/billing/tier {"tier":"pro"}</code>.</p>
-<p>See this month's breakdown in Dashboard → Billing or at <code>GET /v1/billing</code> (<code>month</code>). When credit runs out, apps are suspended, and they resume automatically after a top-up.</p>
+<tr><td>TXT</td><td><code>_aloof-challenge.api.example.com</code></td><td><code>aloof-verify=&lt;token&gt;</code></td><td>proves you own the domain</td></tr>
+<tr><td>CNAME</td><td><code>api.example.com</code></td><td><code>&lt;app&gt;.{base}</code></td><td>routes traffic (subdomains)</td></tr>
+<tr><td>A</td><td><code>example.com</code></td><td>{EDGE_TXT}</td><td>routes traffic (root domains, or instead of the CNAME)</td></tr></table>
+<p>Run <code>aloof domains api verify api.example.com</code>. Once both records check out, the certificate is issued automatically on the first HTTPS request, which usually takes a few seconds. <code>aloof certs</code> shows the status. The edge IP is also printed by <code>aloof ips &lt;app&gt;</code>.</p>
+<h2 id=root>Root (apex) domains</h2><p>DNS doesn't allow a CNAME on a root domain like <code>example.com</code>, so use the <b>A record</b> above. If your provider supports CNAME flattening or ALIAS/ANAME records, you can point those at <code>&lt;app&gt;.{base}</code> instead. To serve both <code>example.com</code> and <code>www.example.com</code>, add each as a domain.</p>
+<h2 id=cloudflare>Cloudflare</h2><p>Set the records to <b>DNS only</b> (grey cloud). With the orange-cloud proxy on, the domain resolves to Cloudflare's IPs instead of ours, so the routing check fails and we can't issue a certificate. TXT records are never proxied, so they're fine as they are.</p>
+<h2 id=propagation>Propagation</h2><p>New records usually show up within a few minutes, but resolvers can cache old answers for as long as the previous record's TTL (often up to an hour, rarely 24–48 hours). It's safe to run <code>verify</code> again as often as you like.</p>
+<h2 id=verify-failed>If verify fails</h2><ul>
+<li><b><code>TXT … not found</code></b>: the record hasn't propagated yet, or the name is wrong. Many DNS panels add your domain automatically, so enter just <code>_aloof-challenge.api</code> rather than the full name. Check with <code>dig TXT _aloof-challenge.api.example.com +short</code>.</li>
+<li><b><code>CNAME points to …</code></b> or <b><code>resolves to …; expected …</code></b>: the routing record points somewhere else. Remove old A/AAAA/CNAME records for the same name, turn off proxying (Cloudflare), and check with <code>dig api.example.com +short</code>.</li>
+<li><b>Verified, but HTTPS shows a certificate error</b>: give it a minute after the first request, then check <code>aloof certs</code>. CAA records on your domain must allow Let's Encrypt (<code>letsencrypt.org</code>).</li></ul>""",
+"billing": """<h1>Billing, invoices &amp; tax</h1>
+<p><b>The short version:</b> you pick a plan (Free, Hobby $5/month or Pro $20/month per workspace), and the plan fee comes back to you as included usage. Apps are billed per second only while they run. If you use more than your plan includes, the rest comes out of a prepaid balance that you top up by card. Prices are in US dollars and exclude tax.</p>
+<h2>Upgrading, topping up and cancelling</h2><ul>
+<li><b>Upgrade or change plan</b>: Dashboard → Billing &amp; usage → Plan. Choose the plan and either <b>Subscribe by card</b> (Stripe charges the fee monthly) or <b>Pay from balance</b> (this month's fee comes out of your credit, pro-rated).</li>
+<li><b>Add credit</b>: Dashboard → Billing &amp; usage → Balance → <b>Add credit</b>, between $10 and $5,000 per top-up. Credit is added as soon as Stripe confirms the payment.</li>
+<li><b>Cards, receipts and cancelling a subscription</b>: Dashboard → Billing &amp; usage → <b>Billing portal</b> (Stripe's customer portal).</li></ul>
+<div class=note><b>Cancellation and refund policy: pending.</b> The terms for what happens to the rest of a billing period and to unused prepaid credit when you cancel haven't been published yet. Until they are, contact us (see <a href="/docs/support">Support</a>) before cancelling if you have questions about a refund.</div>
+<h2>What is metered</h2><p>Per second, in cents: compute while an instance runs (plan $/hr ÷ 3600), volumes per provisioned GB-month ($0.22, attached or not), backups and snapshots per GB-month ($0.22), and egress at $0.06/GB. Usage up to your plan's included amount (Free $1, Hobby $5, Pro $20) isn't deducted from your balance. Stopped and scaled-to-zero apps cost nothing; volumes are still billed.</p>
+<p>See this month's breakdown in Dashboard → Billing &amp; usage. When a paid account's credit runs out, its apps are suspended, and they resume automatically after a top-up.</p>
+<p><b>Invoices and tax</b>: Stripe issues an invoice for every payment. VAT, GST or US sales tax is calculated at checkout from your billing address, and you can enter a VAT/GST ID for reverse charge where it applies.</p>
 <p><b>Free tier</b> is hard-capped and never draws on your wallet: 3 apps on <code>shared-1x-256mb</code>/<code>shared-1x-512mb</code>, 1 instance each, always scale-to-zero after at most 5 minutes idle, 1 GB of volumes. Once the month's usage reaches the included $1, apps pause (requests get HTTP 402) until the 1st of next month or until you upgrade.</p>
-<p>v1 plan ids (<code>cpu-small</code> etc.) still work and are billed at the equivalent current price. Indian customers can optionally be offered INR/UPI top-ups via Razorpay (off by default).</p>""",
+<p>v1 plan ids (<code>cpu-small</code> etc.) still work and are billed at the equivalent current price. Indian customers can optionally be offered INR/UPI top-ups via Razorpay (off by default).</p>
+<h2>API</h2><p>Everything above is also available over the API: <code>POST /v1/billing/checkout {"credit_usd": 25}</code>, <code>POST /v1/billing/subscribe {"tier":"pro"}</code>, <code>POST /v1/billing/portal</code>, <code>PUT /v1/billing/tier {"tier":"pro"}</code> (pay from balance) and <code>GET /v1/billing</code>.</p>""",
 "mcp": f"""<h1>MCP for AI assistants</h1><p>{brand} exposes a Model Context Protocol server, so assistants can pick plans, deploy, read logs, scale, attach volumes and add domains for you or your users.</p>
 <p><b>Remote (OAuth 2.1)</b>: add <code>{mcp}</code> as a connector in Claude, ChatGPT or Cursor. The assistant registers itself (dynamic client registration), sends you to {brand} to approve, and gets a scoped token (PKCE).</p>
 <p><b>Local (stdio)</b>:</p><pre>{{"mcpServers": {{"aloof": {{"command": "python3", "args": ["mcp_server/server.py"],
@@ -309,6 +337,26 @@ Usage up to your tier's included amount (Free $1, Hobby $5, Pro $20) isn't deduc
 "api": f"""<h1>REST API</h1><p>Base URL <code>{api}</code>. Authenticate with <code>Authorization: Bearer pk_...</code>. The full interactive reference is at <a href="/api/docs">/api/docs</a>.</p>
 <pre>curl -X POST {api}/v1/apps -H "Authorization: Bearer $ALOOF_API_KEY" -H "Content-Type: application/json" \\
   -d '{{"name":"api","source":{{"image":"ghcr.io/me/api:1"}},"plan":"shared-1x-1gb","port":8080,"env":{{"DATABASE_URL":"..."}}}}'</pre>""",
+"troubleshooting": f"""<h1>Troubleshooting &amp; FAQ</h1>
+<h2 id=402>Requests return HTTP 402</h2><p>402 means the app is paused for billing, not that it crashed. On the <b>Free</b> plan it happens when the month's usage reaches the included $1: apps resume on the 1st of next month, or straight away when you upgrade. On a <b>paid</b> plan it means your prepaid credit ran out: apps resume automatically after a top-up. Both are in Dashboard → Billing &amp; usage. The API also returns 402 when an action needs credit you don't have, such as upgrading from your balance.</p>
+<h2 id=failed-releases>A deploy failed</h2><p>A failed release never takes traffic. If an earlier release was running, it keeps serving and the app shows <i>v2 failed … still serving v1</i>. Open the app in the dashboard to see which step failed and the last log lines, or run <code>aloof releases &lt;app&gt;</code>. The usual causes, in order:</p><ol>
+<li><b>Wrong port</b>: the app has to listen on <code>0.0.0.0:$PORT</code> (default 8080), and <code>--port</code> or <code>internal_port</code> has to match. Listening on <code>127.0.0.1</code> fails the readiness check.</li>
+<li><b>Health path</b>: if you set one with <code>aloof health &lt;app&gt; --path /healthz</code>, it must return a 2xx/3xx status within a few seconds of starting.</li>
+<li><b>The release command failed</b> (see below).</li>
+<li><b>Image or repo can't be pulled</b>: for private sources, run <code>aloof registry login</code> or set up a <a href="/docs/private">deploy key</a>.</li>
+<li><b>The build failed</b>: see build logs below.</li></ol>
+<p>After fixing it, deploy again or press <b>Retry deploy</b> on the app. To go back to a known-good version without rebuilding, run <code>aloof rollback &lt;app&gt;</code>.</p>
+<h2 id=build-logs>Where are the build logs?</h2><p>Build and deploy output is recorded as platform events. You'll find it in the deploy panel on the app's page in the dashboard (shown while a deploy runs and when it fails), under the app's <b>Logs</b> tab, and with <code>aloof logs &lt;app&gt;</code> (the <i>platform events</i> section). The build step stores the last 40 lines of <code>docker build</code> output when the build finishes, so you'll see them in one batch rather than line by line.</p>
+<h2 id=release-command>What happens when the release command fails?</h2><p><code>release_command</code> (for example database migrations) runs once, in a separate machine, after the build and before any new instance starts. If it exits with a non-zero code, the deploy stops: no new instances start, the release is marked failed, the previous release keeps serving, and the last 30 lines of its output are in the logs prefixed with <code>[release]</code>. Fix the command and deploy again. Make migrations safe to run twice, because a retry runs them again.</p>
+<h2 id=brief-downtime>A short gap during a deploy</h2><p>Apps with a volume attached are single-writer, so the old instance stops before the new one starts, which causes a brief gap. Apps without a volume roll with no downtime.</p>
+<h2 id=domains>Custom domain won't verify</h2><p>See <a href="/docs/domains#verify-failed">Custom domains → If verify fails</a>. Cloudflare users: set the records to DNS only.</p>
+<h2 id=postgres>Can't reach Postgres from my laptop</h2><p>Databases are private. Use <code>aloof proxy 5432 -a pg-&lt;name&gt;</code>; see <a href="/docs/postgres#local">Managed Postgres</a>.</p>
+<h2 id=more>Still stuck?</h2><p>See <a href="/docs/support">Support</a>.</p>""",
+"support": f"""<h1>Support</h1>
+<div class=note><b>Support contact: pending.</b> The support email address and response times haven't been published yet. This page will list them.</div>
+<p>When you contact us, include your account email, the app name, the time it happened (with your timezone) and what you ran. Never send API keys, passwords or <code>DATABASE_URL</code> values; we'll never ask for them.</p>
+<p><b>Security issues</b>: see the <a href="/security">security page</a>.</p>
+<p>Many answers are in <a href="/docs/troubleshooting">Troubleshooting &amp; FAQ</a>.</p>""",
 "nodes": f"""<h1>Bring your own nodes</h1><p>An admin can add any Ubuntu 22.04/24.04 server to a pool, for example Yotta Shakti bare metal or your own GPU box. The node gets a single-use join token, connects to the control plane over WireGuard (outbound UDP only, so no inbound ports are needed), and runs the {brand} agent.</p>
 <pre>curl -X POST {api}/v1/admin/nodes -H "Authorization: Bearer $ADMIN" -d '{{"pool":"self-hosted","plan":"gpu-h100","gpu":true}}'
 # run the returned one-liner on the server:
