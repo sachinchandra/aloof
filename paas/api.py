@@ -1,4 +1,4 @@
-import os, json, itertools, httpx, time, asyncio, socket, logging
+import os, json, itertools, httpx, time, asyncio, socket, logging, weakref
 from fastapi import FastAPI, Header, HTTPException, Request, Depends, Cookie, WebSocket, BackgroundTasks
 log = logging.getLogger("paas.api")
 from fastapi.responses import PlainTextResponse, HTMLResponse, FileResponse, StreamingResponse, Response, RedirectResponse, JSONResponse
@@ -897,6 +897,7 @@ from . import waitlist as _wl; app.include_router(_wl.R)
 try: _wl.migrate_kv()
 except Exception as _e: logging.getLogger('paas').error('waitlist kv migration failed: %s', _e)
 # ---------------- edge proxy (port 8080): <app>.BASE_DOMAIN or /_app/<app>/ ----------------
+from . import lb
 proxy = FastAPI(); _rr = {}; client = httpx.AsyncClient(timeout=60)
 EGRESS = billing.EGRESS   # app -> bytes sent to clients since last meter tick
 HOP = {"connection","keep-alive","transfer-encoding","te","trailer","upgrade","proxy-authorization","proxy-authenticate","host","content-length"}
@@ -918,45 +919,65 @@ def _sh_record(name, status, t0, request=None, path="/"):
 async def edge(path: str, request: Request):
     host = request.headers.get("host","").split(":")[0].lower(); name, path = resolve_app(host, path)
     if not name: return PlainTextResponse(f"{BRAND} edge: use https://<app>.{URL_DOMAIN}/, a verified custom domain, or /_app/<app>/", 404)
-    insts = q("select host,port from instances where app=? and status='running'", (name,))
+    insts = q("select id,host,port from instances where app=? and status='running'", (name,))
     if not insts:
         ap = q("select spec,status from apps where name=?", (name,), one=True)
         if ap and ap["status"] in ("idle","running") and json.loads(ap["spec"]).get("autoscale"):
             controller.M.begin(name)   # count the waiting request so the autoscaler doesn't scale us back down
             try: await asyncio.to_thread(controller.cold_start, name)
             finally: controller.M.end(name)
-            insts = q("select host,port from instances where app=? and status='running'", (name,))
+            insts = q("select id,host,port from instances where app=? and status='running'", (name,))
         if not insts and ap and ap["status"] == "capped": return PlainTextResponse(f"app '{name}' is paused: free tier usage cap reached for this month", 402)
         if not insts: return PlainTextResponse(f"app '{name}' has no running instances", 503)
-    it = _rr.setdefault(name, itertools.count()); i = insts[next(it) % len(insts)]
-    url = f"http://{i['host']}:{i['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
+    i = lb.pick(name, insts); tried = set()
+    qs = f"?{request.url.query}" if request.url.query else ""
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     hdrs = {k:v for k,v in request.headers.items() if k.lower() not in HOP} | {"x-forwarded-host": host, "x-forwarded-proto": proto}
-    controller.M.begin(name); body_bytes = await request.body(); r = None; t0 = time.monotonic()
-    for attempt in range(3):
-        try:
-            r = await client.send(client.build_request(request.method, url, headers=hdrs, content=body_bytes), stream=True); break
-        except httpx.ConnectError as e:
-            err = e   # instance restarting / port remapped: refresh endpoints and retry another or the same instance
-            await asyncio.sleep(0.5 * attempt)
-            await asyncio.to_thread(controller.health_tick)
-            insts = q("select host,port from instances where app=? and status='running'", (name,)) or insts
-            i = insts[next(it) % len(insts)]
-            url = f"http://{i['host']}:{i['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
-        except httpx.HTTPError as e:
-            err = e; break
-    if r is None:
-        controller.M.end(name)
-        if isinstance(err, httpx.ConnectError): _sh_record(name, 502, t0, request, path)   # timeouts / client aborts don't count
-        return PlainTextResponse(f"upstream error: {err}", 502)
-    _sh_record(name, r.status_code, t0, request, path)
+    held = {"m": True, "lb": None}
+    def release():   # idempotent: every exit path (errors, cancellation, finished or abandoned body) releases its counters once
+        if held["lb"]: lb.end(held["lb"]); held["lb"] = None
+        if held["m"]: controller.M.end(name); held["m"] = False
+    controller.M.begin(name); r = None; err = None; t0 = time.monotonic()
+    try:
+        body_bytes = await request.body()
+        for attempt in range(3):
+            url = f"http://{i['host']}:{i['port']}/{path}" + qs
+            lb.begin(i["id"]); held["lb"] = i["id"]
+            try:
+                r = await client.send(client.build_request(request.method, url, headers=hdrs, content=body_bytes), stream=True); break
+            except httpx.ConnectError as e:
+                err = e; lb.end(i["id"]); held["lb"] = None; lb.failure(name, i["id"], insts, "connection refused"); tried.add(i["id"])
+                # instance restarting / port remapped: refresh endpoints and retry on the least-loaded other instance
+                await asyncio.sleep(0.5 * attempt)
+                await asyncio.to_thread(controller.health_tick)
+                insts = q("select id,host,port from instances where app=? and status='running'", (name,)) or insts
+                i = lb.pick(name, insts, exclude=tried)
+            except httpx.HTTPError as e:
+                err = e; lb.end(i["id"]); held["lb"] = None
+                if isinstance(e, httpx.TimeoutException): lb.failure(name, i["id"], insts, "timeout")
+                break
+        if r is None:
+            release()
+            if isinstance(err, httpx.ConnectError): _sh_record(name, 502, t0, request, path)   # timeouts / client aborts don't count
+            return PlainTextResponse(f"upstream error: {err}", 502)
+        _sh_record(name, r.status_code, t0, request, path)
+        if r.status_code in lb.EJECT_STATUSES: lb.failure(name, i["id"], insts, f"HTTP {r.status_code}")
+        elif r.status_code < 500: lb.success(i["id"])
+    except BaseException:
+        release()
+        if r is not None: await r.aclose()
+        raise
     async def body():
         try:
             async for chunk in r.aiter_raw():
                 EGRESS[name] = EGRESS.get(name, 0) + len(chunk); yield chunk
         finally:
-            await r.aclose(); controller.M.end(name)
-    return StreamingResponse(body(), status_code=r.status_code, headers={k:v for k,v in r.headers.items() if k.lower() not in HOP} | {"x-paas-instance": str(i["port"])})
+            try: await r.aclose()
+            finally: release()
+    gen = body(); weakref.finalize(gen, release)   # body never iterated (client gone before streaming): release on GC
+    from starlette.background import BackgroundTask
+    return StreamingResponse(gen, status_code=r.status_code, background=BackgroundTask(release),
+                             headers={k:v for k,v in r.headers.items() if k.lower() not in HOP} | {"x-paas-instance": str(i["port"])})
 
 # Branded 404 for browsers; API/JSON clients keep {"detail": ...}
 from starlette.exceptions import HTTPException as _StarHTTP

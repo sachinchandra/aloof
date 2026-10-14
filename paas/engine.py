@@ -350,7 +350,10 @@ def children(name):
             if load_spec(r["spec"]).get("_parent") == name or load_spec(r["spec"]).get("_preview_of") == name]
 def _stop(inst):
     try: get_drivers()[inst["provider"]].stop_instance(inst["id"])
-    finally: q("update instances set status='stopped', stopped=? where id=?", (time.time(), inst["id"]))
+    finally:
+        q("update instances set status='stopped', stopped=? where id=?", (time.time(), inst["id"]))
+        try: from . import lb; lb.forget(inst["id"])
+        except Exception: pass
 def scale(name, n, reason="manual"):
     with _lock(name):
         app = q("select * from apps where name=?", (name,), one=True); spec = load_spec(app["spec"])
