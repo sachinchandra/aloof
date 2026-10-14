@@ -1,5 +1,5 @@
 """Public site: landing, pricing, docs, login. Server-rendered, no JS framework."""
-import html, os
+import html, os, re
 from .plans import PLANS, TIERS, RATES, REGIONS, REGION_NOTE
 from . import plans as _plans
 ICON = {
@@ -43,18 +43,30 @@ def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a></nav>
 <span class=sp></span><button class=icon-btn onclick="toggleTheme()" aria-label="Toggle dark/light theme">{svg("sun")}</button>
-<a href="/login" class=hide-sm>Log in</a><a class="btn pri sm" href="/login#register">Start free</a>
+<a href="/login" class=hide-sm>Log in</a><a class="btn pri sm" href="/login#register" data-cta=deploy_free data-cta-loc=nav>Start free</a>
 <button class="icon-btn menu-btn" aria-label="Menu" onclick="document.getElementById('nl').classList.toggle('open')">{svg("menu")}</button></div></header>"""
 def footer(brand):
     return f"""<footer class=f><div class=wrap><div class=cols><div><a class=logo href="/"><i></i>{brand}</a><p class=muted style="max-width:300px;margin-top:12px">Cheap, per-second hosting for backends and APIs. Compute in Nuremberg, Germany; billed in USD.</p></div>
-<div><h5>Product</h5><a href="/#features">Features</a><a href="/pricing">Pricing</a><a href="/regions">Regions</a><a href="/customers">Example architectures</a><a href="/pricing#gpus">GPUs (soon)</a></div>
+<div><h5>Product</h5><a href="/#features">Features</a><a href="/pricing">Pricing</a><a href="/regions">Regions</a><a href="/examples">Example architectures</a><a href="/pricing#gpus">GPUs (soon)</a></div>
 <div><h5>Developers</h5><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/docs/cli">CLI</a><a href="/api/docs">API reference</a><a href="/docs/mcp">MCP</a><a href="/llms.txt">llms.txt</a><a href="/rss.xml">RSS</a></div>
 <div><h5>Company</h5><a href="/about">About</a><a href="/security">Security</a><a href="/status">Status</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
 <div><h5>Account</h5><a href="/login">Log in</a><a href="/login#register">Sign up</a><a href="/dashboard">Dashboard</a></div></div>
 <div class=base><span>© 2026 {brand}</span><span>Prices in USD, excluding tax.</span></div></div></footer>"""
+def posthog_key():
+    k = os.environ.get("POSTHOG_KEY", "").strip()
+    if not k:
+        f = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "posthog_key")
+        try: k = open(f).read().strip()
+        except OSError: k = ""
+    return k if re.fullmatch(r"ph[cx]_[A-Za-z0-9]{10,80}", k or "") else ""
+POSTHOG_HOST = "https://eu.i.posthog.com"
+def analytics_tag():
+    """Empty string (load nothing) unless a PostHog project key is configured."""
+    k = posthog_key()
+    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{POSTHOG_HOST}"}}</script><script src="/static/analytics.js?v=1" defer></script>' if k else ""
 def page(title, body, brand="Aloof", desc=None):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
-    return f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}</body></html>"""
+    return f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>"""
 def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(round(g))
 def _money(v, unit=""):
     return (f"${v:,.2f}" if v < 100 or v != int(v) else f"${v:,.0f}") + unit
@@ -119,7 +131,7 @@ def landing(brand, base, api, mcp):
     body = f"""<section class=hero><div class=wrap><div>
 <h1>Infrastructure for the age of <span class=grad>superintelligence.</span></h1>
 <p class=lead>Let Claude, ChatGPT or Cursor deploy, scale and monitor your backends over MCP. They run in the EU, scale to zero, are billed per second, and GPUs are coming soon.</p>
-<div class=cta><a class="btn pri" href="/login#register">Deploy free</a><a class="btn ghost" href="/docs/mcp">Connect your AI assistant (MCP)</a></div>
+<div class=cta><a class="btn pri" href="/login#register" data-cta=deploy_free data-cta-loc=hero>Deploy free</a><a class="btn ghost" href="/docs/mcp" data-cta=connect_mcp data-cta-loc=hero>Connect your AI assistant (MCP)</a></div>
 <div class=trust><span>{svg("lock")} TLS on every app</span><span>{svg("key")} Secrets encrypted at rest</span><span>{svg("eu")} EU hosting</span><span>{svg("bolt")} Per-second billing in USD</span></div></div>
 {_term(base)}</div></section>
 <div class=wrap><div class=works aria-label="Works with">{stack_row()}</div></div>
@@ -144,8 +156,8 @@ def landing(brand, base, api, mcp):
 <p class=t style="margin-top:20px">Usage beyond that is billed per second. Instance sizes start at <code>shared-1x-256mb</code> ({_money(p0)}/mo if run all month). Prices are in USD and exclude tax. Payments are handled by Stripe.</p>
 <div class="grid">{pcards}</div><p style="margin-top:20px"><a href="/pricing">Performance CPUs, volumes, egress and tiers →</a></p></div></section>
 <section class=s id=faq><div class=wrap style="max-width:820px"><div class=eyebrow>FAQ</div><h2 class=t>FAQ</h2>{faqh}</div></section>
-<section class=ctaband><h2>Give your superintelligence a stronger engine.</h2><p class=sub style="margin:0 0 26px">Deploy your first backend free in one command.</p><div class=cta style="justify-content:center"><a class="btn pri" href="/login#register">Deploy free</a><a class="btn ghost" href="/docs">Read the docs</a></div></section>"""
-    return page(f"{brand}: infrastructure for the age of superintelligence", body, brand)
+<section class=ctaband><h2>Give your superintelligence a stronger engine.</h2><p class=sub style="margin:0 0 26px">Deploy your first backend free in one command.</p><div class=cta style="justify-content:center"><a class="btn pri" data-cta=deploy_free data-cta-loc=footer_band href="/login#register">Deploy free</a><a class="btn ghost" href="/docs">Read the docs</a></div></section>"""
+    return page(f"{brand}: EU backend hosting, scale to zero, deploy via MCP", body, brand)
 def _pg_rows():
     from .plans import PG_PLANS
     return "".join(f"<tr><td><code>{k}</code> <span class=muted>{p['note']}</span></td><td>{p['vcpu']:g} {'shared' if p['compute'].startswith('shared') else 'dedicated'} vCPU / {p['memory_mb'] if p['memory_mb'] < 1024 else p['memory_mb'] // 1024}{' MB' if p['memory_mb'] < 1024 else ' GB'}</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items())
@@ -158,7 +170,7 @@ def pricing(brand):
         return (f"<div class='pp-card{' hl' if hl else ''}'><div class=pp-name>{name}</div><p class=pp-who>{who}</p>"
                 f"<div class=pp-price>${t['fee_usd']:g}<small>/month{per}</small></div>"
                 f"<div class=pp-inc>{'$' + format(t['included_usage_usd'], 'g') + ' of usage included'}{' · hard cap' if t.get('hard_cap') else ''}</div>"
-                f"<a class='btn {'pri' if hl else 'ghost'} pp-cta' href='/login#register'>{cta}</a><ul class=pp-feat>{lis}</ul></div>")
+                f"<a class='btn {'pri' if hl else 'ghost'} pp-cta' href='/login#register' data-cta=deploy_free data-cta-loc=pricing_{k}>{cta}</a><ul class=pp-feat>{lis}</ul></div>")
     free, hob, pro = T["free"], T["hobby"], T["pro"]
     cards = plan("free", "Free", "For trying Aloof and side projects.", [
         f"{free['max_apps']} apps, 1 instance each", "shared-1x-256mb and shared-1x-512mb", f"Apps sleep after {free['idle_seconds']//60} min idle",
@@ -384,7 +396,9 @@ curl -fsSL '{api}/v1/nodes/bootstrap.sh?node=n-…&token=jt_…' | sudo bash</pr
     groups = [("Getting started", ["quickstart", "cli", "deploy", "config", "releases"]), ("Source & CI", ["private", "github", "ci"]), ("Apps", ["processes", "networking"]), ("Platform", ["autoscaling", "volumes", "postgres", "domains", "gpu"]), ("Operate", ["console", "logs"]), ("Account", ["billing"]), ("Integrations", ["mcp", "api", "nodes"])]
     navh = "".join(f"<h4>{g}</h4>" + "".join(f'<a href="/docs/{d}" class="{"on" if d == pg else ""}"{" aria-current=page" if d == pg else ""}>{TITLES[d]}</a>' for d in ds) for g, ds in groups)
     c = c.replace("<table>", "<div class=scroll><table class=tbl>").replace("</table>", "</table></div>")
-    return page(f"{TITLES[pg]} · {brand} docs", f"<div class='wrap docs'><aside aria-label='Docs navigation'>{navh}</aside><article class=docmain style='min-width:0;max-width:780px'>{c}</article></div>", brand)
+    return page(f"{TITLES[pg]} · {brand} docs", f"<div class='wrap docs'><aside aria-label='Docs navigation'>{navh}</aside><article class=docmain style='min-width:0;max-width:780px'>{c}</article></div>", brand,
+                desc=("Aloof documentation: quickstart, CLI, aloof.toml config, deploys from Docker images or git, managed Postgres, volumes, domains, billing and the MCP server for AI assistants." if pg == "quickstart"
+                      else f"{TITLES[pg]} on Aloof: how it works, commands and limits. Part of the Aloof docs for EU backend hosting with scale to zero and MCP deploys."))
 def login(brand):
     return page(f"Log in · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
 <h1 id=title>Welcome back</h1><p class=muted id=subt style="margin:0">Log in to deploy and manage your apps.</p>
@@ -399,7 +413,7 @@ def login(brand):
 var M='login';function mode(m){{M=m;tl.classList.toggle('on',m=='login');tr.classList.toggle('on',m=='register');title.textContent=m=='login'?'Welcome back':'Create your account';
 subt.textContent=m=='login'?'Log in to deploy and manage your apps.':'Free plan with $1/month of included usage.';lb.textContent=m=='login'?'Log in':'Create account';pwh.style.display=m=='login'?'none':'block';pw.placeholder=m=='login'?'Your password':'Choose a password';pw.autocomplete=m=='login'?'current-password':'new-password'}}
 if(location.hash=='#register')mode('register');
-async function go(kind){{const r=await fetch('/v1/auth/'+kind,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,password:pw.value}})}});
+async function go(kind){{if(kind=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'password'}});const r=await fetch('/v1/auth/'+kind,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,password:pw.value,attribution:window.aloofAttribution?aloofAttribution():null}})}});
  const j=await r.json(); if(!r.ok){{msg.className='bad';msg.textContent=j.detail||'error';return}}
  if(j.api_key) sessionStorage.newKey=j.api_key; var n=new URLSearchParams(location.search).get('next');location=(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&n.indexOf(String.fromCharCode(92))<0)?n:'/dashboard'}}
 async function magic(){{const r=await fetch('/v1/auth/magic',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value}})}});
@@ -413,7 +427,7 @@ LEGAL = {
 <h3>Accounts</h3><ul><li>HttpOnly, SameSite session cookies; state-changing cookie requests require a CSRF header.</li><li>Single-use, expiring magic links. OAuth 2.1 with PKCE for MCP clients; tokens are scoped and revocable.</li></ul>
 <h3>Infrastructure</h3><ul><li>Compute and the control plane run on Hetzner Cloud in Nuremberg, Germany. Off-site backups are stored in Helsinki, Finland.</li><li>Payments are processed by Stripe; card data never reaches our servers.</li></ul>
 <h3>Reporting</h3><p>Email <a href="mailto:security@aloof.si">security@aloof.si</a>. Please give us reasonable time to fix an issue before disclosing it.</p>"""),
-"privacy": ("Privacy policy", """<p><b>Draft.</b> A full policy will be published before general availability.</p><p>We collect your email, billing details you provide, and operational data needed to run and bill your apps (logs, usage). Payments are handled by Stripe. We don't sell personal data. Data is hosted in the EU. Contact: <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>"""),
+"privacy": ("Privacy policy", """<p><b>Draft.</b> A full policy will be published before general availability.</p><p>We collect your email, billing details you provide, and operational data needed to run and bill your apps (logs, usage). Payments are handled by Stripe. We don't sell personal data.</p><p><b>Analytics.</b> On this website, the docs and the dashboard we use PostHog Cloud EU (PostHog Inc., data stored in the EU, Frankfurt) to count page views and clicks on sign-up buttons, and to see which campaign or referring site brought you here (UTM parameters and referrer). It runs without cookies: no identifier is stored on your device beyond the current browser tab, so no consent banner is shown. When you're logged in, events are linked to your account id so we can understand how the product is used. We don't send your email, app data or logs to PostHog.<p> Data is hosted in the EU. Contact: <a href="mailto:privacy@aloof.si">privacy@aloof.si</a>.</p>"""),
 "terms": ("Terms of service", """<p><b>Draft.</b> Full terms will be published before general availability.</p><p>Don't use the service for illegal content, abuse, spam or cryptocurrency mining. Prepaid credit is consumed per second of usage; the free tier is hard-capped. Contact: <a href="mailto:legal@aloof.si">legal@aloof.si</a>.</p>
 <h2 id=billing>Billing, cancellation and refunds</h2><ul>
 <li>Plans (Hobby, Pro) are monthly and renew until cancelled. You can cancel at any time. A card-paid plan stays active until the end of the paid month; a balance-paid plan changes immediately. Plan fees for a partly used month aren't refunded.</li>

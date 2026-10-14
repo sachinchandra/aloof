@@ -70,12 +70,14 @@ PARTNER_FORM = """<form class="card form-card" id=dp onsubmit="event.preventDefa
 <h3>Become a design partner</h3><p>Run a real workload on Aloof and tell us what's missing. In return: direct access to the people building it, priority on the features you need, and credits while we iterate.</p>
 <div class=fgrid><input name=email type=email required placeholder="you@company.com" aria-label=Email><input name=company placeholder="Company or project" aria-label=Company maxlength=200></div>
 <textarea name=note rows=3 placeholder="What would you run? (stack, traffic, region)" aria-label="What would you run" maxlength=1000></textarea><div aria-hidden=true style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label>Website <input name=website tabindex=-1 autocomplete=off></label></div><button class="btn pri">Apply</button><p class=muted style="font-size:13px;margin:10px 0 0">We use your email only to reply about the program. Every email has a link to remove your application.</p></form>"""
-@R.get("/customers", response_class=HTMLResponse)
+@R.get("/customers", include_in_schema=False)
+def customers_moved(): return RedirectResponse("/examples", 301)
+@R.get("/examples", response_class=HTMLResponse)
 def customers():
     cards = "".join(f"<div class='card reveal'><span class=tag>Reference build</span><h3>{t}</h3><p>{d}</p><ul>{''.join(f'<li>{i}</li>' for i in items)}</ul>{f'<a href=/blog/{l}>Read the walkthrough →</a>' if l else ''}</div>" for t, d, items, l in ARCHES)
     inner = f"""<p class=muted style="margin:0 0 22px">These are reference architectures we built and tested ourselves. They're not customer stories, and no company names, logos or metrics are implied.</p>
 <div class='grid g3'>{cards}</div><div id=partner style="margin-top:56px">{PARTNER_FORM}</div>"""
-    return render("/customers", "Example architectures · Aloof", "Reference architectures on Aloof: SaaS API with worker, Next.js with private API, scale-to-zero webhooks, MCP-operated backends.",
+    return render("/examples", "Example architectures · Aloof", "Reference architectures on Aloof: SaaS API with worker, Next.js with private API, scale-to-zero webhooks, MCP-operated backends.",
                   shell("Example architectures", "What you can build on Aloof", "Reference builds we tested ourselves, with the plans and features each one uses.", inner), og="customers")
 # ---------------- regions ----------------
 @R.get("/regions", response_class=HTMLResponse)
@@ -148,14 +150,33 @@ def status_page():
 @R.get("/robots.txt", response_class=PlainTextResponse)
 def robots(): return f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /dashboard\nDisallow: /v1/\nSitemap: {SITE}/sitemap.xml\n"
 def urls():
-    u = ["/", "/pricing", "/docs", "/blog", "/guides", "/customers", "/regions", "/about", "/security", "/status", "/privacy", "/terms", "/login"]
+    u = ["/", "/pricing", "/docs", "/blog", "/guides", "/examples", "/regions", "/about", "/security", "/status", "/privacy", "/terms"]
     u += [f"/blog/{p['slug']}" for p in POSTS] + [f"/guides/{k}" for k in GUIDES]
     u += [f"/docs/{k}" for k in ("quickstart", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "mcp")]
     return u
+_GITD = {}
+def _git_date(*files):
+    """Last commit date (YYYY-MM-DD) touching any of the files; cached per process. None outside a git checkout."""
+    if files not in _GITD:
+        import subprocess
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        try: d = subprocess.run(["git", "-c", f"safe.directory={root}", "log", "-1", "--format=%cs", "--", *files], cwd=root, capture_output=True, text=True, timeout=5).stdout.strip()
+        except Exception: d = ""
+        _GITD[files] = d or None
+    return _GITD[files]
+_SRC = {"/": ("paas/site.py",), "/pricing": ("paas/site.py", "paas/plans.py"), "/terms": ("paas/site.py",), "/privacy": ("paas/site.py",), "/security": ("paas/site.py",), "/status": ("paas/www.py",),
+        "/guides": ("paas/www_content.py",), "/blog": ("paas/www_content.py",), "/examples": ("paas/www.py", "paas/www_content.py"), "/regions": ("paas/www.py", "paas/plans.py"), "/about": ("paas/www_content.py",)}
+def lastmod(p):
+    """Content date where we have one (blog posts), else the git date of the file the page is built from."""
+    if p.startswith("/blog/"):
+        d = next((x["date"] for x in POSTS if f"/blog/{x['slug']}" == p), None)
+        if d: return d
+    if p == "/blog": return max(x["date"] for x in POSTS)
+    src = _SRC.get(p) or (("paas/site.py", "paas/site_devx.py") if p.startswith("/docs") else ("paas/www_content.py",) if p.startswith("/guides/") else ("paas/site.py",))
+    return _git_date(*src) or CHANGELOG[0][0]
 @R.get("/sitemap.xml")
 def sitemap():
-    lm = CHANGELOG[0][0]
-    x = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(f"<url><loc>{SITE}{p}</loc><lastmod>{lm}</lastmod></url>" for p in urls()) + "</urlset>"
+    x = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(f"<url><loc>{SITE}{p}</loc><lastmod>{lastmod(p)}</lastmod></url>" for p in urls()) + "</urlset>"
     return Response(x, media_type="application/xml")
 @R.get("/static/og/{name}.png", include_in_schema=False)
 def og(name: str):

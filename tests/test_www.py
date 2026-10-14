@@ -5,7 +5,7 @@ from paas import api, www, site
 from paas.db import q
 from paas.plans import PLANS
 c = TestClient(api.app, base_url="http://api.aloof.test")
-PAGES = ["/blog", "/guides", "/customers", "/regions", "/about", "/security", "/status", "/", "/pricing", "/docs"]
+PAGES = ["/blog", "/guides", "/examples", "/regions", "/about", "/security", "/status", "/", "/pricing", "/docs"]
 def test_pages_render_with_seo():
     for p in PAGES + [f"/blog/{x['slug']}" for x in www.POSTS] + [f"/guides/{k}" for k in www.GUIDES]:
         r = c.get(p); assert r.status_code == 200, p
@@ -22,7 +22,7 @@ def test_no_fabricated_claims():
     reg = c.get("/regions").text
     assert "Nuremberg" in reg and reg.count("Coming soon · not live") == 5
     for l in ("Falkenstein", "Ashburn", "Singapore", "Mumbai"): assert l in reg
-    assert "Reference build" in c.get("/customers").text and "Become a design partner" in c.get("/customers").text
+    assert "Reference build" in c.get("/examples").text and "Become a design partner" in c.get("/examples").text
     assert "Germany and Finland" not in allh
 def test_prices_in_posts_match_plans():
     t = c.get("/blog/aloof-vs-fly-render-railway").text
@@ -101,3 +101,20 @@ def test_support_doc_fixes():
 def test_terms_billing_section():
     t = c.get("/terms").text; assert "Billing, cancellation and refunds" in t and "/docs/billing#cancel" in t
     assert "$5 of prepaid credit" in c.get("/docs/quickstart").text
+def test_seo_examples_sitemap_title():
+    r = c.get("/customers", follow_redirects=False); assert r.status_code == 301 and r.headers["location"] == "/examples"
+    sm = c.get("/sitemap.xml").text; assert "/login<" not in sm and "/examples<" in sm and "/customers" not in sm
+    import re as _r; assert _r.findall(r"<lastmod>(\d{4}-\d\d-\d\d)</lastmod>", sm)
+    h = c.get("/").text; assert "<title>Aloof: EU backend hosting, scale to zero, deploy via MCP</title>" in h and "superintelligence" in h
+    d = c.get("/docs").text; assert 'content="Aloof documentation: quickstart' in d
+def test_analytics_off_without_key(monkeypatch):
+    monkeypatch.delenv("POSTHOG_KEY", raising=False)
+    from paas import site
+    monkeypatch.setattr(site, "posthog_key", lambda: "")
+    assert "analytics.js" not in c.get("/").text and c.get("/v1/config").json()["posthog"] is None
+def test_analytics_on_with_key(monkeypatch):
+    from paas import site
+    monkeypatch.setattr(site, "posthog_key", lambda: "phc_testkey1234567890")
+    h = c.get("/").text; assert "/static/analytics.js" in h and "eu.i.posthog.com" in h and 'data-cta=deploy_free' in h and "data-cta=connect_mcp" in h
+    assert c.get("/v1/config").json()["posthog"]["key"] == "phc_testkey1234567890"
+    assert "PostHog Cloud EU" in c.get("/privacy").text

@@ -362,16 +362,25 @@ def invoice(inv_id: int, a=Depends(acct)):
     if not inv: raise HTTPException(404, "invoice not found")
     return rzp.invoice_html(inv)
 # ---- auth: password, magic link, sessions ----
-class Creds(BaseModel): email: str; password: str
+class Creds(BaseModel): email: str; password: str; attribution: dict | None = None
 class MagicReq(BaseModel): email: str
 def _login_response(a, body=None):
     r = JSONResponse(body or {"ok": True, "email": a["email"]}); r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
+ATTR_KEYS = ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "referrer", "landing")
+def _save_attribution(account_id, attr):
+    """First-touch UTM/referrer sent by the site with the signup (from sessionStorage, no cookies). Whitelisted and length-capped."""
+    if not isinstance(attr, dict): return
+    clean = {k: str(attr[k])[:500] for k in ATTR_KEYS if attr.get(k)}
+    if clean:
+        try: q("update accounts set signup_attribution=? where id=?", (json.dumps(clean), account_id))
+        except Exception: pass
 @app.post("/v1/auth/register")
 def auth_register(c: Creds):
     try: a = auth.register(c.email, c.password)
     except ValueError as e: raise HTTPException(400, str(e))
     except PermissionError as e: raise HTTPException(409, str(e))
+    _save_attribution(a["id"], c.attribution)
     return _login_response(a, {"ok": True, "email": a["email"], "api_key": a["api_key"]})
 # Soft login rate limit (in-memory, per process): LOGIN_LIMIT attempts per LOGIN_WINDOW s per client IP and per email -> 429 + Retry-After.
 LOGIN_LIMIT = int(os.environ.get("PAAS_LOGIN_LIMIT", "10")); LOGIN_WINDOW = 60.0
@@ -529,7 +538,8 @@ def mcp_manifest():
     return m
 from .mcp_tools import mcp_tool_names
 @app.get("/v1/config")
-def config(): return {"brand": BRAND, "base_domain": BASE_DOMAIN, "api": PUBLIC_API_URL, "mcp": PUBLIC_MCP_URL, "app_url_pattern": f"https://<app>.{URL_DOMAIN}/", "app_domains": APP_DOMAINS}
+def config(): return {"brand": BRAND, "base_domain": BASE_DOMAIN, "api": PUBLIC_API_URL, "mcp": PUBLIC_MCP_URL, "app_url_pattern": f"https://<app>.{URL_DOMAIN}/", "app_domains": APP_DOMAINS,
+                       "posthog": ({"key": site.posthog_key(), "host": site.POSTHOG_HOST} if site.posthog_key() else None)}
 from . import site
 @app.get("/", response_class=HTMLResponse)
 def landing(): return www.at("/", "default", site.landing, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL)
@@ -566,7 +576,7 @@ def api_docs():
 @app.get("/dashboard", response_class=HTMLResponse)
 def dash(request: Request):
     if not auth.session_account(request.cookies.get(auth.COOKIE)): return RedirectResponse("/login?next=/dashboard", 303)
-    return HTMLResponse(open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND), headers={"X-Robots-Tag": "noindex, nofollow"})
+    return HTMLResponse(open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND).replace("<!--ANALYTICS-->", site.analytics_tag()), headers={"X-Robots-Tag": "noindex, nofollow"})
 
 
 # ---------------- Fly parity: releases/rollback, managed Postgres, snapshots, exec/console, log drains/history, audit ----------------
