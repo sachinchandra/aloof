@@ -33,7 +33,7 @@ aloof drains &lt;app&gt; add https://logs.example.com/ingest ; aloof history &lt
 <p>Redeploys are rolling: new instances must pass a readiness check before old ones stop, and a release that fails it never takes traffic (see <a href="/docs/releases">releases &amp; rollback</a>). A <a href="/docs/processes">release_command</a> runs before any new instance starts. Env vars, volumes, autoscale and health settings carry over between deploys.</p>
 <p>Health checks: set an HTTP path with <code>aloof health app --path /healthz</code> or <code>[[http_service.checks]]</code>. After N consecutive failures the instance is replaced.</p>""",
 "config": """<h1>aloof.toml reference</h1><p>Fly-style config. <code>aloof config validate</code> checks it against the server. Unknown keys give warnings, not errors.</p><pre>app = "my-app"
-primary_region = "eu-de"     # regions = [...] is accepted; one region runs today
+primary_region = "nbg1"     # see `aloof regions`; only live regions accept new apps
 
 [build]
   dockerfile = "Dockerfile"       # or image = "ghcr.io/me/app:1" | git = "git@github.com:me/app.git" + ref

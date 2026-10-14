@@ -204,8 +204,8 @@ class HetznerProvisioner(Provisioner):
     Nodes get a firewall that allows nothing inbound except ICMP (+ SSH from PAAS_SSH_ALLOW_CIDR): the agent is only reached
     over WireGuard, which the node dials out to the hub."""
     name = "hetzner"; supports_gpu = False; env = ["HCLOUD_TOKEN"]
-    regions = ["eu-de"]   # only Nuremberg is live; see /regions
-    LOCATIONS = {"eu-de": ["nbg1"]}
+    regions = ["nbg1", "fsn1", "hel1"]   # Hetzner EU locations; US/SG regions are provider-agnostic (OVH planned, no provisioner) we can place in; live status comes from paas.regions
+    LOCATIONS = {r: [r] for r in regions} | {"eu-de": ["nbg1"]}
     docs = "https://docs.hetzner.cloud/reference/cloud#servers-create-a-server"
     DEFAULT_SIZES = {"cpu-node": "cx43"}
     base = property(lambda s: E("HCLOUD_API_BASE", "https://api.hetzner.cloud/v1"))
@@ -236,11 +236,11 @@ class HetznerProvisioner(Provisioner):
                 last = f"{loc}: HTTP {r.status_code} {r.text[:150]}"; log.warning("hetzner %s", last); continue   # no capacity / type not orderable here
             return _raise(r, "hetzner create server")["server"]
         raise ProvisionError(f"hetzner: {server_type} not available in {self.locations(region)} ({last})")
-    def create(self, node_id, plan_id, script, gpu):
+    def create(self, node_id, plan_id, script, gpu, region=None):
         if gpu: raise ProvisionError("hetzner: no GPUs in phase 1")
         with self.http() as c:
             fw = self.firewall(c)
-            s = self.create_server(c, f"aloof-{node_id}", self.node_size(plan_id), script, {"aloof-node": node_id, "aloof-pool": self.name}, fw)
+            s = self.create_server(c, f"aloof-{node_id}", self.node_size(plan_id), script, {"aloof-node": node_id, "aloof-pool": self.name}, fw, region=region)
         return str(s["id"])
     def status(self, ref):
         with self.http() as c: r = c.get(f"{self.base}/servers/{ref}", headers=self._h())

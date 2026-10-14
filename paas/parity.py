@@ -36,19 +36,23 @@ def pg_net(name): return f"aloof-pg-{name}"
 def _dbname(name): return name.replace("-", "_")
 def pg_url(db, host=None):
     pw = crypto.dec(db["password_enc"]); return f"postgres://aloof:{pw}@{host or pg_app(db['name'])}:5432/{_dbname(db['name'])}?sslmode=disable"
-def pg_create(account_id, name, plan="pg-dev"):
+def pg_create(account_id, name, plan="pg-dev", region=None):
+    from . import regions as R
     if not PG_NAME.match(name or ""): raise ValueError("name must be 3-26 chars, lowercase letters/digits/hyphens")
+    region = R.require_live(region or R.home())
+    R.check_allowed(region, engine.account_tier(account_id)[0])
     if plan not in PG_PLANS: raise ValueError(f"unknown plan; choose from {list(PG_PLANS)}")
     if q("select 1 from pg_dbs where name=?", (name,), one=True) or q("select 1 from apps where name=? and status!='destroyed'", (pg_app(name),), one=True):
         raise PermissionError("database name taken")
     p = PG_PLANS[plan]; pw = secrets.token_urlsafe(24); vol = f"pgdata-{name}"
-    engine.create_volume(account_id, vol, p["disk_gb"]); q("update volumes set app=?, mount_path=? where name=?", (pg_app(name), "/var/lib/postgresql/data", vol))
-    q("insert into pg_dbs(name,account_id,app,password_enc,plan,disk_gb,created,attached) values(?,?,?,?,?,?,?,?)",
-      (name, account_id, pg_app(name), crypto.enc(pw), plan, p["disk_gb"], time.time(), "[]"))
+    engine.create_volume(account_id, vol, p["disk_gb"], region); q("update volumes set app=?, mount_path=? where name=?", (pg_app(name), "/var/lib/postgresql/data", vol))
+    q("insert into pg_dbs(name,account_id,app,password_enc,plan,disk_gb,created,attached,region) values(?,?,?,?,?,?,?,?,?)",
+      (name, account_id, pg_app(name), crypto.enc(pw), plan, p["disk_gb"], time.time(), "[]", region))
     spec = {"name": pg_app(name), "kind": "postgres", "pg_plan": plan, "source": {"image": PG_IMAGE}, "plan": p["compute"], "port": 5432,
             "env": {"POSTGRES_USER": "aloof", "POSTGRES_PASSWORD": pw, "POSTGRES_DB": _dbname(name), "PGDATA": "/var/lib/postgresql/data/pgdata"},
             "volumes": [{"name": vol, "path": "/var/lib/postgresql/data"}], "networks": [pg_net(name)], "net_alias": pg_app(name),
-            "health": {"path": None, "tcp": True, "interval": 10, "failures": 3}, "provider": "local-docker", "instances": 1}
+            "health": {"path": None, "tcp": True, "interval": 10, "failures": 3}, "instances": 1, "region": region,
+            **({"provider": "local-docker"} if region == R.home() and R.local_capacity() else {})}
     try: engine.deploy(account_id, spec)
     except Exception:
         q("delete from pg_dbs where name=?", (name,)); q("update volumes set app=null where name=?", (vol,)); engine.delete_volume(vol); raise
@@ -56,7 +60,7 @@ def pg_create(account_id, name, plan="pg-dev"):
     return pg_view(q("select * from pg_dbs where name=?", (name,), one=True))
 def pg_view(db, reveal=False):
     ap = q("select status, error from apps where name=?", (db["app"],), one=True) or {}
-    v = {"name": db["name"], "plan": db["plan"], "disk_gb": db["disk_gb"], "status": ap.get("status"), "error": ap.get("error"), "created": db["created"],
+    v = {"name": db["name"], "region": db.get("region") or "nbg1", "plan": db["plan"], "disk_gb": db["disk_gb"], "status": ap.get("status"), "error": ap.get("error"), "created": db["created"],
          "attached": json.loads(db["attached"] or "[]"), "host": pg_app(db["name"]), "port": 5432, "database": _dbname(db["name"]), "user": "aloof",
          "price_usd_month": PG_PLANS[db["plan"]]["price_usd_month"],
          "backups": [_arc_view(r) for r in q("select * from archives where kind='pg' and owner=? order by created desc", (db["name"],))]}
@@ -64,7 +68,10 @@ def pg_view(db, reveal=False):
     return v
 def pg_attach(name, app, var="DATABASE_URL"):
     db = q("select * from pg_dbs where name=?", (name,), one=True); ap = q("select * from apps where name=?", (app,), one=True)
-    if ap["provider"] != "local-docker": raise ValueError(f"{app} runs on {ap['provider']}; managed Postgres attaches to apps on the EU edge pool only (for now)")
+    from . import regions as R
+    R.same_region("database", name, db.get("region"), app, ap.get("region"))
+    pg = q("select provider from apps where name=?", (db["app"],), one=True) or {}
+    if ap["provider"] != pg.get("provider"): raise ValueError(f"{app} runs on {ap['provider']} but database {name} runs on {pg.get('provider')}; they must share a node pool")
     if not __import__("re").fullmatch(r"[A-Z_][A-Z0-9_]{0,63}", var): raise ValueError("bad env var name")
     att = [x for x in json.loads(db["attached"] or "[]") if x["app"] != app] + [{"app": app, "var": var}]
     q("update pg_dbs set attached=? where name=?", (json.dumps(att), name)); event(app, f"postgres {name} attached as ${var}")

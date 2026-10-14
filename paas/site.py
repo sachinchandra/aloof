@@ -99,7 +99,7 @@ def _gpu_section():
     opts = "".join(f"<option value={k}>{p['gpu']}</option>" for k, p in PLANS.items() if p["kind"] == "gpu" and k != "gpu-t4-spot")
     return f"""<h2 class=pp-h id=gpus>GPUs <span class=tag>coming soon</span></h2><div class="card pp-gpu"><p>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. GPUs launch in our second phase; leave your email and we'll tell you when they're live.</p><div style="margin-top:16px">{WAITLIST_FORM % opts}</div></div>"""
 TERM = [("p", "$ ", "aloof deploy api --git https://github.com/acme/api.git"), ("m", "", "→ cloning acme/api@main"), ("m", "", "→ building Dockerfile (cached layers: 7/9)"),
-        ("m", "", "→ pushing image to registry"), ("c", "", "→ starting 2 instances in eu-de"), ("g", "✓ ", "health check passed /healthz (38 ms)"),
+        ("m", "", "→ pushing image to registry"), ("c", "", "→ starting 2 instances in nbg1"), ("g", "✓ ", "health check passed /healthz (38 ms)"),
         ("g", "✓ ", "live: https://api.{base}/"), ("p", "$ ", "aloof autoscale api --min 0 --max 6 --idle 300"), ("g", "✓ ", "scale to zero enabled · billed per second")]
 def _term(base):
     import json as _j

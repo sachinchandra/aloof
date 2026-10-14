@@ -1,5 +1,5 @@
 """aloof.toml (fly.toml-compatible subset) -> app spec. `aloof config validate` calls validate(); `aloof deploy` sends the parsed TOML.
-Supported: app, primary_region, regions (placeholder: one region today), [build] image|dockerfile|git/ref|build_args|subdir, [env],
+Supported: app, primary_region (region id, e.g. nbg1; see GET /v1/regions), regions (first entry used; one region per app), [build] image|dockerfile|git/ref|build_args|subdir, [env],
 [processes], [http_service] (+ checks, concurrency, auto_stop/min_machines_running), [[services]] (first internal_port), [checks],
 [deploy] release_command, [[mounts]], [autoscale], [[vm]] size|cpus+memory, [scale] counts per process group, [[cron]]."""
 import re
@@ -98,11 +98,12 @@ def to_spec(cfg, name=None):
             if not c.get("schedule") or not c.get("command"): raise ValueError("[[cron]] needs schedule and command")
             parse(c["schedule"])
         spec["cron"] = [{"name": c.get("name") or f"job{i}", "schedule": c["schedule"], "command": c["command"]} for i, c in enumerate(crons)]
-    regs = cfg.get("regions") or ([cfg["primary_region"]] if cfg.get("primary_region") else [])
-    if len(regs) > 1: w.append("multi-region placement is not available yet: the app runs in one region (EU, Hetzner nbg1)")
-    from .plans import REGIONS as _R
-    for r in regs:
-        if r not in _R: w.append(f"unknown region {r!r}: the only live region is {next(iter(_R))} ({_R[next(iter(_R))]}); the app runs there")
+    regs = ([cfg["primary_region"]] if cfg.get("primary_region") else []) + [r for r in (cfg.get("regions") or []) if r != cfg.get("primary_region")]
+    if regs:   # primary_region wins over regions[0]. Unknown ids (e.g. fly.toml codes like ams/iad) warn and fall back, never 400.
+        from .regions import canonical, RegionError, home
+        try: spec["region"] = canonical(regs[0])
+        except RegionError: w.append(f"unknown region {regs[0]!r} (fly.io region codes aren't Aloof regions): ignored; the app runs in {home()}. See `aloof regions`")
+    if len(regs) > 1: w.append(f"multi-region placement is not available yet: the app runs in one region ({spec.get('region') or 'the default'}, primary_region or the first listed)")
     from .engine import NAME_RE
     if not NAME_RE.match(app): raise ValueError("app name must be 3-32 chars, lowercase letters/digits/hyphens")
     return spec, mounts, w
