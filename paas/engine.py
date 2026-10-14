@@ -234,6 +234,42 @@ def _run_deploy(name, image=None, reason=None):
                 log(f"ERROR: v{ver} failed ({e}); v{prev['version']} still serving, no downtime")
             else:
                 q("update apps set status='failed', error=? where name=?", (str(e), name)); log(f"ERROR: {e}")
+def deploy_progress(name):
+    """The latest deploy as real backend states only: apps.status (queued -> building -> starting -> running|idle|stopped|failed),
+    the release row (deploying -> active|failed) and the platform events logged since the deploy was queued."""
+    app = q("select * from apps where name=?", (name,), one=True)
+    if not app: return None
+    anchor = q("select id, ts, msg from events where app=? and (msg like ? or msg like ?) order by id desc limit 1", (name, "deploy queued%", "rollback to % queued"), one=True)
+    t0 = anchor["ts"] if anchor else 0
+    evs = q("select id, ts, msg from events where app=? and id>=? order by id", (name, anchor["id"] if anchor else 0))[-400:]
+    rel = q("select version, status, reason, created, image from releases where app=? order by version desc limit 1", (name,), one=True)
+    if rel and rel["created"] < t0 - 1: rel = None   # this deploy's release row isn't written yet
+    st = app["status"]; src = load_spec(app["spec"]).get("source") or {}
+    from_image = bool(src.get("image")) or bool(rel and (rel["reason"] or "").startswith("rollback"))
+    pushed = any(e["msg"].startswith("pushed ") for e in evs)
+    if rel and rel["status"] == "active": phase = "live"
+    elif rel and rel["status"] == "failed": phase = "failed"
+    elif st == "failed": phase = "failed"
+    elif st in ("queued", "building", "starting"): phase = st
+    elif rel and rel["status"] == "deploying": phase = "starting"
+    else: phase = "live" if st in ("running", "idle", "stopped") else st
+    order = ["queued", "building", "starting", "live"]
+    reached = {"queued": 0, "building": 1, "starting": 2, "live": 3}.get(phase)
+    if phase == "failed":   # where it stopped: last state the events show
+        reached = 2 if any(e["msg"].startswith(("release_command", "[release]")) for e in evs) or (rel and rel["image"]) else 1 if any(not e["msg"].startswith(("deploy queued", "release v")) for e in evs) else 0
+    steps = []
+    for i, k in enumerate(order):
+        lab = {"queued": "Queued", "building": "Pull image" if from_image else "Build", "starting": "Start & health check", "live": "Live"}[k]
+        if phase == "failed": state = "done" if i < reached else "failed" if i == reached else "pending"
+        else: state = "done" if i < reached or phase == "live" else "active" if i == reached else "pending"
+        steps.append({"id": k, "label": lab, "state": state})
+    if pushed or (phase in ("building",) and app["provider"] != "local-docker"):
+        steps.insert(2, {"id": "pushing", "label": "Push to registry", "state": "done" if pushed else "pending" if phase == "building" else steps[1]["state"]})
+    err = app["error"]
+    still = rel and rel["status"] == "failed" and st == "running"
+    return {"app": name, "phase": phase, "version": rel["version"] if rel else None, "reason": rel["reason"] if rel else None, "queued_at": t0 or None,
+            "steps": steps, "error": err, "still_serving_previous": bool(still), "events": evs[-200:], "last_event_id": evs[-1]["id"] if evs else 0,
+            "excerpt": [e["msg"] for e in evs if e["msg"].strip()][-20:] if phase == "failed" else []}
 def group_app(name, g): return f"{name}-{g}"
 def _sync_groups(name, account_id, spec, image):
     """Process groups (fly.toml [processes]): 'web' is this app; every other group runs as a child app <app>-<group> from the same image,

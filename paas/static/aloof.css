@@ -264,3 +264,17 @@ a.logo i{width:28px;height:28px;flex:none}
  .bar2{gap:10px}.bar2 h2{font-size:17px}
 }
 @media(prefers-reduced-motion:reduce){.app .side{transition:none}}
+/* console: deploy progress */
+.dprog{border:1px solid var(--line2);border-radius:12px;padding:14px 16px;margin:4px 0 16px;background:color-mix(in srgb,var(--panel) 80%,transparent)}
+.dprog.failed{border-color:color-mix(in srgb,var(--acc3) 45%,var(--line2))}.dprog.live{border-color:color-mix(in srgb,#22c55e 40%,var(--line2))}
+.dph{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px}.dph a{word-break:break-all}
+.dpsteps{list-style:none;display:flex;flex-wrap:wrap;gap:6px 18px;margin:12px 0 0;padding:0;font-size:13px;color:var(--fg3)}
+.dps{display:flex;align-items:center;gap:7px}.dps i{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:11px;font-weight:700;border:1.5px solid var(--line2)}
+.dps.done{color:var(--fg2)}.dps.done i{background:#22c55e;border-color:#22c55e;color:#fff}
+.dps.active{color:var(--fg);font-weight:600}.dps.active i{border-color:var(--acc);border-top-color:transparent;animation:spin 0.9s linear infinite}
+.dps.failed{color:var(--acc3);font-weight:600}.dps.failed i{background:var(--acc3);border-color:var(--acc3);color:#fff}
+.dplog{max-height:260px;overflow:auto;font-size:12px;line-height:1.5;margin:6px 0 0;white-space:pre-wrap;word-break:break-word}
+.dperr{margin:10px 0 0;font-size:13.5px;color:var(--acc3)}
+.spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--acc);animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin,.dps.active i{animation:none}}

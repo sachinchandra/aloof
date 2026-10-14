@@ -143,6 +143,25 @@ def deploy(r: DeployReq, a=Depends(acct)):
 def list_apps(a=Depends(acct)): return [with_url(engine.get_app(r["name"])) for r in q("select name from apps where account_id=? and status!='destroyed' and name not like ?", (a["id"], "pg-%")) if scope_ok(r["name"], a)]
 @app.get("/v1/apps/{name}")
 def get_app(name: str, a=Depends(acct)): return with_url(own(name, a))
+@app.get("/v1/apps/{name}/deploy")
+def app_deploy_progress(name: str, a=Depends(acct)):
+    """Latest deploy: phase (queued|building|starting|live|failed), steps, error, a log excerpt on failure, and the platform events so far."""
+    own(name, a); return with_url(engine.deploy_progress(name) | {"name": name})
+@app.get("/v1/apps/{name}/events")
+def app_events(name: str, after: int = 0, limit: int = 200, a=Depends(acct)):
+    """Platform events (deploy steps, build output, release_command output) after an event id, for polling."""
+    own(name, a); return q("select id, ts, msg from events where app=? and id>? order by id limit ?", (name, after, max(1, min(limit, 500))))
+@app.post("/v1/apps/{name}/retry")
+def app_retry(name: str, request: Request, a=Depends(acct)):
+    """Run the last deploy again from the same source (rebuilds; env, plan, volumes and scale are kept)."""
+    ap = own(name, a)
+    if ap["status"] in ("queued", "building", "starting"): raise HTTPException(409, "a deploy is already in progress")
+    spec = {"name": name, "source": (ap.get("spec") or {}).get("source") or {}}
+    if not spec["source"]: raise HTTPException(400, "this app has no source to redeploy")
+    try: r = engine.deploy(a["id"], spec)
+    except PermissionError as e: raise HTTPException(409, str(e))
+    except ValueError as e: raise HTTPException(400, str(e))
+    _audit(a["id"], name, "deploy.retry", "", _ip(request)); return with_url(r)
 @app.get("/v1/apps/{name}/logs", response_class=PlainTextResponse)
 def logs(name: str, tail: int=200, a=Depends(acct)): own(name, a); return engine.logs(name, tail)
 class Scale(BaseModel): instances: int
