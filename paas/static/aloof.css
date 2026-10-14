@@ -246,3 +246,21 @@ a.logo i{width:28px;height:28px;flex:none}
 .top .btn{white-space:nowrap}
 .hero h1:first-child{margin-top:0}
 .empty .eacts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.empty p code{font-size:12.5px}
+/* console mobile: drawer nav + theme switch in the header */
+.iconbtn{display:inline-grid;place-items:center;width:38px;height:38px;border-radius:10px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);cursor:pointer;padding:0;flex:none}
+.iconbtn svg{width:18px;height:18px}.iconbtn:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.mob,.navscrim{display:none}
+[data-theme=light] .th-sun,:root:not([data-theme=light]) .th-moon{display:none}
+@media(max-width:860px){
+ .mob{display:inline-grid}
+ .app .side{position:fixed;top:0;left:0;bottom:0;z-index:40;width:min(300px,84vw);height:100dvh;min-height:0;flex-direction:column;flex-wrap:nowrap;overflow-y:auto;overflow-x:hidden;gap:4px;padding:18px 14px;border-right:1px solid var(--line);border-bottom:0;align-items:stretch;transform:translateX(-102%);transition:transform .22s ease;visibility:hidden}
+ body.navopen .app .side{transform:none;visibility:visible;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+ .app .side a.nav{padding:11px 12px;font-size:15px}
+ .app .side .logo{padding:4px 8px 10px}
+ .app .side .who{display:block}
+ .side .navx{position:absolute;top:14px;right:12px}
+ body.navopen .navscrim{display:block;position:fixed;inset:0;z-index:39;background:rgba(0,0,0,.5)}
+ body.navopen{overflow:hidden}
+ .bar2{gap:10px}.bar2 h2{font-size:17px}
+}
+@media(prefers-reduced-motion:reduce){.app .side{transition:none}}
