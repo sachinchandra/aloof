@@ -13,6 +13,7 @@ def credit(acct, cents, kind, ref):
     """Add to the wallet + ledger, then resume suspended apps."""
     q("update accounts set credit_cents = credit_cents + ? where id=?", (cents, acct))
     q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (acct, time.time(), round(cents, 4), kind, ref))
+    if cents > 0: q("update accounts set lowbal_sent='' where id=?", (acct,))   # a top-up re-arms the low-balance alerts
     resume_suspended(acct)
 EGRESS = {}   # filled by the edge proxy: app -> bytes since last tick
 def month_key(ts=None): return time.strftime("%Y-%m", time.localtime(ts or time.time()))
@@ -79,6 +80,8 @@ def meter_tick(now=None):
             for app in q("select name from apps where account_id=? and status in ('running','idle')", (a["id"],)):
                 engine.scale(app["name"], 0, reason="suspended: balance exhausted")
                 q("update apps set status='suspended' where name=?", (app["name"],)); event(app["name"], "suspended: prepaid balance exhausted; top up to resume")
+    try: check_low_balance(now)
+    except Exception as e: log.warning("low-balance check: %s", e)
 def cap_account(acct):
     from . import engine
     for app in q("select name from apps where account_id=? and status in ('running','idle')", (acct,)):
@@ -102,3 +105,74 @@ def resume_suspended(account_id):
         q("update apps set status='running' where name=?", (app["name"],)); event(app["name"], "resumed after top-up")
         sp = load_spec(q("select spec from apps where name=?", (app["name"],), one=True)["spec"])
         engine.scale(app["name"], max(1, (sp.get("autoscale") or {}).get("min", 1)), reason="resume")
+
+# ---- low-balance runway + alerts ----
+BURN_WINDOW = 6 * 3600
+LOWBAL_LEVELS = (("72h", 72), ("24h", 24))
+def burn_cents_hr(acct, now=None):
+    """Average wallet burn (metered usage debits) over the last 6 hours, in cents/hour. Plan fees and top-ups don't count."""
+    now = now or time.time(); since = now - BURN_WINDOW
+    created = (q("select created from accounts where id=?", (acct,), one=True) or {}).get("created") or since
+    r = q("select coalesce(sum(-amount_cents),0) as s from ledger where account_id=? and kind='usage' and ts>?", (acct, since), one=True)
+    hrs = max(1.0, (now - max(since, created)) / 3600.0)
+    return max(0.0, float(r["s"] or 0)) / hrs
+def runway(acct, now=None):
+    """Estimated hours of prepaid credit left at the current burn rate. level: ok | warn (<~3 days) | critical (<24h) | suspended | free."""
+    from .plans import TIERS
+    a = q("select credit_cents, tier, lowbal_alerts, lowbal_threshold_usd from accounts where id=?", (acct,), one=True) or {}
+    tier = TIERS.get(a.get("tier") or "free", TIERS["free"]); bal = float(a.get("credit_cents") or 0)
+    susp = (q("select count(*) as n from apps where account_id=? and status='suspended'", (acct,), one=True) or {}).get("n", 0)
+    burn = burn_cents_hr(acct, now); hours = (bal / burn) if burn > 0 and bal > 0 else (0.0 if bal <= 0 and burn > 0 else None)
+    if tier.get("hard_cap"): level = "free"
+    elif susp or (bal <= 0 and burn > 0): level = "suspended"
+    elif hours is not None and hours < 24: level = "critical"
+    elif hours is not None and hours < 72: level = "warn"
+    else: level = "ok"
+    th = a.get("lowbal_threshold_usd")
+    return {"credit_usd": usd(bal), "burn_usd_hr": round(burn / 100, 4), "burn_usd_day": round(burn * 24 / 100, 2),
+            "hours_left": None if hours is None else round(hours, 1), "level": level, "suspended_apps": susp,
+            "alerts": bool(a.get("lowbal_alerts", 1) if a.get("lowbal_alerts") is not None else 1), "threshold_usd": th,
+            "below_threshold": bool(th and bal / 100 <= th and level != "free")}
+def _fmt_hours(h):
+    return f"about {round(h)} hours" if h < 48 else f"about {round(h / 24)} days"
+def _lowbal_mail(email, kind, rw):
+    base = (E("PAAS_PUBLIC_API_URL") or "http://localhost:8000").rstrip("/"); link = f"{base}/dashboard#billing"
+    bal = f"${rw['credit_usd']:.2f}"; rate = f"${rw['burn_usd_day']:.2f}/day"
+    if kind == "suspended":
+        return ("Your Aloof apps are suspended: prepaid credit used up",
+                f"Hello,\n\nYour Aloof prepaid balance has reached {bal}, so your running apps have been scaled to zero and suspended. "
+                f"Volumes, databases and backups are kept, and continue to be billed.\n\nTop up to resume them automatically:\n{link}\n\n"
+                "If you think this is a mistake, reply via the Support page at https://www.aloof.si/docs/support.\n\nAloof\n")
+    when = _fmt_hours(rw["hours_left"]) if rw.get("hours_left") is not None else "less than you might expect"
+    head = {"72h": "about 3 days", "24h": "less than 24 hours", "custom": "your alert threshold"}[kind]
+    return (f"Aloof credit: {head} left" if kind != "custom" else f"Aloof credit is below your ${rw['threshold_usd']:g} alert",
+            f"Hello,\n\nYour Aloof prepaid balance is {bal}. At your current usage ({rate}) that lasts {when}.\n\n"
+            "When the balance reaches $0, running apps are scaled to zero and suspended until you top up. Volumes and databases are kept.\n\n"
+            f"Top up here:\n{link}\n\nYou can turn these emails off or set your own threshold under Settings in the dashboard.\n\nAloof\n")
+def check_low_balance(now=None):
+    """Called from meter_tick. Emails each threshold once (72h, 24h, custom $, suspended); credit() re-arms after a top-up."""
+    from .auth import send_mail
+    sent_n = 0
+    for a in q("select id, email, lowbal_sent, lowbal_alerts, is_test from accounts where (tier is not null and tier != ?) or credit_cents <= 0", ("free",)):
+        if a.get("is_test") and not E("PAAS_LOWBAL_TEST_ACCOUNTS"): continue   # reserved test domains never get mail
+        try:
+            rw = runway(a["id"], now)
+            if rw["level"] == "free": continue
+            due = []
+            if rw["level"] == "suspended": due.append("suspended")
+            else:
+                h = rw["hours_left"]
+                for k, lim in LOWBAL_LEVELS:
+                    if h is not None and h < lim: due.append(k)
+                if rw["below_threshold"]: due.append("custom")
+            sent = set(filter(None, (a.get("lowbal_sent") or "").split(",")))
+            new = [k for k in due if k not in sent]
+            if not new: continue
+            pick = "suspended" if "suspended" in new else ("24h" if "24h" in new else new[0])
+            if a.get("lowbal_alerts", 1) not in (0, False) and a.get("email"):
+                subj, body = _lowbal_mail(a["email"], pick, rw)
+                try: send_mail(a["email"], subj, body); sent_n += 1
+                except Exception as e: log.warning("low-balance mail failed account=%s: %s", a["id"], type(e).__name__); continue
+            q("update accounts set lowbal_sent=? where id=?", (",".join(sorted(sent | set(new))), a["id"]))
+        except Exception as e: log.warning("low-balance check failed account=%s: %s", a.get("id"), e)
+    return sent_n

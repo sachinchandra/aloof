@@ -332,11 +332,22 @@ async def billing_webhook(request: Request):
     if not rzp.enabled(): return JSONResponse({"error": "razorpay disabled"}, status_code=404)
     code, body = rzp.handle_webhook(await request.body(), request.headers.get("x-razorpay-signature"))
     return JSONResponse(body, status_code=code)
+@app.get("/v1/billing/runway")
+def billing_runway(a=Depends(acct)):
+    """Estimated hours of prepaid credit left at the last 6 hours' burn rate, plus alert settings. Drives the dashboard banner."""
+    return billing.runway(a["id"])
+class AlertPrefs(BaseModel): enabled: bool = True; threshold_usd: float | None = None
+@app.put("/v1/billing/alerts")
+def billing_alerts(p: AlertPrefs, a=Depends(acct)):
+    """Low-balance emails (on by default: ~3 days left, <24h left, suspension). Optional extra alert when the balance falls to threshold_usd."""
+    th = p.threshold_usd
+    if th is not None and not (0 < th <= 5000): raise HTTPException(400, "threshold must be between $0 and $5,000, or empty")
+    q("update accounts set lowbal_alerts=?, lowbal_threshold_usd=? where id=?", (int(p.enabled), th, a["id"])); return billing.runway(a["id"])
 @app.get("/v1/billing")
 def billing_summary(a=Depends(acct)):
     a = q("select * from accounts where id=?", (a["id"],), one=True)
     return _wallet(a) | {"currency": "USD", "stripe": stripe_billing.configured(), "payments_open": stripe_billing.payments_open(), "stripe_tax": stripe_billing.tax_enabled(), "topup_min_usd": stripe_billing.MIN_TOPUP, "topup_max_usd": stripe_billing.MAX_TOPUP, "rates": RATES, "razorpay": rzp.enabled(),
-            "subscription": a.get("stripe_subscription"), "month": billing.month_summary(a["id"]), "tiers": TIERS,
+            "subscription": a.get("stripe_subscription"), "month": billing.month_summary(a["id"]), "tiers": TIERS, "runway": billing.runway(a["id"]),
             "profile": {k: a.get(k) for k in ("billing_name", "country", "tax_id")},
             "payments": q("select id,kind,credit_cents,amount_cents,tier,status,invoice_url,created from stripe_sessions where account_id=? order by created desc limit 50", (a["id"],)),
             "invoices": [r for r in q("select id,invoice_id,amount_cents,invoice_url,created from stripe_sessions where account_id=? and invoice_url is not null order by created desc", (a["id"],))],
@@ -615,7 +626,7 @@ def api_docs():
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>API reference · {BRAND}</title>
 <meta name=description content="Interactive reference for the {BRAND} REST API: apps, deploys, volumes, Postgres, domains, billing and keys. Authenticate with Authorization: Bearer.">
 <link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3">
-<link rel=stylesheet href="/static/swagger/swagger-ui.css?v={SWAGGER_V}" integrity="{SWAGGER_SRI['css']}" crossorigin=anonymous><link rel=stylesheet href="/static/aloof.css?v=16">
+<link rel=stylesheet href="/static/swagger/swagger-ui.css?v={SWAGGER_V}" integrity="{SWAGGER_SRI['css']}" crossorigin=anonymous><link rel=stylesheet href="/static/aloof.css?v=17">
 <style>body{{margin:0;background:#fff}}.topbar{{display:none}}.abar{{display:flex;align-items:center;gap:14px;padding:14px 24px;background:#0a0807;color:#f6f1ec}}.abar .logo{{color:#f6f1ec!important}}.abar a{{color:#a9b0c3}}.abar .sp{{flex:1}}</style></head>
 <body><div class=abar><a class=logo href="/"><i></i>{BRAND}</a><span style="color:#998b7e">API reference</span><span class=sp></span><a href="/docs/api">Guide</a><a href="/dashboard">Dashboard</a></div><div id=swagger-ui></div>
 <script src="/static/swagger/swagger-ui-bundle.js?v={SWAGGER_V}" integrity="{SWAGGER_SRI['js']}" crossorigin=anonymous></script>
