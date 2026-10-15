@@ -166,6 +166,7 @@ def test_templates_and_selfheal_docs():
     assert "Paid plans opening soon" in c.get("/docs/billing").text
     t = c.get("/templates/n8n").text; assert "/month</b> if it runs all month" in t
 
-def test_prices_note_not_on_landing():
-    assert "excluding tax" not in c.get("/").text
-    assert "Prices in USD, excluding tax." in c.get("/pricing").text and "Prices in USD, excluding tax." in c.get("/about").text
+def test_no_prices_note_anywhere():
+    for u in ("/", "/pricing", "/about", "/docs/billing", "/terms"):
+        assert "Prices in USD, excluding tax" not in c.get(u).text
+    assert "exclude tax" in c.get("/docs/billing").text and "exclude" in c.get("/terms").text
