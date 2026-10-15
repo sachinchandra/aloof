@@ -361,4 +361,7 @@ async function logout(){await api('POST','/v1/auth/logout');location='/login'}
 (async()=>{const me=await api('GET','/v1/auth/me');ME=me;loadRunway();setInterval(loadRunway,300000);if(window.aloofIdentify)aloofIdentify(String(me.id));$('who').textContent=me.email;$('av').textContent=me.email[0];setTheme(document.documentElement.dataset.theme||'dark');
  const p=await api('GET','/v1/plans');PL=p.plans;await regions();$('d_plan').innerHTML=p.plans.map(x=>`<option value=${x.id}>${esc(planLabel(x))}</option>`).join('');est();
  if(sessionStorage.newKey){const k=sessionStorage.newKey;delete sessionStorage.newKey;showKey(k,true)}refresh();setInterval(()=>{if(tab=='apps')apps()},6000)})();
+// ---- stack tables into cards on phones: copy each header label onto its cells
+function stackTables(root){(root||document).querySelectorAll('.content table.tbl').forEach(t=>{const hr=[...t.rows].find(r=>r.querySelector('th'));if(!hr)return;const L=[...hr.cells].map(c=>c.textContent.trim());t.classList.add('stk');[...t.rows].forEach(r=>{if(r===hr||r.querySelector('th'))return;[...r.cells].forEach((c,i)=>{if(r.cells.length>1&&!c.hasAttribute('data-l'))c.setAttribute('data-l',L[i]||'')})})})}
+new MutationObserver(()=>stackTables()).observe(document.querySelector('.content'),{childList:true,subtree:true});stackTables();
 </script><!--ANALYTICS--></body></html>

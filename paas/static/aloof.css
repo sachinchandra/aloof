@@ -362,3 +362,34 @@ a:focus-visible,.btn:focus-visible,summary:focus-visible{outline:2px solid var(-
 .tlogo-mono{font:700 14px var(--mono);color:var(--acc);letter-spacing:.02em}.tlogo.sm.tlogo-mono{font-size:12px}
 .thead{display:flex;align-items:center;gap:14px}
 @media(max-width:560px){.tgrid{grid-template-columns:1fr}}
+
+/* ---- console: mobile + touch polish ---- */
+@media(max-width:640px){
+ .content{padding:14px 12px}.pnl{padding:16px 14px}
+ /* tables become stacked cards; labels come from the header row (see dashboard stackTables) */
+ .content .tbl.stk{border:0;background:none;display:block}.content .tbl.stk tbody{display:block}
+ .content .tbl.stk tr{display:block}.content .tbl.stk tr:has(th){display:none}
+ .content .tbl.stk tr:has(td[data-l]){border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:4px 12px;margin:0 0 10px}
+ .content .tbl.stk td{display:flex;justify-content:space-between;align-items:center;gap:14px;border:0;padding:8px 0;text-align:right;min-width:0;overflow-wrap:anywhere;background:none!important}
+ .content .tbl.stk td[data-l]::before{content:attr(data-l);flex:none;color:var(--fg3);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;text-align:left}
+ .content .tbl.stk td[data-l]:empty{display:none}
+ .content .tbl.stk td:not([data-l]){display:block;text-align:left}
+ .content .tbl.stk td .btn,.content .tbl.stk td button{margin-left:6px}
+ .content .tbl.stk td[data-l=""]{justify-content:flex-end;flex-wrap:wrap}
+ .content .tbl.stk td[data-l=""]::before{display:none}
+ .bl-usage .tbl.stk tr:last-child{margin-bottom:0}
+ .content pre,.content .logs{font-size:12px}
+ .dtabs button{padding:12px 14px}
+ #toast{left:12px;right:12px;bottom:14px}
+}
+/* comfortable tap targets and no iOS zoom-on-focus on touch screens */
+@media(pointer:coarse),(max-width:640px){
+ .content .btn,.bar2 .btn{min-height:42px;justify-content:center}.content .btn.sm,.bar2 .btn.sm{min-height:40px;padding:8px 14px}
+ .seg button{min-height:36px;padding:7px 12px}
+ .iconbtn{min-width:42px;min-height:42px}
+ .side a.nav{min-height:44px}
+ input,select,textarea{font-size:16px;min-height:42px}
+ input[type=checkbox],input[type=radio]{min-height:0}
+ .content a.mut,.pnl p a,.pnl .muted a{padding:4px 0;display:inline-block}
+ summary.btn{min-height:42px}
+}
