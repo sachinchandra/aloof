@@ -44,7 +44,9 @@ def register(email, password):
     if len(password or "") < 10: raise ValueError("password must be at least 10 characters")
     if q("select 1 from accounts where email=?", (email,), one=True): raise PermissionError("account exists; log in or use a magic link")
     a = engine.create_account(email, hash_password(password))
-    try: send_mail(email, "Welcome to Aloof", f"Your Aloof account is ready.\n\nAPI key (shown once): {a['api_key']}\nDashboard: {E('PAAS_PUBLIC_API_URL','http://localhost:8000')}/dashboard\n")
+    try:
+        from . import emailkit; subj, txt, htm = emailkit.welcome(a["api_key"], f"{E('PAAS_PUBLIC_API_URL','http://localhost:8000')}/dashboard")
+        send_mail(email, subj, txt, html=htm)
     except MailError: pass   # already logged; the key is also returned in the register response
     return a
 def login(email, password):
@@ -60,7 +62,8 @@ def start_magic(email, base_url, attribution=None):
     if attribution:
         if len(_magic_attr) > 5000: _magic_attr.clear()
         _magic_attr[sha256(tok)] = attribution
-    send_mail(email, "Your Aloof sign-in link", f"Sign in to Aloof (valid 15 minutes, single use):\n\n{base_url.rstrip('/')}/auth/magic?token={tok}\n\nIf you didn't request this, ignore this email.\n")
+    from . import emailkit; subj, txt, htm = emailkit.magic_link(f"{base_url.rstrip('/')}/auth/magic?token={tok}", MAGIC_TTL // 60)
+    send_mail(email, subj, txt, html=htm)
     return True
 def finish_magic(tok):
     won = q("update magic_links set used=1 where token_hash=? and used=0 and expires>? returning email", (sha256(tok or ""), time.time()))

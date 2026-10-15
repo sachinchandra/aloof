@@ -77,8 +77,8 @@ def confirmation(r):
         subj = "You're on the Aloof region waitlist"; body = "We'll email you once, when the region is live. We won't use your address for anything else."
     else:
         subj = "You're on the Aloof GPU waitlist"; body = "GPUs launch in our second phase. We'll email you once, when they're available to deploy. We won't use your address for anything else."
-    text = f"Hi,\n\nYou're on {what}.\n\n{body}\n\nIf you didn't sign up, or want to be removed, use this link:\n{link}\n\nAloof\nhttps://www.aloof.si\n"
-    return subj, text, _html(subj, [f"You're on {html.escape(what)}.", html.escape(body)], "Remove me from this list", link), link
+    from . import emailkit; text, htm = emailkit.waitlist(r["kind"], what, body, link)
+    return subj, text, htm, link
 def _admin_mail(r):
     fields = {k: r.get(k) for k in ("kind", "email", "gpu", "region", "company", "note", "source", "ip")}
     subj = f"[Aloof] New {r['kind']} waitlist signup: {r['email']}" + (" (test)" if r.get("is_test") else "")
