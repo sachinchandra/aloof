@@ -1,5 +1,6 @@
 """Public site: landing, pricing, docs, login. Server-rendered, no JS framework."""
 import html, os, re
+from .contact import apply as _contact
 from .plans import PLANS, TIERS, RATES, REGIONS, REGION_NOTE
 from . import plans as _plans
 ICON = {
@@ -73,7 +74,7 @@ def analytics_tag():
     return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=3" defer></script>' if k else ""
 def page(title, body, brand="Aloof", desc=None):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
-    return f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>"""
+    return _contact(f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>""")
 def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(round(g))
 def _money(v, unit=""):
     return (f"${v:,.2f}" if v < 100 or v != int(v) else f"${v:,.0f}") + unit
