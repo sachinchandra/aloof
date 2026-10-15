@@ -443,7 +443,7 @@ aloof autoscale preview --min 0 --max 2 --idle 120    # scale to zero after 2 id
 "api": f"""<h1>REST API</h1><p>Base URL <code>{api}</code>. Authenticate with <code>Authorization: Bearer pk_...</code>. The full interactive reference is at <a href="/api/docs">/api/docs</a>.</p>
 <pre>curl -X POST {api}/v1/apps -H "Authorization: Bearer $ALOOF_API_KEY" -H "Content-Type: application/json" \\
   -d '{{"name":"api","source":{{"image":"ghcr.io/me/api:1"}},"plan":"shared-1x-1gb","port":8080,"env":{{"DATABASE_URL":"..."}}}}'</pre>""",
-"troubleshooting": f"""<h1>Troubleshooting &amp; FAQ</h1>
+"troubleshooting": """<h1>Troubleshooting &amp; FAQ</h1>
 <h2 id=402>Requests return HTTP 402</h2><p>402 means the app is paused for billing, not that it crashed. On the <b>Free</b> plan it happens when the month's usage reaches the included $1: apps resume on the 1st of next month, or straight away when you upgrade. On a <b>paid</b> plan it means your prepaid credit ran out: apps resume automatically after a top-up. Both are in Dashboard → Billing &amp; usage. The API also returns 402 when an action needs credit you don't have, such as upgrading from your balance.</p>
 <h2 id=failed-releases>A deploy failed</h2><p>A failed release never takes traffic. If an earlier release was running, it keeps serving and the app shows <i>v2 failed … still serving v1</i>. Open the app in the dashboard to see which step failed and the last log lines, or run <code>aloof releases &lt;app&gt;</code>. The usual causes, in order:</p><ol>
 <li><b>Wrong port</b>: the app has to listen on <code>0.0.0.0:$PORT</code> (default 8080), and <code>--port</code> or <code>internal_port</code> has to match. Listening on <code>127.0.0.1</code> fails the readiness check.</li>
@@ -459,12 +459,12 @@ aloof autoscale preview --min 0 --max 2 --idle 120    # scale to zero after 2 id
 <h2 id=domains>Custom domain won't verify</h2><p>See <a href="/docs/domains#verify-failed">Custom domains → If verify fails</a>. Cloudflare users: set the records to DNS only.</p>
 <h2 id=postgres>Can't reach Postgres from my laptop</h2><p>Databases are private. Use <code>aloof proxy 5432 -a pg-&lt;name&gt;</code>; see <a href="/docs/postgres#local">Managed Postgres</a>.</p>
 <h2 id=more>Still stuck?</h2><p>Support doesn't have a public email address yet; see <a href="/docs/support">Support</a> for where things stand.</p>""",
-"support": f"""<h1>Support</h1>
+"support": """<h1>Support</h1>
 <div class=note><b>There's no public support email yet.</b> We're still setting up our support inbox, so we can't give you an address or a response time today. Until it's ready, the best places to get unstuck are <a href="/docs/troubleshooting">Troubleshooting &amp; FAQ</a> and the read-only diagnose tool (<code>GET /v1/apps/&lt;app&gt;/diagnose</code>, or <code>diagnose_app</code> over MCP), which cover most deploy problems. This page will list the address as soon as it exists.</div>
 <p>When you contact us, include your account email, the app name, the time it happened (with your timezone) and what you ran. Never send API keys, passwords or <code>DATABASE_URL</code> values; we'll never ask for them.</p>
 <p><b>Security issues</b>: see the <a href="/security">security page</a>.</p>
 <p>Many answers are in <a href="/docs/troubleshooting">Troubleshooting &amp; FAQ</a>.</p>""",
-"templates": f"""<h1>One-click templates</h1><p>Templates deploy a ready-made open-source app (n8n, Umami, and others) with its database, disk and secrets set up for you. Browse them on the <a href="/templates">templates page</a>; each one lists exactly what it creates and what it costs.</p>
+"templates": """<h1>One-click templates</h1><p>Templates deploy a ready-made open-source app (n8n, Umami, and others) with its database, disk and secrets set up for you. Browse them on the <a href="/templates">templates page</a>; each one lists exactly what it creates and what it costs.</p>
 <h2>Deploy one</h2><pre>aloof templates                         # list ids and descriptions
 aloof deploy --template umami my-stats  # create the app (add -e KEY=value for required settings)
 aloof deploy --template n8n my-n8n --plan shared-1x-1gb   # pick a different plan</pre>
