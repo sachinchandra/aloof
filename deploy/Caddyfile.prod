@@ -44,6 +44,13 @@ mcp.__D__ {
 ` 200
 	}
 	handle {
+		# directory scanners (Glama) send the key bare or as X-API-Key: normalise to a Bearer token
+		@rawkey header_regexp rawkey Authorization ^\s*(pk_[A-Za-z0-9_-]+)\s*$
+		request_header @rawkey Authorization "Bearer {re.rawkey.1}"
+		@xkey header_regexp xkey X-API-Key ^\s*(pk_[A-Za-z0-9_-]+)\s*$
+		request_header @xkey Authorization "Bearer {re.xkey.1}"
+		@prm path /.well-known/oauth-protected-resource
+		rewrite @prm /.well-known/oauth-protected-resource/mcp
 		reverse_proxy 127.0.0.1:8001
 	}
 }

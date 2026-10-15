@@ -76,6 +76,7 @@ class LocalDockerDriver(Driver):
             except Exception: pass
     def start_instance(self, app, image, spec, index):
         plan = PLANS[spec["plan"]]; port = int(spec.get("port", 8080))
+        from .. import capacity; capacity.admit(spec["plan"], 1)   # memory admission: refuse instead of overcommitting the host
         kw = dict(detach=True, name=f"paas-{app}-{index}", environment={**spec.get("env",{}), "PORT":str(port)},
                   ports={f"{port}/tcp": ("127.0.0.1", None)}, labels={"paas.app":app},
                   nano_cpus=int(plan["vcpu"]*1e9), mem_limit=f"{plan['memory_mb']}m", restart_policy={"Name":"unless-stopped"})

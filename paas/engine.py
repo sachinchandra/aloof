@@ -162,6 +162,8 @@ def deploy(account_id, spec):
     spec["net_aliases"] = {**(spec.get("net_aliases") or {}), acct_net: [name, f"{name}.internal"]}
     apply_tier_limits(account_id, spec, redeploy=bool(ex and ex["status"] != "destroyed"))
     prov = pick_provider(spec); now = time.time()
+    if prov == "local-docker":   # fail fast with a clear 503 before queueing; start_instance re-checks per instance
+        from . import capacity; capacity.admit(spec["plan"], spec["instances"])
     q("insert into apps(name,account_id,spec,status,provider,created,updated,error) values(?,?,?,?,?,?,?,null) "
       "on conflict(name) do update set account_id=excluded.account_id, spec=excluded.spec, status=excluded.status, provider=excluded.provider, updated=excluded.updated, error=null",
       (name, account_id, dump_spec(spec), "queued", prov, ex["created"] if ex else now, now))

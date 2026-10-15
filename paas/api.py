@@ -24,6 +24,11 @@ API_HOST = os.environ.get("PAAS_API_HOST", f"api.{BASE_DOMAIN}"); MCP_HOST = os.
 PUBLIC_API_URL = os.environ.get("PAAS_PUBLIC_API_URL", f"https://{API_HOST}"); PUBLIC_MCP_URL = os.environ.get("PAAS_PUBLIC_MCP_URL", f"https://{MCP_HOST}/mcp")
 ROOT = os.path.dirname(os.path.dirname(__file__))
 app = FastAPI(title=f"{BRAND} control plane", version="0.3", docs_url=None, redoc_url=None, openapi_url="/api/openapi.json")
+from . import capacity
+@app.exception_handler(capacity.PlatformAtCapacity)
+async def _at_capacity(request, exc):   # local node memory budget exhausted: 503 + Retry-After, clients retry with backoff
+    return JSONResponse({"detail": str(exc), "retry_after": exc.retry_after, "retry": "safe to retry the same request after Retry-After seconds"},
+                        status_code=503, headers={"Retry-After": str(exc.retry_after)})
 # Security headers on control-plane responses (www/api/dashboard). Caddy sets the same non-CSP headers at the edge; setdefault keeps
 # any per-route override. CSP only on HTML: our pages use inline <script>/<style> and same-origin fetch/WebSocket, nothing third-party.
 SEC_HEADERS = {"Strict-Transport-Security": "max-age=31536000; includeSubDomains", "X-Content-Type-Options": "nosniff",
@@ -928,6 +933,7 @@ async def edge(path: str, request: Request):
         if ap and ap["status"] in ("idle","running") and json.loads(ap["spec"]).get("autoscale"):
             controller.M.begin(name)   # count the waiting request so the autoscaler doesn't scale us back down
             try: await asyncio.to_thread(controller.cold_start, name)
+            except capacity.PlatformAtCapacity as e: return PlainTextResponse(str(e), 503, headers={"Retry-After": str(e.retry_after)})
             finally: controller.M.end(name)
             insts = q("select id,host,port from instances where app=? and status='running'", (name,))
         if not insts and ap and ap["status"] == "capped": return PlainTextResponse(f"app '{name}' is paused: free tier usage cap reached for this month", 402)
