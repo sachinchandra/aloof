@@ -202,9 +202,10 @@ def fakedns(monkeypatch):
     s = DNSServer(R(), port=0, address="127.0.0.1"); s.start_thread()
     monkeypatch.setenv("PAAS_DNS_SERVER", f"127.0.0.1:{s.server.server_address[1]}")
     yield zone; s.stop()
-def test_domain_txt_flow(client, fakedns):
+def test_domain_txt_flow(client, fakedns, monkeypatch):
+    monkeypatch.setattr(domains, 'VERIFY_MIN_GAP', 0)
     c = _acct_client("dom@example.in")
-    aid = engine.account_by_key(c.headers["Authorization"][7:])["id"]
+    aid = engine.account_by_key(c.headers["Authorization"][7:])["id"]; q("update accounts set tier='hobby' where id=?", (aid,))
     q("insert into apps(name,account_id,spec,status,provider,created,updated) values(?,?,?,?,?,?,?)", ("webx", aid, crypto.dump_spec({"plan": "cpu-small"}), "running", "local-docker", 0, 0))
     d = c.post("/v1/apps/webx/domains", json={"domain": "api.shop.in"}).json()
     assert d["verified"] is False and d["dns_records"]["ownership"]["name"] == "_aloof-challenge.api.shop.in"

@@ -21,8 +21,11 @@
 - PUT /v1/apps/{name}/autoscale {"min":0,"max":4,"target_concurrency":10,"cpu_percent":70,"idle_seconds":300}  (min 0 = scale-to-zero)
 - PUT /v1/apps/{name}/health {"path":"/healthz","failures":3}
 - POST /v1/volumes {"name","size_gb"}, GET /v1/volumes, POST /v1/apps/{name}/volumes {"volume","path"}, DELETE /v1/apps/{name}/volumes/{vol}
-- POST /v1/apps/{name}/domains {"domain"} -> add TXT _aloof-challenge.<domain> = aloof-verify=<token> and CNAME <domain> -> {name}.{{DOMAIN}},
-  then POST /v1/apps/{name}/domains/{domain}/verify (HTTPS is issued automatically once verified)
+- Custom domains: POST /v1/apps/{name}/domains {"domain"} -> returns dns_records: TXT _aloof-challenge.<domain> = aloof-verify=<token>, plus CNAME <domain> -> {name}.{{DOMAIN}} (subdomains)
+  or A + AAAA records (apex/root domains; ALIAS/ANAME/CNAME-flattening to {name}.{{DOMAIN}} also works). We re-check DNS every few minutes, so a pending domain verifies by itself;
+  POST /v1/apps/{name}/domains/{domain}/verify checks now (rate limited). Status per domain: pending | verified | dns_error (was verified, DNS later broke: still served, not removed), with last_checked_at.
+  GET /v1/apps/{name}/domains, GET /v1/domains (whole account + plan limit: Free 1, Hobby 3, Pro 10), DELETE /v1/apps/{name}/domains/{domain}.
+  A verified apex also redirects its www twin (308) and vice versa. Unverified claims are released after 7 days. Cloudflare: DNS only (grey cloud). Guide: /docs/domains on the main site
 - GET /v1/billing (USD prepaid balance in cents, invoices); POST /v1/billing/checkout {"credit_usd":25} -> Stripe Checkout url;
   POST /v1/billing/subscribe {"tier":"pro"} -> Stripe subscription; POST /v1/billing/portal -> Stripe customer portal
 - Humans sign up at /login (email+password or magic link); API keys at /dashboard -> Account

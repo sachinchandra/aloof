@@ -19,7 +19,7 @@ on them are refused, and the pricing page shows a waitlist (`POST /v1/waitlist`)
 - **Deploy** from an image or git (`aloof deploy`, REST, dashboard or MCP), with rolling redeploys, env vars (encrypted at rest) and health checks with auto-replace.
 - **Autoscaling and scale to zero**: concurrency- and CPU-based. Idle apps sleep and the first request wakes them (≈1 s on CPU) while it's held at the edge.
 - **Volumes** that survive redeploys and restarts, pinned to the node they live on.
-- **Custom domains**: TXT ownership check plus CNAME/A routing, with automatic TLS through Caddy (Let's Encrypt in production).
+- **Custom domains**: TXT ownership check plus CNAME (subdomains) or A + AAAA (apex; ALIAS/ANAME/flattening also works) routing, background re-checks with a `pending`/`verified`/`dns_error` status, www/apex 308 pairing, per-plan limits, automatic TLS through Caddy (Let's Encrypt in production).
 - **Multi-cloud scheduler**: bin-packs CPU apps, gives each GPU app a dedicated node, and refuses any pool where a plan would fall under the margin floor. Nodes join over WireGuard and run `paas/agent/agent.py`.
 - **Accounts**: email + password, magic links, session cookies with a CSRF header, and API keys stored only as SHA-256 hashes.
 - **Billing in USD (cents)**: a prepaid wallet with Stripe Checkout top-ups, Stripe subscriptions for the Hobby and Pro tiers, the Stripe customer portal, webhook signature verification,
@@ -73,7 +73,32 @@ Add `https://mcp.aloof.si/mcp` as a connector in Claude, ChatGPT or Cursor (OAut
 {"mcpServers": {"aloof": {"command": "python3", "args": ["mcp_server/server.py"],
   "env": {"ALOOF_API_URL": "http://localhost:8000", "ALOOF_API_KEY": "pk_..."}}}}
 ```
-Tools: `list_plans, join_gpu_waitlist, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain`.
+Tools (42, parsed from `mcp_server/server.py`): `list_plans, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, list_templates, deploy_template, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain, list_domains, verify_domain, remove_domain, join_gpu_waitlist, list_releases, diagnose_app, rollback_app, set_self_heal, create_postgres, list_regions, list_postgres, attach_postgres, backup_postgres, snapshot_volume, restore_volume, exec_command, add_log_drain, list_offsite_backups, restore_offsite_backup, registry_login, add_git_credential, deploy_with_config, app_status, create_deploy_token`.
+
+## Custom domains: how to connect one
+
+Works like Fly.io, Railway and Render: add the domain, create DNS records at your registrar, wait for the automatic check, done. Full guide with per-registrar tips (Cloudflare, GoDaddy, Namecheap, Route 53): `/docs/domains` on the site.
+
+```
+aloof domains my-app add api.example.com      # prints the records to create
+aloof domains my-app list                     # status, last checked, records still needed
+aloof domains my-app verify api.example.com   # check now (rate limited); we also re-check automatically
+aloof domains my-app remove api.example.com
+```
+
+| Record | Name | Value | When |
+|---|---|---|---|
+| TXT | `_aloof-challenge.<domain>` | `aloof-verify=<token>` | always: proves ownership |
+| CNAME | `api.example.com` | `<app>.aloof.si` | subdomains |
+| A / AAAA | `example.com` | the edge IPv4 / IPv6 shown by the API (`PAAS_EDGE_IPS`) | root (apex) domains, or instead of the CNAME |
+| ALIAS / ANAME / flattened CNAME | `example.com` | `<app>.aloof.si` | apex, if your DNS provider offers it, instead of A/AAAA |
+
+- **Cloudflare**: set the routing records to *DNS only* (grey cloud); proxied (orange cloud) domains are rejected because they resolve to Cloudflare, not to us.
+- **Status**: `pending` (re-checked after 2 min, then 5, 10, 30 min, 1 h, 3 h, 6 h), `verified` (re-checked every 30 min), `dns_error` (was verified, DNS later broke: still served, never removed, recovers by itself). Unverified claims are released after 7 days.
+- **www/apex**: once `example.com` is verified, `www.example.com` redirects to it with a 308 (and the reverse for a verified `www`), if it points at us too. Only to verified domains.
+- **Limits** per account: Free 1, Hobby 3, Pro 10 domains (`PAAS_DOMAIN_LIMIT_<TIER>` overrides); 20 adds and 30 manual verifies per hour per account (HTTP 429 + `Retry-After`); `PAAS_MAX_CUSTOM_DOMAINS` (500) caps certificate-issuing hostnames platform-wide.
+- **API / MCP**: `POST /v1/apps/{app}/domains`, `POST .../{domain}/verify`, `GET /v1/apps/{app}/domains`, `GET /v1/domains`, `DELETE .../{domain}`; MCP tools `add_domain`, `list_domains`, `verify_domain`, `remove_domain`.
+- **Operator config**: `PAAS_EDGE_IPS` is a comma list of the edge's public IPv4 *and* IPv6 addresses (e.g. `178.104.200.75,2a01:4f8:1c1f:71d2::1`); the controller re-check interval is `PAAS_DOMAIN_TICK_S` (60 s). Migration v12 adds the status columns.
 
 ## Layout
 ```

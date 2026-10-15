@@ -303,17 +303,28 @@ elif o.cmd == "autoscale":
     r = call("DELETE", f"/v1/apps/{o.name}/autoscale") if o.off else call("PUT", f"/v1/apps/{o.name}/autoscale", {"min":o.min,"max":o.max,"target_concurrency":o.concurrency,"cpu_percent":o.cpu,"idle_seconds":o.idle})
     pj(r["spec"].get("autoscale"))
 elif o.cmd == "domains":
+    import datetime as _dt
+    def ago(t): return _dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "never"
     def show(d):
-        st = "verified, HTTPS on" if d["verified"] else f"pending (ownership {'ok' if d['owned'] else 'missing'}, routing {'ok' if d['routed'] else 'missing'})"
-        print(f"{d['domain']}: {st}")
-        if not d["verified"]:
+        st = d.get("status") or ("verified" if d["verified"] else "pending")
+        label = {"verified": "verified, HTTPS on", "dns_error": "DNS ERROR: was verified, but its DNS no longer checks out (still served; fix the records)"}.get(st) or f"pending (ownership {'ok' if d['owned'] else 'missing'}, routing {'ok' if d['routed'] else 'missing'}; re-checked automatically)"
+        print(f"{d['domain']}: {label}   [last checked {ago(d.get('last_checked_at'))}]")
+        if st != "verified":
             r = d["dns_records"]; print("  add these DNS records at your DNS provider:")
             print(f"    TXT    {r['ownership']['name']}  \"{r['ownership']['value']}\"")
-            print(f"    CNAME  {d['domain']}  {r['routing'][0]['value']}" + "".join(f"\n    (or A  {d['domain']}  {x['value']}  for apex domains)" for x in r["routing"][1:]))
+            if r.get("is_apex"):
+                for x in r["recommended"]: print(f"    {x['type']:<6} {d['domain']}  {x['value']}")
+                print(f"    (or, if your DNS offers ALIAS/ANAME/CNAME flattening: point {d['domain']} at {r['routing'][0]['value']} instead of the A/AAAA records)")
+            else:
+                print(f"    CNAME  {d['domain']}  {r['routing'][0]['value']}")
+                for x in r["routing"][1:]: print(f"    (or {x['type']:<5} {d['domain']}  {x['value']}  if you can't use a CNAME)")
             for m in d.get("detail") or []: print("  -", m)
-            print(f"  then: aloof domains {o.name} verify {d['domain']}")
+            print(f"  Cloudflare: set these records to DNS only (grey cloud). We re-check every few minutes; or run: aloof domains {o.name} verify {d['domain']}")
+            if d.get("claim_expires_at"): print(f"  unverified claims are released on {ago(d['claim_expires_at'])}")
+        if d.get("www_pair"): w = d["www_pair"]; print(f"  also point {w['domain']} at us: it will redirect (308) to https://{d['domain']} once {d['domain']} is verified")
     if o.action == "add": show(call("POST", f"/v1/apps/{o.name}/domains", {"domain": o.domain}))
-    elif o.action == "list": [show(d) for d in call("GET", f"/v1/apps/{o.name}/domains")]
+    elif o.action == "list":
+        r = call("GET", "/v1/domains"); [show(d) for d in r["domains"] if d["app"] == o.name]; print(f"({r['used']} of {r['limit']} domains used on the {r['tier'].title()} plan)")
     elif o.action == "verify": show(call("POST", f"/v1/apps/{o.name}/domains/{o.domain}/verify"))
     else: pj(call("DELETE", f"/v1/apps/{o.name}/domains/{o.domain}"))
 elif o.cmd == "health": pj(call("PUT", f"/v1/apps/{o.name}/health", {"path": o.path, "failures": o.failures})["spec"]["health"])

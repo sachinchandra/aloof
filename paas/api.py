@@ -243,38 +243,84 @@ def vol_attach(name: str, b: Attach, a=Depends(acct)):
     except ValueError as e: raise HTTPException(409, str(e))
 @app.delete("/v1/apps/{name}/volumes/{vol}")
 def vol_detach(name: str, vol: str, a=Depends(acct)): own(name, a); own_vol(vol, a); return with_url(engine.detach_volume(name, vol))
-# ---- custom domains (TXT ownership + routing) + on-demand TLS gate ----
-EDGE_IPS = [x for x in os.environ.get("PAAS_EDGE_IPS", "127.0.0.1").split(",") if x]
+# ---- custom domains (TXT ownership + routing, background re-check, www/apex pairing) + on-demand TLS gate ----
+EDGE_IPS = [x.strip() for x in os.environ.get("PAAS_EDGE_IPS", "127.0.0.1").split(",") if x.strip()]
 class DomainReq(BaseModel): domain: str
+def _lim(e: "doms.LimitError"):
+    return HTTPException(e.status, e.msg, headers={"Retry-After": str(e.retry_after)} if e.retry_after else None)
 def _domain_view(d):
-    return {"domain": d["domain"], "app": d["app"], "verified": bool(d["verified"]), "owned": bool(d["owned"]), "routed": bool(d["routed"]),
-            "dns_records": doms.instructions(d["domain"], d["app"], BASE_DOMAIN, d["txt_token"], EDGE_IPS), "https": f"https://{d['domain']}/"}
-def _verify(d):
+    now = time.time(); st = d.get("status") or ("verified" if d["verified"] else "pending")
+    v = {"domain": d["domain"], "app": d["app"], "status": st, "verified": bool(d["verified"]), "owned": bool(d["owned"]), "routed": bool(d["routed"]),
+         "dns_error": st == "dns_error", "last_checked_at": d.get("last_checked_at"), "next_check_at": d.get("next_check_at") or None, "verified_at": d.get("verified_at"),
+         "detail": [x for x in (d.get("last_detail") or "").split("; ") if x] if st != "verified" else [],
+         "dns_records": doms.instructions(d["domain"], d["app"], BASE_DOMAIN, d["txt_token"], EDGE_IPS), "https": f"https://{d['domain']}/"}
+    if not d["verified"]: v["claim_expires_at"] = (d.get("created") or now) + doms.CLAIM_TTL_DAYS * 86400
+    p = doms.pair_hint(d["domain"], d["app"], BASE_DOMAIN, EDGE_IPS)
+    if p: v["www_pair"] = p
+    return v
+def _verify(d, manual=True):
     r = doms.check(d["domain"], d["app"], BASE_DOMAIN, d["txt_token"], EDGE_IPS)
-    q("update domains set owned=?, routed=?, verified=? where domain=?", (int(r["owned"]), int(r["routed"]), int(r["verified"]), d["domain"]))
-    return _domain_view(q("select * from domains where domain=?", (d["domain"],), one=True)) | {"detail": r["detail"]}
+    doms.apply(q, d, r, manual=manual)
+    return _domain_view(q("select * from domains where domain=?", (d["domain"],), one=True)) | {"detail": r["detail"] or []}
+def _tier(a): return (q("select tier from accounts where id=?", (a["id"],), one=True) or {}).get("tier") or "free"
+def _domain_quota(a):
+    t = _tier(a); lim = doms.limit_for(t); used = q("select count(*) n from domains where account_id=?", (a["id"],), one=True)["n"]
+    return {"tier": t, "limit": lim, "used": used, "remaining": max(0, lim - used)}
+def _domain_hosts_blocked(): return [BASE_DOMAIN, URL_DOMAIN, API_HOST, MCP_HOST] + list(APP_DOMAINS)
 @app.post("/v1/apps/{name}/domains")
 def add_domain(name: str, d: DomainReq, a=Depends(acct)):
-    own(name, a); dom = d.domain.lower().strip().strip(".")
-    if not doms_ok(dom): raise HTTPException(400, "invalid domain")
-    if dom == BASE_DOMAIN or dom.endswith("." + BASE_DOMAIN): raise HTTPException(400, f"subdomains of {BASE_DOMAIN} are assigned automatically")
+    own(name, a); dom = doms.normalize(d.domain)
+    try: doms.rate_check("add", a["id"])
+    except doms.LimitError as e: raise _lim(e)
+    err = doms.valid_error(dom, _domain_hosts_blocked())
+    if err: raise HTTPException(400, f"subdomains of {BASE_DOMAIN} are assigned automatically" if "managed by the platform" in err else err)
     ex = q("select * from domains where domain=?", (dom,), one=True)
-    if ex and ex["account_id"] != a["id"]: raise HTTPException(409, "domain claimed by another account")
-    if not ex: q("insert into domains(domain,app,account_id,verified,created,txt_token,owned,routed) values(?,?,?,0,?,?,0,0)", (dom, name, a["id"], time.time(), doms.new_token()))
-    else: q("update domains set app=? where domain=?", (name, dom))
-    return _verify(q("select * from domains where domain=?", (dom,), one=True))
+    if ex and ex["account_id"] != a["id"]:
+        # a verified (or recently added) claim is protected; a stale unverified one can't squat the name from other accounts
+        if ex["verified"] or time.time() - (ex.get("created") or 0) < doms.CLAIM_GRACE_S:
+            raise HTTPException(409, "domain claimed by another account. If it's yours, the current claim must be verified or expire (unverified claims are released after "
+                                     f"{doms.CLAIM_TTL_DAYS} days); contact support to dispute a verified claim")
+        q("delete from domains where domain=? and verified=0", (dom,)); ex = None
+    if not ex:
+        qt = _domain_quota(a)
+        if qt["used"] >= qt["limit"]:
+            nxt = {"free": "Hobby allows 3 and Pro 10", "hobby": "Pro allows 10"}.get(qt["tier"], "contact support for more")
+            raise HTTPException(403, f"custom domain limit reached: the {qt['tier'].title()} plan allows {qt['limit']} domain{'s' if qt['limit'] != 1 else ''} per account (you have {qt['used']}). Remove one, or upgrade ({nxt}).")
+        if q("select count(*) n from domains where verified=0", one=True)["n"] >= doms.MAX_PENDING:
+            raise HTTPException(503, "too many pending domain claims platform-wide right now; try again later", headers={"Retry-After": "600"})
+        q("insert into domains(domain,app,account_id,verified,created,txt_token,owned,routed,status,next_check_at,check_count,fail_count) values(?,?,?,0,?,?,0,0,'pending',0,0,0)", (dom, name, a["id"], time.time(), doms.new_token()))
+    elif ex["app"] != name:
+        q("update domains set app=?, status=case when verified=1 then 'verified' else 'pending' end where domain=?", (name, dom))
+    elif not ex["verified"]: q("update domains set created=? where domain=?", (time.time(), dom))   # re-adding renews your own pending claim
+    row = q("select * from domains where domain=?", (dom,), one=True)
+    return _verify(row, manual=False)
 import re as _re
-def doms_ok(d): return bool(_re.match(r"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", d))
+def doms_ok(d): return doms.valid_error(d) is None
 @app.post("/v1/apps/{name}/domains/{domain}/verify")
 def verify_domain(name: str, domain: str, a=Depends(acct)):
-    own(name, a); d = q("select * from domains where domain=? and app=?", (domain, name), one=True)
+    own(name, a); domain = doms.normalize(domain); d = q("select * from domains where domain=? and app=? and account_id=?", (domain, name, a["id"]), one=True)
     if not d: raise HTTPException(404, "domain not found")
+    try: doms.rate_check("verify", a["id"]); doms.verify_gap(domain)
+    except doms.LimitError as e: raise _lim(e)
     return _verify(d)
 @app.get("/v1/apps/{name}/domains")
-def list_domains(name: str, a=Depends(acct)): own(name, a); return [_domain_view(d) for d in q("select * from domains where app=?", (name,))]
+def list_domains(name: str, a=Depends(acct)): own(name, a); return [_domain_view(d) for d in q("select * from domains where app=? and account_id=? order by created", (name, a["id"]))]
+@app.get("/v1/domains")
+def list_all_domains(a=Depends(acct)):
+    """Every custom domain on the account with its status, plus the plan's limit."""
+    return {"domains": [_domain_view(d) for d in q("select * from domains where account_id=? order by created", (a["id"],))], **_domain_quota(a),
+            "edge": {"a": doms.edge_split(EDGE_IPS)[0], "aaaa": doms.edge_split(EDGE_IPS)[1]}}
 @app.delete("/v1/apps/{name}/domains/{domain}")
-def del_domain(name: str, domain: str, a=Depends(acct)): own(name, a); q("delete from domains where domain=? and app=?", (domain, name)); return {"ok": True}
+def del_domain(name: str, domain: str, a=Depends(acct)):
+    own(name, a); q("delete from domains where domain=? and app=? and account_id=?", (doms.normalize(domain), name, a["id"])); return {"ok": True}
 SYSTEM_HOSTS = {API_HOST, MCP_HOST} | {h for d in APP_DOMAINS for h in (d, f"www.{d}", f"api.{d}", f"mcp.{d}")}
+def pair_target(host):
+    """If host is the www/apex twin of a verified custom domain (and isn't itself claimed), the canonical verified domain it redirects to.
+    The target is always a verified domain taken from the DB, never from the request, so this can't be an open redirect."""
+    if host in SYSTEM_HOSTS or _app_of(host): return None
+    p = doms.partner(host)
+    if not p or q("select 1 from domains where domain=? and verified=1", (host,), one=True): return None
+    return p if q("select 1 from domains where domain=? and verified=1", (p,), one=True) else None
 def _app_of(host):
     for d in APP_DOMAINS:
         if host.endswith("." + d) and host not in SYSTEM_HOSTS and "." not in host[:-len(d)-1] and not host.startswith("pg-"): return host[:-len(d)-1]
@@ -285,6 +331,7 @@ def tls_ask(domain: str):
     if d in SYSTEM_HOSTS: return {"ok": True}
     if _app_of(d) and q("select 1 from apps where name=? and status!='destroyed'", (_app_of(d),), one=True): return {"ok": True}
     if q("select 1 from domains where domain=? and verified=1", (d,), one=True): return {"ok": True}
+    if pair_target(d): return {"ok": True}        # www/apex twin of a verified domain (served as a 308 redirect)
     raise HTTPException(403, "unknown domain")
 def _wallet(a): return {"credit_cents": round(a.get("credit_cents") or 0, 4), "credit_usd": billing.usd(a.get("credit_cents"))}
 @app.get("/v1/usage")
@@ -926,6 +973,11 @@ def _sh_record(name, status, t0, request=None, path="/"):
 @proxy.api_route("/{path:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS","HEAD"])
 async def edge(path: str, request: Request):
     host = request.headers.get("host","").split(":")[0].lower(); name, path = resolve_app(host, path)
+    if not name:
+        tgt = pair_target(host)
+        if tgt:
+            qs = f"?{request.url.query}" if request.url.query else ""
+            return Response(status_code=308, headers={"location": f"https://{tgt}{request.url.path or '/'}{qs}", "cache-control": "max-age=300"})
     if not name: return PlainTextResponse(f"{BRAND} edge: use https://<app>.{URL_DOMAIN}/, a verified custom domain, or /_app/<app>/", 404)
     insts = q("select id,host,port from instances where app=? and status='running'", (name,))
     if not insts:

@@ -113,6 +113,21 @@ alter table accounts add column lowbal_threshold_usd REAL;
 alter table accounts add column lowbal_sent TEXT default '';
 """)
 
+    # v12: custom-domain lifecycle: status (pending|verified|dns_error), background re-check schedule, last check time/detail
+    ,(12, """
+alter table domains add column status TEXT default 'pending';
+alter table domains add column last_checked_at REAL;
+alter table domains add column next_check_at REAL default 0;
+alter table domains add column check_count int default 0;
+alter table domains add column fail_count int default 0;
+alter table domains add column verified_at REAL;
+alter table domains add column last_detail TEXT;
+update domains set status='verified', verified_at=created where verified=1;
+update domains set status='pending' where verified is null or verified=0;
+create index if not exists domains_account on domains(account_id);
+create index if not exists domains_next on domains(next_check_at);
+""")
+
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
