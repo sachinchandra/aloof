@@ -12,7 +12,8 @@ SITE=$(sed -n '/# __SITE__ begin/,/# __SITE__ end/p' Caddyfile.prod)
   for d in $PAAS_BASE_DOMAIN ${PAAS_ALT_DOMAINS//,/ }; do
     if [ "$d" = "$PAAS_BASE_DOMAIN" ] && [ "${PAAS_CANONICAL_WWW:-0}" = 1 ]; then
       # www.<base> is canonical; the apex (if its DNS exists) redirects to www
-      printf 'www.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8000\n}\n%s {\n\timport aloof_sec\n\tredir https://www.%s{uri} permanent\n}\napi.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8000\n}\nmcp.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8001\n}\n' "$d" "$d" "$d" "$d" "$d"
+      printf 'www.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8000\n}\n%s {\n\timport aloof_sec\n\tredir https://www.%s{uri} permanent\n}\napi.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8000\n}\n' "$d" "$d" "$d" "$d"
+      echo "$SITE" | sed -n '/^mcp\.__D__ {/,$p' | grep -v '^# __SITE__' | sed "s|__D__|$d|g"
     else echo "$SITE" | sed "s|__D__|$d|g"; fi; done
   sed -n '/# __SITE__ end/,$p' Caddyfile.prod | sed '1d'; } > "$LIVE"
 /usr/local/bin/caddy validate --config "$LIVE" --adapter caddyfile >/dev/null 2>&1 || { /usr/local/bin/caddy validate --config "$LIVE" --adapter caddyfile; exit 1; }
