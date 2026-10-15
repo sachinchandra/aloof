@@ -45,13 +45,14 @@ def nav(brand):
 <span class=sp></span><button class=icon-btn onclick="toggleTheme()" aria-label="Toggle dark/light theme">{svg("sun")}</button>
 <a href="/login" class=hide-sm>Log in</a><a class="btn pri sm" href="/login#register" data-cta=deploy_free data-cta-loc=nav>Start free</a>
 <button class="icon-btn menu-btn" aria-label="Menu" onclick="document.getElementById('nl').classList.toggle('open')">{svg("menu")}</button></div></header>"""
-def footer(brand):
-    return f"""<footer class=f><div class=wrap><div class=cols><div><a class=logo href="/"><i></i>{brand}</a><p class=muted style="max-width:300px;margin-top:12px">The cloud for apps your AI ships.</p></div>
+def footer(brand, prices_note=True):
+    f = f"""<footer class=f><div class=wrap><div class=cols><div><a class=logo href="/"><i></i>{brand}</a><p class=muted style="max-width:300px;margin-top:12px">The cloud for apps your AI ships.</p></div>
 <div><h5>Product</h5><a href="/#features">Features</a><a href="/pricing">Pricing</a><a href="/regions">Regions</a><a href="/examples">Example architectures</a><a href="/pricing#gpus">GPUs (soon)</a></div>
 <div><h5>Developers</h5><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/docs/cli">CLI</a><a href="/api/docs">API reference</a><a href="/docs/mcp">MCP</a><a href="/llms.txt">llms.txt</a><a href="/rss.xml">RSS</a></div>
 <div><h5>Company</h5><a href="/about">About</a><a href="/security">Security</a><a href="/status">Status</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
 <div><h5>Account</h5><a href="/login">Log in</a><a href="/login#register">Sign up</a><a href="/dashboard">Dashboard</a></div></div>
 <div class=base><span>© 2026 {brand}</span><span>Prices in USD, excluding tax.</span></div></div></footer>"""
+    return f if prices_note else f.replace("<span>Prices in USD, excluding tax.</span>", "")
 def mcp_tool_names():
     """Tool names registered with @mcp.tool() in mcp_server/server.py, in order. Parsed (not imported) so the web process
     doesn't load the MCP server; llms.txt and the MCP docs use this so the list can't drift from the code."""
@@ -70,9 +71,9 @@ def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
     return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{POSTHOG_HOST}"}}</script><script src="/static/analytics.js?v=1" defer></script>' if k else ""
-def page(title, body, brand="Aloof", desc=None):
+def page(title, body, brand="Aloof", desc=None, prices_note=True):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
-    return f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>"""
+    return f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand, prices_note)}{COMMON_JS}{analytics_tag()}</body></html>"""
 def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(round(g))
 def _money(v, unit=""):
     return (f"${v:,.2f}" if v < 100 or v != int(v) else f"${v:,.0f}") + unit
@@ -219,7 +220,7 @@ def landing(brand, base, api, mcp):
 <section class="s v5s" id=faq><div class=wrap style="max-width:760px"><h2 class="t c">FAQ</h2>{faqh}<p class=c style="margin-top:16px"><a href="/docs/self-driving#faq">All questions →</a></p></div></section>
 <section class="ctaband v5cta"><h2>Give your superintelligence a stronger engine.</h2><div class=cta style="justify-content:center"><a class="btn pri" data-cta=deploy_free data-cta-loc=footer_band href="/login#register">Deploy free</a></div></section>{HERO_JS}"""
     return page(f"{brand}: the self-driving cloud for your backends", body, brand,
-                desc="Backends that roll back bad deploys, route around failing instances and scale to zero on their own. Drive it from Claude, ChatGPT or Cursor.")
+                desc="Backends that roll back bad deploys, route around failing instances and scale to zero on their own. Drive it from Claude, ChatGPT or Cursor.", prices_note=False)
 def _pg_rows():
     from .plans import PG_PLANS
     return "".join(f"<tr><td><code>{k}</code> <span class=muted>{p['note']}</span></td><td>{p['vcpu']:g} {'shared' if p['compute'].startswith('shared') else 'dedicated'} vCPU / {p['memory_mb'] if p['memory_mb'] < 1024 else p['memory_mb'] // 1024}{' MB' if p['memory_mb'] < 1024 else ' GB'}</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items())

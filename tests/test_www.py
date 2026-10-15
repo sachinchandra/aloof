@@ -165,3 +165,7 @@ def test_templates_and_selfheal_docs():
     cli = c.get("/docs/cli").text; assert "aloof self-heal" in cli and "aloof templates" in cli
     assert "Paid plans opening soon" in c.get("/docs/billing").text
     t = c.get("/templates/n8n").text; assert "/month</b> if it runs all month" in t
+
+def test_prices_note_not_on_landing():
+    assert "excluding tax" not in c.get("/").text
+    assert "Prices in USD, excluding tax." in c.get("/pricing").text and "Prices in USD, excluding tax." in c.get("/about").text
