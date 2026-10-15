@@ -136,19 +136,11 @@ def runway(acct, now=None):
 def _fmt_hours(h):
     return f"about {round(h)} hours" if h < 48 else f"about {round(h / 24)} days"
 def _lowbal_mail(email, kind, rw):
-    base = (E("PAAS_PUBLIC_API_URL") or "http://localhost:8000").rstrip("/"); link = f"{base}/dashboard#billing"
-    bal = f"${rw['credit_usd']:.2f}"; rate = f"${rw['burn_usd_day']:.2f}/day"
-    if kind == "suspended":
-        return ("Your Aloof apps are suspended: prepaid credit used up",
-                f"Hello,\n\nYour Aloof prepaid balance has reached {bal}, so your running apps have been scaled to zero and suspended. "
-                f"Volumes, databases and backups are kept, and continue to be billed.\n\nTop up to resume them automatically:\n{link}\n\n"
-                "If you think this is a mistake, reply via the Support page at https://www.aloof.si/docs/support.\n\nAloof\n")
+    """-> (subject, text, html)"""
+    from . import emailkit
+    base = (E("PAAS_PUBLIC_API_URL") or "http://localhost:8000").rstrip("/")
     when = _fmt_hours(rw["hours_left"]) if rw.get("hours_left") is not None else "less than you might expect"
-    head = {"72h": "about 3 days", "24h": "less than 24 hours", "custom": "your alert threshold"}[kind]
-    return (f"Aloof credit: {head} left" if kind != "custom" else f"Aloof credit is below your ${rw['threshold_usd']:g} alert",
-            f"Hello,\n\nYour Aloof prepaid balance is {bal}. At your current usage ({rate}) that lasts {when}.\n\n"
-            "When the balance reaches $0, running apps are scaled to zero and suspended until you top up. Volumes and databases are kept.\n\n"
-            f"Top up here:\n{link}\n\nYou can turn these emails off or set your own threshold under Settings in the dashboard.\n\nAloof\n")
+    return emailkit.low_balance(kind, f"${rw['credit_usd']:.2f}", f"${rw['burn_usd_day']:.2f}/day", when, f"{base}/dashboard#billing", rw.get("threshold_usd"))
 def check_low_balance(now=None):
     """Called from meter_tick. Emails each threshold once (72h, 24h, custom $, suspended); credit() re-arms after a top-up."""
     from .auth import send_mail
@@ -170,8 +162,8 @@ def check_low_balance(now=None):
             if not new: continue
             pick = "suspended" if "suspended" in new else ("24h" if "24h" in new else new[0])
             if a.get("lowbal_alerts", 1) not in (0, False) and a.get("email"):
-                subj, body = _lowbal_mail(a["email"], pick, rw)
-                try: send_mail(a["email"], subj, body); sent_n += 1
+                subj, body, htm = _lowbal_mail(a["email"], pick, rw)
+                try: send_mail(a["email"], subj, body, html=htm); sent_n += 1
                 except Exception as e: log.warning("low-balance mail failed account=%s: %s", a["id"], type(e).__name__); continue
             q("update accounts set lowbal_sent=? where id=?", (",".join(sorted(sent | set(new))), a["id"]))
         except Exception as e: log.warning("low-balance check failed account=%s: %s", a.get("id"), e)

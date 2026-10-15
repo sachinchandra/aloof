@@ -564,7 +564,7 @@ def auth_mcp_key(a=Depends(acct)):
     return {"api_key": engine.create_named_key(a["id"], "mcp-oauth")}
 ICONS = {"/favicon.ico": ("favicon.ico", "image/x-icon"), "/icon.svg": ("icon.svg", "image/svg+xml"), "/favicon-16x16.png": ("favicon-16x16.png", "image/png"),
          "/favicon-32x32.png": ("favicon-32x32.png", "image/png"), "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
-         "/icon-192.png": ("icon-192.png", "image/png"), "/icon-512.png": ("icon-512.png", "image/png"), "/site.webmanifest": ("site.webmanifest", "application/manifest+json")}
+         "/icon-192.png": ("icon-192.png", "image/png"), "/email-logo.png": ("email-logo.png", "image/png"), "/icon-512.png": ("icon-512.png", "image/png"), "/site.webmanifest": ("site.webmanifest", "application/manifest+json")}
 def _icon_route(path, fn, mt):
     @app.get(path, include_in_schema=False)
     def _icon(): return FileResponse(os.path.join(ROOT, "paas", "static", "icons", fn), media_type=mt, headers={"Cache-Control": "public, max-age=86400"})
