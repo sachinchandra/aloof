@@ -70,7 +70,7 @@ def posthog_host(): return (os.environ.get("POSTHOG_HOST") or POSTHOG_DEFAULT_HO
 def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
-    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=2" defer></script>' if k else ""
+    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=3" defer></script>' if k else ""
 def page(title, body, brand="Aloof", desc=None):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
     return f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>"""
@@ -511,7 +511,7 @@ if(location.hash=='#register')mode('register');
 async function go(kind){{if(kind=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'password'}});const r=await fetch('/v1/auth/'+kind,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,password:pw.value,attribution:window.aloofAttribution?aloofAttribution():null}})}});
  const j=await r.json(); if(!r.ok){{msg.className='bad';msg.textContent=j.detail||'error';return}}
  if(j.api_key) sessionStorage.newKey=j.api_key; var n=new URLSearchParams(location.search).get('next'),d='/dashboard';try{{if(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&!/[\\\\\\x00-\\x20\\x7f]/.test(n)){{var u=new URL(n,location.origin);if(u.origin===location.origin&&u.pathname.charAt(1)!='/')d=u.pathname+u.search+u.hash}}}}catch(e){{}}location=d}}
-async function magic(){{const r=await fetch('/v1/auth/magic',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,attribution:window.aloofAttribution?aloofAttribution():null}})}});
+async function magic(){{if(M=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'magic_link'}});const r=await fetch('/v1/auth/magic',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,attribution:window.aloofAttribution?aloofAttribution():null}})}});
  const j=await r.json(); msg.className=r.ok?'ok':'bad'; msg.textContent=j.detail}}
 </script>""", brand)
 LEGAL = {

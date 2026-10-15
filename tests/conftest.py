@@ -7,5 +7,5 @@ os.environ.update(PAAS_DB=os.path.join(_d, "t.sqlite"), PAAS_SECRET_KEY=Fernet.g
                   PAAS_EDGE_IPS="203.0.113.10", STRIPE_SECRET_KEY="sk_test_X", STRIPE_WEBHOOK_SECRET="whsec_test",
                   STRIPE_PRICE_HOBBY="price_hobby", STRIPE_PRICE_PRO="price_pro", PAAS_OUTBOX=os.path.join(_d, "outbox.log"))
 os.environ.pop("PAAS_DB_URL", None); os.environ.pop("STRIPE_TAX", None); os.environ.pop("PAAS_ENV_FILE", None); os.environ.pop("PAAS_RAZORPAY_ENABLED", None)
-for k in [k for k in os.environ if k.startswith(("E2E_", "JARVISLABS_", "KRUTRIM_", "AWS_", "SMTP_", "HCLOUD_", "HYPERSTACK_", "RUNPOD_", "PAAS_GPU_", "PAAS_CPU_POOLS"))]: os.environ.pop(k)
+for k in [k for k in os.environ if k.startswith(("POSTHOG_", "E2E_", "JARVISLABS_", "KRUTRIM_", "AWS_", "SMTP_", "HCLOUD_", "HYPERSTACK_", "RUNPOD_", "PAAS_GPU_", "PAAS_CPU_POOLS"))]: os.environ.pop(k)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
