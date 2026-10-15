@@ -7,6 +7,8 @@ aloof deploy &lt;app&gt; --image IMG | --git URL [--ref main] [--plan shared-1x-
 aloof config validate | show
 aloof status | logs [-f] | destroy   [-a app]        (app defaults to aloof.toml's app)
 aloof releases &lt;app&gt; ; aloof rollback &lt;app&gt; [version]
+aloof self-heal &lt;app&gt; [on|off]    # show or set automatic rollback of bad deploys (on by default)
+aloof templates                   # list one-click templates ; deploy one with: aloof deploy &lt;app&gt; --template &lt;id&gt;
 aloof scale count 3 | scale count web=2 worker=1 | scale vm perf-2x-4gb [--group worker]
 aloof secrets set K=V [K2=V2] [--stage] | unset K | list | deploy
 aloof tokens create [-a app | --org] [--expiry 30d] | list | revoke &lt;id&gt;

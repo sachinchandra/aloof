@@ -97,7 +97,7 @@ def test_support_doc_fixes():
     t = c.get("/docs/troubleshooting"); assert t.status_code == 200 and "HTTP 402" in t.text and "id=failed-releases" in t.text and "build logs" in t.text.lower() and "release_command" in t.text
     b = c.get("/docs/billing").text; assert b.index("The short version") < b.index("/v1/billing/subscribe") and "id=cancel" in b and "id=refunds" in b and "id=delete" in b and "pending" not in b.lower() and "Railway" not in b and "Fly" not in b and "Render" not in b
     p = c.get("/docs/postgres").text; assert "aloof proxy 5432 -a pg-" in p and "max_connections" in p and "id=resize" in p and "Support will resize" in p
-    assert "Support contact: pending" in c.get("/docs/support").text and "Remix" in c.get("/guides").text
+    sp = c.get("/docs/support").text; assert "no public support email yet" in sp and "pending" not in sp.lower() and "@" not in sp.split("<article")[1] and "Remix" in c.get("/guides").text
 def test_terms_billing_section():
     t = c.get("/terms").text; assert "Fees and billing" in t and "Draft" not in t and "/docs/billing#cancel" in t
     assert "$5 of prepaid credit" in c.get("/docs/quickstart").text
@@ -157,3 +157,11 @@ def test_home_v5():
     assert len(h.encode()) < 40000
     from paas import site
     for pth in ["/", "/pricing", "/templates", "/security", "/llms.txt", "/sitemap.xml"] + [f"/docs/{k}" for k in site.DOCS]: assert "babysit" not in c.get(pth).text.lower(), pth
+
+def test_templates_and_selfheal_docs():
+    for u in ("/docs/templates", "/docs/self-healing"):
+        r = c.get(u); assert r.status_code == 200 and "babysit" not in r.text.lower() and f'href="{u}"' in r.text
+    assert "on by default" in c.get("/docs/self-healing").text.lower()
+    cli = c.get("/docs/cli").text; assert "aloof self-heal" in cli and "aloof templates" in cli
+    assert "Paid plans opening soon" in c.get("/docs/billing").text
+    t = c.get("/templates/n8n").text; assert "/month</b> if it runs all month" in t

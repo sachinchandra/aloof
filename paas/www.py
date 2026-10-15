@@ -161,7 +161,7 @@ def robots(): return f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /das
 def urls():
     u = ["/", "/pricing", "/docs", "/blog", "/guides", "/examples", "/regions", "/about", "/security", "/status", "/privacy", "/terms"]
     u += [f"/blog/{p['slug']}" for p in POSTS] + [f"/guides/{k}" for k in GUIDES]
-    u += [f"/docs/{k}" for k in ("quickstart", "self-driving", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "mcp")]
+    u += [f"/docs/{k}" for k in ("quickstart", "self-driving", "templates", "self-healing", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "mcp")]
     return u
 _GITD = {}
 def _git_date(*files):

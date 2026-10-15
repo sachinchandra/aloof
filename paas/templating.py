@@ -107,12 +107,20 @@ def get(tid):
     if not t: raise KeyError(tid)
     return t
 
+def est_monthly(t):
+    """Monthly cost if the app runs all month: app plan + volumes + Postgres plan, from plans.py (same data the console prices with)."""
+    from .plans import PLANS, PG_PLANS, RATES
+    a = t["app"]; tot = PLANS[a.get("plan", "shared-1x-512mb")]["price_usd_month"]
+    tot += sum(v.get("size_gb", 1) for v in t.get("volumes", [])) * RATES["volume_usd_gb_month"]
+    if "postgres" in t: tot += PG_PLANS[t["postgres"].get("plan", "pg-dev")]["price_usd_month"]
+    return round(tot, 2)
+
 def public(t):
     """Machine-readable view. Never includes generated values."""
     a = t["app"]
     return {"id": t["id"], "name": t["name"], "description": t["description"], "category": t.get("category"), "website": t.get("website"),
             "source": {k: v for k, v in t["source"].items() if k in ("image", "repo", "ref", "subdir")}, "port": a["port"],
-            "default_plan": a.get("plan", "shared-1x-512mb"), "region": LIVE_REGIONS[a.get("region", "nbg1")],
+            "default_plan": a.get("plan", "shared-1x-512mb"), "est_monthly_usd": est_monthly(t), "region": LIVE_REGIONS[a.get("region", "nbg1")],
             "env": [{"name": e["name"], "kind": "generated" if "generate" in e else ("default" if "value" in e else "required"),
                      **({"default": e["value"]} if "value" in e else {}), "description": e.get("description", "")} for e in t.get("env", [])],
             "required_env": [e["name"] for e in t.get("env", []) if not ("value" in e or "generate" in e)],
@@ -278,9 +286,12 @@ def template_page(tid: str):
     envs = "".join(f"<li><code>{e(x['name'])}</code> · {e(x['kind'])}{' · ' + e(x['description']) if x['description'] else ''}</li>" for x in p["env"]) or "<li>none</li>"
     vols = "".join(f"<li>{e(v['size_gb'])} GB at <code>{e(v['path'])}</code></li>" for v in p["volumes"]) or "<li>none</li>"
     src = p["source"].get("image") or p["source"].get("repo")
+    from .plans import PLANS, PG_PLANS, RATES
+    _t = get(tid); _pl = PLANS[_t['app'].get('plan', 'shared-1x-512mb')]['price_usd_month']; _vg = sum(v.get('size_gb', 1) for v in _t.get('volumes', []))
+    cost_parts = f"app ${_pl:.2f}" + (f" + {_vg} GB disk ${_vg * RATES['volume_usd_gb_month']:.2f}" if _vg else "") + (f" + database ${PG_PLANS[_t['postgres'].get('plan', 'pg-dev')]['price_usd_month']:.2f}" if 'postgres' in _t else "")
     inner = (f"<p class=thead>{tpl_logo(p['id'], p['name'], 'lg')}<a class='btn' href='{e(p['deploy_button'])}'>Deploy on Aloof</a></p><h2>What gets created</h2><ul><li>App from <code>{e(src)}</code> on port {p['port']}, plan <code>{e(p['default_plan'])}</code>, region {e(p['region'])}</li>"
              f"{'<li>Managed Postgres (' + e(p['postgres']['plan']) + '), connection in <code>' + e(', '.join(p['postgres']['env'])) + '</code></li>' if p['postgres'] else ''}</ul>"
-             f"<h3>Environment</h3><ul>{envs}</ul><h3>Volumes</h3><ul>{vols}</ul>"
+             f"<h3>Cost</h3><p>About <b>${p['est_monthly_usd']:.2f}/month</b> if it runs all month ({cost_parts}). Billed per second, and nothing while the app sleeps. <a href='/docs/templates'>How template costs work</a>.</p><h3>Environment</h3><ul>{envs}</ul><h3>Volumes</h3><ul>{vols}</ul>"
              f"<h3>CLI / API / MCP</h3><pre>aloof deploy --template {e(p['id'])} &lt;app-name&gt;\ncurl -X POST https://api.aloof.si/v1/templates/{e(p['id'])}/deploy -H 'Authorization: Bearer $ALOOF_API_KEY' -d '{{\"name\":\"my-{e(p['id'])}\"}}'\nMCP: deploy_template(template=\"{e(p['id'])}\", name=...)</pre>"
              f"<p class=muted>Button markdown: <code>[![Deploy on Aloof](https://www.aloof.si/button.svg)]({e(p['deploy_button'])})</code></p>")
     return _page(f"/templates/{tid}", f"Deploy {p['name']} on Aloof", p["description"], inner)
