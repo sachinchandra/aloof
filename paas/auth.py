@@ -16,7 +16,7 @@ def _production(): return (E("PAAS_PUBLIC_API_URL") or "").startswith("https://"
 def send_mail(to, subject, body, html=None, headers=None):
     """SMTP when SMTP_HOST is set. Without it: dev appends to the outbox; production refuses (the outbox would hold live
     sign-in links and API keys) and raises MailError. SMTP failures are logged (never the body) and raise MailError."""
-    msg = EmailMessage(); msg["From"] = E("MAIL_FROM", "Aloof <no-reply@aloof.si>"); msg["To"] = to; msg["Subject"] = subject; msg.set_content(body, cte="8bit")
+    msg = EmailMessage(); msg["From"] = E("MAIL_FROM", "Aloof <no-reply@aloof.si>"); msg["To"] = to; msg["Subject"] = subject; msg["Reply-To"] = E("PAAS_CONTACT_EMAIL", "sachin@aloof.si"); msg.set_content(body, cte="8bit")
     if html: msg.add_alternative(html, subtype="html")
     for k, v in (headers or {}).items(): msg[k] = v
     if E("SMTP_HOST"):
