@@ -34,7 +34,18 @@ api.__D__ {
 }
 mcp.__D__ {
 	import aloof_sec
-	reverse_proxy 127.0.0.1:8001
+	# Glama directory ownership claim (exact body, public)
+	handle /.well-known/glama.json {
+		header Content-Type application/json
+		respond `{
+  "$schema": "https://glama.ai/mcp/schemas/connector.json",
+  "claim": "glama_claim_gXmGq7LWR56x3FwGOK_LvkHq-tnRnOWL"
+}
+` 200
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8001
+	}
 }
 # __SITE__ end
 https:// {
