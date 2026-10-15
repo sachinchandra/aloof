@@ -115,9 +115,9 @@ def test_analytics_off_without_key(monkeypatch):
 def test_analytics_on_with_key(monkeypatch):
     from paas import site
     monkeypatch.setattr(site, "posthog_key", lambda: "phc_testkey1234567890")
-    h = c.get("/").text; assert "/static/analytics.js" in h and "eu.i.posthog.com" in h and 'data-cta=deploy_free' in h and "data-cta=connect_mcp" in h
+    h = c.get("/").text; assert "/static/analytics.js" in h and "us.i.posthog.com" in h and 'data-cta=deploy_free' in h and "data-cta=connect_mcp" in h
     assert c.get("/v1/config").json()["posthog"]["key"] == "phc_testkey1234567890"
-    p = c.get("/privacy").text; assert "PostHog Cloud EU" in p and "Draft" not in p
+    p = c.get("/privacy").text; assert "PostHog Cloud US" in p and "Draft" not in p
 def test_client_events_no_server_duplicates():
     import os
     r = os.path.join(os.path.dirname(__file__), "..")

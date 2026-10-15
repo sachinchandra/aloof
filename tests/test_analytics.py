@@ -9,7 +9,7 @@ def sent(monkeypatch):
     out = []
     def handler(req): out.append((str(req.url), json.loads(req.content))); return httpx.Response(200)
     monkeypatch.setattr(analytics, "_client", httpx.Client(transport=httpx.MockTransport(handler)))
-    monkeypatch.setenv("POSTHOG_API_KEY", "phc_testkey"); monkeypatch.setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
+    monkeypatch.setenv("POSTHOG_API_KEY", "phc_testkey"); monkeypatch.setenv("POSTHOG_HOST", "https://us.i.posthog.com")
     def get(): analytics.flush(); return out
     return get
 def _blob(ev): return json.dumps(ev)
@@ -25,7 +25,7 @@ def test_register_signup_event_with_utm(sent):
     assert ev["distinct_id"] == str(a["id"]) and ev["api_key"] == "phc_testkey"
     p = ev["properties"]; assert p["method"] == "password" and len(p["utm_source"]) <= 100 and p["utm_medium"] == "social"
     assert p["referrer"] == "https://news.ycombinator.com/item" and "@" not in _blob(p) and "sk_live" not in _blob(ev)
-    assert sent()[-1][0] == "https://eu.i.posthog.com/i/v0/e/"
+    assert sent()[-1][0] == "https://us.i.posthog.com/i/v0/e/"
 def test_test_accounts_skipped(sent):
     n = len(sent()); assert c.post("/v1/auth/register", json={"email": "t@example.com", "password": "long-enough-pw"}).status_code == 200
     assert len(sent()) == n
@@ -77,7 +77,7 @@ def test_mcp_connected(sent):
 def test_config_exposes_public_key(monkeypatch):
     monkeypatch.delenv("POSTHOG_API_KEY", raising=False); assert c.get("/v1/config").json()["posthog_key"] is None
     monkeypatch.setenv("POSTHOG_API_KEY", "phc_pub"); j = c.get("/v1/config").json()
-    assert j["posthog_key"] == "phc_pub" and j["posthog_host"] == "https://eu.i.posthog.com"
+    assert j["posthog_key"] == "phc_pub" and j["posthog_host"] == "https://us.i.posthog.com"
 def test_nested_attribution_from_site(sent):
     assert c.post("/v1/auth/register", json={"email": "ana8@real.dev", "password": "long-enough-pw", "attribution": {"utm_source": "hn", "referrer": "https://news.ycombinator.com/"}}).status_code == 200
     p = [b for u, b in sent() if b["event"] == "signup_completed"][-1]["properties"]

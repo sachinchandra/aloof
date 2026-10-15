@@ -623,7 +623,7 @@ def mcp_manifest():
 from .mcp_tools import mcp_tool_names
 @app.get("/v1/config")
 def config(): return {"brand": BRAND, "base_domain": BASE_DOMAIN, "api": PUBLIC_API_URL, "mcp": PUBLIC_MCP_URL, "app_url_pattern": f"https://<app>.{URL_DOMAIN}/", "app_domains": APP_DOMAINS,
-                       "posthog": ({"key": site.posthog_key(), "host": site.POSTHOG_HOST} if site.posthog_key() else None),
+                       "posthog": ({"key": site.posthog_key(), "host": site.posthog_host()} if site.posthog_key() else None),
                        "posthog_key": analytics.api_key() or None, "posthog_host": analytics.host() if analytics.enabled() else None}   # phc_ project key is public by design
 from . import site
 @app.get("/", response_class=HTMLResponse)

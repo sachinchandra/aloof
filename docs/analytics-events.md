@@ -1,6 +1,6 @@
-# Analytics events (PostHog EU)
+# Analytics events (PostHog US)
 
-Server side: `paas/analytics.py`. Host `POSTHOG_HOST` (default `https://eu.i.posthog.com`), key `POSTHOG_API_KEY`; no-op when unset.
+Server side: `paas/analytics.py`. Host `POSTHOG_HOST` (default `https://us.i.posthog.com`), key `POSTHOG_API_KEY`; no-op when unset.
 Frontend gets both from `GET /v1/config` (`posthog_key`, `posthog_host`; the `phc_` project key is public by design).
 
 **distinct_id** = the account's numeric id as a string, e.g. `"42"` (`id` from `GET /v1/auth/me`). The frontend must call `posthog.identify(String(me.id))`.

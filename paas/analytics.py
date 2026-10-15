@@ -1,4 +1,4 @@
-"""Server-side product analytics (PostHog EU). Fire-and-forget: events go to a bounded background queue and a single
+"""Server-side product analytics (PostHog US). Fire-and-forget: events go to a bounded background queue and a single
 daemon thread posts them with a short timeout, so analytics can never fail or slow a request. No-op unless POSTHOG_API_KEY is set.
 distinct_id is always str(accounts.id), the same value the frontend passes to posthog.identify(). Test accounts (is_test) are skipped.
 Never pass emails, secrets, tokens, API keys or message bodies: properties are filtered through an allow-list per event."""
@@ -19,7 +19,7 @@ def api_key():
     if k: return k
     try: from .site import posthog_key; return posthog_key() or ""   # POSTHOG_KEY / data/posthog_key (frontend config)
     except Exception: return ""
-def host(): return (os.environ.get("POSTHOG_HOST") or "https://eu.i.posthog.com").rstrip("/")
+def host(): return (os.environ.get("POSTHOG_HOST") or "https://us.i.posthog.com").rstrip("/")
 def enabled(): return bool(api_key())
 def clean(v, n=200):
     """Short, printable, no emails or key-looking strings."""

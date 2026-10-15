@@ -65,11 +65,12 @@ def posthog_key():
         try: k = open(f).read().strip()
         except OSError: k = ""
     return k if re.fullmatch(r"ph[cx]_[A-Za-z0-9]{10,80}", k or "") else ""
-POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_DEFAULT_HOST = "https://us.i.posthog.com"
+def posthog_host(): return (os.environ.get("POSTHOG_HOST") or POSTHOG_DEFAULT_HOST).strip().rstrip("/")
 def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
-    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{POSTHOG_HOST}"}}</script><script src="/static/analytics.js?v=1" defer></script>' if k else ""
+    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=2" defer></script>' if k else ""
 def page(title, body, brand="Aloof", desc=None):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
     return f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>"""
@@ -549,8 +550,8 @@ LEGAL = {
 <p>Your application code and images, environment variables, application logs (stdout/stderr), databases, volumes, snapshots and backups, and anything your end users send to your apps ("Customer Data"). We process Customer Data only to provide the Service to you. We don't look at it, analyse it, or use it for our own purposes, except where needed to keep the Service running, to fix a problem you ask us to help with, to enforce our Terms, or where the law requires it.</p>
 
 <h2 id="analytics">3. Analytics</h2>
-<p>On this website, the docs and the dashboard we use PostHog Cloud EU (PostHog Inc., data stored in the EU, Frankfurt) to count page views and clicks on sign-up buttons, and to see which campaign or referring site brought you here (UTM parameters and referrer). It runs without cookies: no identifier is stored on your device beyond the current browser tab, so no consent banner is shown. When you're logged in, events are linked to your account id so we can understand how the product is used. We don't send your email, app data or logs to PostHog.</p>
-<p>Our servers also send a small number of product events to PostHog EU under the same account id (for example sign-up completed, first deploy, MCP client connected, plan upgraded, waitlist joined), with only the fields needed to count them, such as the plan, amount or MCP client name.</p>
+<p>On this website, the docs and the dashboard we use PostHog Cloud US (PostHog Inc., data stored in the United States) to count page views and clicks on sign-up buttons, and to see which campaign or referring site brought you here (UTM parameters and referrer). It runs without cookies: no identifier is stored on your device beyond the current browser tab, so no consent banner is shown. When you're logged in, events are linked to your account id so we can understand how the product is used. We don't send your email, app data or logs to PostHog.</p>
+<p>Our servers also send a small number of product events to PostHog US under the same account id (for example sign-up completed, first deploy, MCP client connected, plan upgraded, waitlist joined), with only the fields needed to count them, such as the plan, amount or MCP client name.</p>
 
 <h2 id="purposes">4. Why we use your data and our legal bases</h2>
 <p>We rely on the legal bases in the EU and UK General Data Protection Regulation (GDPR) and, where it applies, the UAE Federal Decree-Law No. 45 of 2021 on the Protection of Personal Data (PDPL). Under the PDPL, the purposes below fall within the exceptions to consent for performing a contract, complying with legal obligations, and protecting our and others' legitimate interests, or rely on your consent where we ask for it.</p>
@@ -571,7 +572,7 @@ LEGAL = {
 <ul>
 <li><b>Hetzner Online GmbH</b> (Germany). <b>What:</b> hosting of compute, the control plane, databases and volumes in Nuremberg, Germany, and encrypted off-site backups in Hetzner Object Storage in Helsinki, Finland. <b>Data:</b> all account, operational and Customer Data. <b>Location:</b> EU.</li>
 <li><b>Stripe</b> (Stripe Payments Europe Ltd., Ireland, and its affiliates including Stripe, Inc., USA). <b>What:</b> payments, subscriptions, invoices, the customer billing portal and tax calculation. <b>Data:</b> email, billing name, address, country, tax ID, payment details and transaction history. <b>Location:</b> EU and USA. Stripe also acts as an independent controller for some data, for example for fraud prevention and its own legal obligations; see <a href="https://stripe.com/privacy">Stripe's privacy policy</a>.</li>
-<li><b>PostHog Inc.</b> (PostHog Cloud EU). <b>What:</b> cookieless product analytics (section 3). <b>Data:</b> page views, clicks, referrer and UTM parameters, browser and device information, account id and product events. No email, app data or logs. <b>Location:</b> EU (Frankfurt, Germany).</li>
+<li><b>PostHog Inc.</b> (PostHog Cloud US). <b>What:</b> cookieless product analytics (section 3). <b>Data:</b> page views, clicks, referrer and UTM parameters, browser and device information, account id and product events. No email, app data or logs. <b>Location:</b> United States.</li>
 <li><b>Our transactional email delivery provider</b>. <b>What:</b> delivering sign-in links, billing and service emails, and waitlist emails over SMTP. <b>Data:</b> your email address and the content of those emails.</li>
 </ul>
 <p>We also share data, only as far as needed, with: Let's Encrypt (Internet Security Research Group, USA), which issues TLS certificates for your app and custom domain names (certificates are published in public Certificate Transparency logs, so these domain names become public); integrations you choose to connect, such as GitHub, container registries, log drain destinations or AI assistants; our professional advisers (lawyers, accountants, auditors); a buyer or successor if Aloof is sold or reorganised, who must keep this policy's protections; and courts, regulators or law enforcement where the law requires it.</p>
