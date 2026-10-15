@@ -81,7 +81,7 @@ def instructions(domain, app, base, token, edge_ips):
            "recommended": ([{"type": "A", "name": domain, "value": ip} for ip in v4] + [{"type": "AAAA", "name": domain, "value": ip} for ip in v6]) if apex else [routing[0]]}
     out["note"] = (f"{domain} is a root (apex) domain: DNS doesn't allow a plain CNAME there. Add the A (and AAAA) records, or, if your DNS provider offers ALIAS/ANAME/CNAME flattening, "
                    f"point that at {app}.{base} instead. Don't add both styles.") if apex else \
-                  f"Add the CNAME; or the A/AAAA records if you can't use a CNAME. If your DNS is on Cloudflare, set the records to DNS only (grey cloud)."
+                  "Add the CNAME; or the A/AAAA records if you can't use a CNAME. If your DNS is on Cloudflare, set the records to DNS only (grey cloud)."
     return out
 def pair_hint(domain, app, base, edge_ips):
     p = partner(domain)

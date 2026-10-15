@@ -1,0 +1,13 @@
+# Gitleaks configuration: allowlist deliberate fake fixtures in test files.
+# Each entry is scoped to the specific file to avoid masking real leaks.
+
+[allowlist]
+description = "Fake test fixtures for secret redaction tests"
+paths = [
+    # test_diagnose.py: QA redaction matrix with fake secrets like "abcdefAPIKEYsecret123"
+    # and "sk_live_51Habcdefghijklmnop" to verify diagnose.redactor() works correctly.
+    '''tests/test_diagnose\.py''',
+    # test_analytics.py: fake sk_live token in a test referrer URL ("sk_live_abcdefghijk")
+    # to verify analytics strips secrets from URLs.
+    '''tests/test_analytics\.py''',
+]
