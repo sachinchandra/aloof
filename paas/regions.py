@@ -49,6 +49,7 @@ def status(now=None):
     for rid, c in CATALOG.items():
         nodes = h.get(rid, 0); local = rid == hm and local_capacity()
         live = bool(nodes or local)
+        if local: nodes += 1   # the control-plane host itself is a healthy node when local Docker capacity is on
         out.append({"id": rid, "name": f"{c['city']}, {c['country']}", "city": c["city"], "country": c["country"], "country_code": c["cc"], "area": c["area"],
                     "provider": c["provider"], "provider_id": PROVIDER[rid], "egress": EGRESS.get(rid), "status": "live" if live else "coming_soon", "live": live, "healthy_nodes": nodes,
                     "control_plane": rid == hm, "aliases": sorted(a for a, t in ALIASES.items() if t == rid)})

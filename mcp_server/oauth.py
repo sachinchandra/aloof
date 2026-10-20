@@ -184,7 +184,7 @@ def patch_metadata():
         m.client_id_metadata_document_supported = True
         return m
     build._aloof = True; routes.build_metadata = build
-    patch_registration()
+    patch_registration(); patch_token()
 def _track_connected(client, api_key, code):
     """mcp_connected analytics (OAuth grant completed). Sends only the client's display name and redirect host. Never raises."""
     try:
@@ -231,13 +231,28 @@ def _rate_key(ip):
         return str(m) if m else str(ipaddress.ip_network(f"{a}/64", strict=False)) if a.version == 6 else str(a)
     except ValueError: return ip
 def reg_rate_ok(ip, now=None):
+    """Per-IP (/64 for IPv6) /register limit, counted in the shared DB (kv kind oauth:reghit) so it holds across restarts and
+    workers. Falls back to the in-process counter if the DB is unavailable."""
     now = now or time.time(); ip = _rate_key(ip)
+    try:
+        pre = _crypto.sha256(ip)[:32] + ":"
+        n = _db.q("select count(*) c from kv where kind='oauth:reghit' and k like ? and exp > ?", (pre + "%", now), one=True)["c"]
+        if n >= REG_PER_IP: return False
+        _db.kv_put("oauth:reghit", pre + secrets.token_hex(8), "1", REG_WINDOW)
+        if int(now) % 50 == 0: _db.q("delete from kv where kind='oauth:reghit' and exp < ?", (now,))
+        return True
+    except Exception as e:
+        log.warning("register rate limit: DB unavailable, using in-process counter: %s", e)
     with _reg_lock:
         hits = [t for t in _reg_hits.get(ip, []) if t > now - REG_WINDOW]
         if len(hits) >= REG_PER_IP: _reg_hits[ip] = hits; return False
         hits.append(now); _reg_hits[ip] = hits
         if len(_reg_hits) > 50000: _reg_hits.clear()
         return True
+def reset_reg_hits():
+    _reg_hits.clear()
+    try: _db.q("delete from kv where kind='oauth:reghit'")
+    except Exception: pass
 def client_count(): return _db.q("select count(*) c from kv where kind='oauth:client'", one=True)["c"]
 def _rows(kind):
     for r in _db.q("select k, v, exp from kv where kind=?", ("oauth:" + kind,)):
@@ -290,6 +305,23 @@ def patch_registration():
         else: await anyio.to_thread.run_sync(sweep_unused_clients)
         return await orig(self, request)
     handle._aloof = True; RegistrationHandler.handle = handle
+def patch_token():
+    """RFC 6749 4.1.2: a failed authorization_code exchange (wrong PKCE code_verifier, redirect_uri or client mismatch) burns the
+    code (invalid_grant after client authentication), so a leaked code can't be retried with guessed verifiers. Client-auth
+    failures (401) don't burn it, so a third party can't void someone else's code."""
+    from mcp.server.auth.handlers.token import TokenHandler
+    if getattr(TokenHandler.handle, "_aloof", False): return
+    orig = TokenHandler.handle
+    async def handle(self, request):
+        resp = await orig(self, request)
+        try:
+            if resp.status_code == 400 and b'"invalid_grant"' in bytes(resp.body or b""):
+                f = await request.form()
+                if f.get("grant_type") == "authorization_code" and f.get("code"):
+                    import anyio; await anyio.to_thread.run_sync(S.rm, "code", str(f.get("code")))
+        except Exception as e: log.warning("token error cleanup failed: %s", e)
+        return resp
+    handle._aloof = True; TokenHandler.handle = handle
 class PaasOAuthProvider(OAuthAuthorizationServerProvider):
     def __init__(self, issuer): self.issuer = issuer.rstrip("/")
     async def get_client(self, client_id):

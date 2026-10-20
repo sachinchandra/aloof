@@ -180,8 +180,8 @@ def _hero_visual(base):
             (6, "ok", "↺", "rolled back to v41 · zero downtime"), (7, "m", "", "reason: 5xx rate 18.2% vs 0.4% baseline (1,240 requests)"), (8, "ok", "✓", "healthy · recorded in release history")]
     lines = "".join(f"<div class='hv-l {c}' data-s={s}><span class=hv-p>{p}</span>{html.escape(t)}</div>" for s, c, p, t in rows)
     bars = "".join(f"<i style='--h:{h}' class='{'sp' if k in (6,7,8) else ''}'></i>" for k, h in enumerate([18, 22, 16, 24, 20, 26, 88, 94, 80, 22, 18, 20, 16, 22]))
-    return f"""<div class=hv id=hv data-step=0 role=img aria-label="Animation: a deploy goes live, its error rate spikes, and Aloof rolls it back automatically and records the reason.">
-<div class=hv-bar aria-hidden=true><i></i><i></i><i></i><b>aloof · api</b><span class=hv-pill>self-heal on</span></div>
+    return f"""<div class=hv id=hv data-step=0 role=img aria-label="Animation with example data: a deploy goes live, its error rate spikes, and Aloof rolls it back automatically and records the reason.">
+<div class=hv-bar aria-hidden=true><i></i><i></i><i></i><b>aloof · api</b><span class=hv-pill>self-heal on</span><span class=hv-pill style='margin-left:6px;color:#8a92a8;border-color:#3a4256'>example data</span></div>
 <div class=hv-body aria-hidden=true>{lines}</div>
 <div class=hv-chart id=hv-chart aria-hidden=true><span>5xx rate</span><div class=hv-bars>{bars}</div></div></div>"""
 def landing(brand, base, api, mcp):

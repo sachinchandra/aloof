@@ -82,8 +82,7 @@ SOON_REGIONS = [("fsn1", "Falkenstein, Germany", "Hetzner Cloud", REGION_PURPOSE
                 ("hel1", "Helsinki, Finland", "Hetzner Cloud", REGION_PURPOSE["hel1"]),
                 ("us-east", "Vint Hill, Virginia, US", "OVHcloud (planned)", REGION_PURPOSE["us-east"]),
                 ("us-west", "Hillsboro, Oregon, US", "OVHcloud (planned)", REGION_PURPOSE["us-west"]),
-                ("sg", "Singapore", "OVHcloud (planned)", REGION_PURPOSE["sg"]),
-                ("ap-bom", "Mumbai, India", "Provider not chosen yet", "For users in India. We'll name the provider when it's decided.")]
+                ("sg", "Singapore", "OVHcloud (planned)", REGION_PURPOSE["sg"])]
 
 ABOUT = """<p>Aloof is a small, independent hosting platform for backends, APIs and workers. You bring a Docker image, a git repo or a local directory; we run it, bill it per second, and put it to sleep when it's idle.</p>
 <h2>Why we built it</h2><p>Running a side project or a small production API shouldn't cost $20+ a month per service, and it shouldn't take a week of YAML. Fly.io got the developer experience right; we wanted that experience, the same config model, and prices at or below list, with sensible defaults like scale-to-zero, encrypted off-site backups and an audit log built in.</p>

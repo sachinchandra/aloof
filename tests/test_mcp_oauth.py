@@ -55,7 +55,7 @@ def test_public_client_dcr_pkce_flow(srv):
     assert "error=invalid_request" in r.headers.get("location", "") or r.status_code == 400
 @pytest.fixture(autouse=True)
 def _reset_reg_limit():
-    import oauth; oauth._reg_hits.clear(); yield; oauth._reg_hits.clear()
+    import oauth; oauth.reset_reg_hits(); yield; oauth.reset_reg_hits()
 def _reg(c, uris, **kw):
     return c.post("/register", json={"redirect_uris": uris, "client_name": "x", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]} | kw)
 def test_dcr_never_issues_secret(srv):
@@ -234,3 +234,20 @@ def test_mcp_healthz_endpoint(srv):
     r = c.get("/healthz")
     assert r.status_code == 200, f"healthz returned {r.status_code}: {r.text}"
     assert r.json() == {"ok": True}
+
+
+def test_pkce_mismatch_burns_code(srv):
+    """A wrong code_verifier fails AND deletes the code, so the right verifier can't be used afterwards."""
+    c, oauth, _ = srv
+    v, ch = pkce()
+    cid = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "t", "token_endpoint_auth_method": "none"}).json()["client_id"]
+    _, code = authorize(c, cid, ch); assert code
+    d = {"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": cid}
+    r = c.post("/token", data=d | {"code_verifier": "x" * 50}); assert r.status_code == 400 and "invalid_grant" in r.text
+    assert oauth.S.get("code", code) is None
+    assert c.post("/token", data=d | {"code_verifier": v}).status_code == 400
+def test_register_rate_limit_is_in_db(srv):
+    c, oauth, _ = srv
+    for i in range(10): assert oauth.reg_rate_ok("9.9.9.9")
+    oauth._reg_hits.clear()   # a restart loses in-process state; the DB-backed count still holds
+    assert oauth.reg_rate_ok("9.9.9.9") is False
