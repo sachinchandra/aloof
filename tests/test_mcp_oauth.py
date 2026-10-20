@@ -155,6 +155,8 @@ def test_register_rate_limit_per_ip(srv, monkeypatch):
     assert oauth.client_ip(mk("2001:db8:1::1:0", "5.6.7.8")) == "5.6.7.8" and oauth.client_ip(mk("203.0.113.10", "5.6.7.8")) == "5.6.7.8"
     assert oauth.client_ip(mk("2001:db8:2::1", "5.6.7.8")) == "2001:db8:2::1" and oauth.client_ip(mk("172.17.0.5", "5.6.7.8")) == "172.17.0.5"
     assert oauth.reg_rate_ok("5.6.7.8") is True
+    for i in range(3): assert oauth.reg_rate_ok(f"2001:db8:9::{i+1}") is True
+    assert oauth.reg_rate_ok("2001:db8:9::ffff") is False and oauth.reg_rate_ok("2001:db8:a::1") is True   # IPv6 limited per /64
 def test_register_client_cap(srv, monkeypatch):
     c, oauth, _ = srv; oauth.sweep_unused_clients(force=True); monkeypatch.setattr(oauth, "MAX_CLIENTS", oauth.client_count())
     r = _reg(c, [REDIRECT]); assert r.status_code == 503

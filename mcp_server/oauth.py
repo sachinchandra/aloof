@@ -224,8 +224,14 @@ def _trusted_proxy(peer):
             if a in ipaddress.ip_network(e if "/" in e else (f"{e}/64" if ":" in e else f"{e}/32"), strict=False): return True
         except ValueError: continue
     return False
+def _rate_key(ip):
+    try:
+        a = ipaddress.ip_address(ip)
+        m = getattr(a, "ipv4_mapped", None)
+        return str(m) if m else str(ipaddress.ip_network(f"{a}/64", strict=False)) if a.version == 6 else str(a)
+    except ValueError: return ip
 def reg_rate_ok(ip, now=None):
-    now = now or time.time()
+    now = now or time.time(); ip = _rate_key(ip)
     with _reg_lock:
         hits = [t for t in _reg_hits.get(ip, []) if t > now - REG_WINDOW]
         if len(hits) >= REG_PER_IP: _reg_hits[ip] = hits; return False
