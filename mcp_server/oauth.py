@@ -211,8 +211,19 @@ def client_ip(request):
     """Caddy appends the real peer to X-Forwarded-For (and drops client-supplied values from untrusted peers); only trust it from loopback."""
     peer = request.client.host if request.client else ""
     xff = request.headers.get("x-forwarded-for", "")
-    if peer in ("127.0.0.1", "::1", "localhost") and xff: return xff.split(",")[-1].strip()
+    if xff and _trusted_proxy(peer): return xff.split(",")[-1].strip()
     return peer or "unknown"
+def _trusted_proxy(peer):
+    """The local Caddy reaches us over loopback or the edge's own public address (port 8001 is firewalled from outside)."""
+    if peer in ("localhost", "testclient"): return peer == "localhost"
+    try: a = ipaddress.ip_address(peer)
+    except ValueError: return False
+    if a.is_loopback: return True
+    for e in _csv("PAAS_MCP_TRUSTED_PROXIES", "") + _csv("PAAS_EDGE_IPS", ""):
+        try:
+            if a in ipaddress.ip_network(e if "/" in e else (f"{e}/64" if ":" in e else f"{e}/32"), strict=False): return True
+        except ValueError: continue
+    return False
 def reg_rate_ok(ip, now=None):
     now = now or time.time()
     with _reg_lock:

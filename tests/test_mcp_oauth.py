@@ -151,6 +151,9 @@ def test_register_rate_limit_per_ip(srv, monkeypatch):
     from types import SimpleNamespace as NS
     mk = lambda peer, xff: NS(client=NS(host=peer), headers={"x-forwarded-for": xff} if xff else {})
     assert oauth.client_ip(mk("127.0.0.1", "1.2.3.4, 5.6.7.8")) == "5.6.7.8" and oauth.client_ip(mk("9.9.9.9", "1.2.3.4")) == "9.9.9.9"
+    monkeypatch.setenv("PAAS_EDGE_IPS", "203.0.113.10,2001:db8:1::1")
+    assert oauth.client_ip(mk("2001:db8:1::1:0", "5.6.7.8")) == "5.6.7.8" and oauth.client_ip(mk("203.0.113.10", "5.6.7.8")) == "5.6.7.8"
+    assert oauth.client_ip(mk("2001:db8:2::1", "5.6.7.8")) == "2001:db8:2::1" and oauth.client_ip(mk("172.17.0.5", "5.6.7.8")) == "172.17.0.5"
     assert oauth.reg_rate_ok("5.6.7.8") is True
 def test_register_client_cap(srv, monkeypatch):
     c, oauth, _ = srv; oauth.sweep_unused_clients(force=True); monkeypatch.setattr(oauth, "MAX_CLIENTS", oauth.client_count())
