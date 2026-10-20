@@ -12,7 +12,7 @@ Sending is a background queue + one thread, 2 s timeout; failures are dropped an
 | Event | When | Properties |
 |---|---|---|
 | `signup_started` | browser: Create account clicked, or sign-in link requested while on the Create account tab (`aloofTrack`, no account yet) | `method` (`password`\|`magic_link`) |
-| `signup_completed` | account created via `POST /v1/signup`, `POST /v1/auth/register`, or first magic-link login (`GET /auth/magic`) | `method` (`api`\|`password`\|`magic_link`), `utm_source`, `utm_medium`, `utm_campaign`, `referrer` (all optional strings) |
+| `signup_completed` | account created via `POST /v1/signup`, `POST /v1/auth/register`, or first magic-link login (`GET /auth/magic`) | `method` (`api`\|`password`\|`magic_link`), `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `referrer` (all optional strings); also `$set_once` person props `initial_utm_*`, `initial_referrer` |
 | `first_deploy_succeeded` | first successful deploy of the account (once per account) | `app_id` (app name), `region`, `source_type` |
 | `deploy_succeeded` | every successful release (not scale-only) | `app_id`, `region`, `source_type` (`github`\|`git`\|`upload`\|`path`\|`image`\|`postgres`\|`other`), `version` (int) |
 | `mcp_connected` | OAuth authorization code exchanged in mcp_server | `client_name`, `client_host` (redirect URI host) |
@@ -22,3 +22,14 @@ Sending is a background queue + one thread, 2 s timeout; failures are dropped an
 Also accepted: the site's nested `"attribution": {...}` object (same keys). `/v1/config` returns `posthog_key`, `posthog_host` (and the older `posthog: {key, host}`).
 Frontend passes UTM/referrer as optional JSON fields on the signup bodies: `{"email", "password", "utm_source", "utm_medium", "utm_campaign", "referrer"}`
 (`/v1/auth/register`), `{"email", ...utm}` (`/v1/auth/magic`, `/v1/signup`). Send the first-touch values stored at landing.
+
+## Browser events (paas/static/analytics.js, site + console)
+
+| Event | When | Properties |
+|---|---|---|
+| `$pageview` | every page load | `utm_*` from the URL (if present), `referrer` (external, no query), and first-touch `first_utm_source/medium/campaign/term/content`, `first_referrer`, `first_landing` (kept in sessionStorage from the first page of the visit) |
+| `cta_click` | click on any `[data-cta]` element | `cta`, `location` |
+| `signup_started` | Create account clicked / sign-in link requested on the Create tab | `method` |
+| `$identify` | console load after login (distinct_id = account id) | `$set_once`: `initial_utm_*`, `initial_referrer`, `initial_landing` |
+
+Key: `POSTHOG_API_KEY` (env, deploy/golive.env); never hardcoded. `POSTHOG_KEY` / `data/posthog_key` are legacy fallbacks.

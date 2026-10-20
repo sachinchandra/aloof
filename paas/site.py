@@ -71,7 +71,7 @@ def posthog_host(): return (os.environ.get("POSTHOG_HOST") or POSTHOG_DEFAULT_HO
 def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
-    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=3" defer></script>' if k else ""
+    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=4" defer></script>' if k else ""
 def page(title, body, brand="Aloof", desc=None):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
     return _contact(f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>""")

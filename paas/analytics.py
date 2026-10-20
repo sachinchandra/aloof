@@ -6,13 +6,14 @@ import os, re, queue, threading, logging, httpx
 log = logging.getLogger("paas.analytics")
 TIMEOUT = 2.0
 EVENTS = {   # event -> allowed property names (anything else is dropped)
-    "signup_completed": {"method", "utm_source", "utm_medium", "utm_campaign", "referrer"},
+    "signup_completed": {"method", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "referrer"},
     "first_deploy_succeeded": {"app_id", "region", "source_type"},
     "deploy_succeeded": {"app_id", "region", "source_type", "version"},
     "mcp_connected": {"client_name", "client_host"},
     "plan_upgraded": {"plan", "amount_usd", "interval"},
     "gpu_waitlist_joined": {"gpu"},
 }
+UTM = ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content")
 _SECRETish = re.compile(r"(sk|pk|rk|whsec|dt|mcp_at|mcp_rt|mcp_ac|ml|s)_[A-Za-z0-9_\-]{8,}|[^\s@]+@[^\s@]+\.[^\s@]+")
 def api_key():
     k = os.environ.get("POSTHOG_API_KEY", "").strip()
@@ -39,8 +40,13 @@ def attribution(src):
     nested = (src.get("attribution") if isinstance(src, dict) else getattr(src, "attribution", None)) or {}
     g0 = (lambda k: getattr(src, k, None)) if not isinstance(src, dict) else src.get
     g = lambda k: g0(k) or (nested.get(k) if isinstance(nested, dict) else None)
-    out = {k: clean(g(k), 100) for k in ("utm_source", "utm_medium", "utm_campaign")}
+    out = {k: clean(g(k), 100) for k in UTM}
     out["referrer"] = clean_referrer(g("referrer")); return {k: v for k, v in out.items() if v}
+def person_once(p):
+    """First-touch person properties ($set_once: PostHog keeps the first value ever set)."""
+    o = {f"initial_{k}": p[k] for k in UTM if p.get(k)}
+    if p.get("referrer"): o["initial_referrer"] = p["referrer"]
+    return o
 _q = queue.Queue(maxsize=1000); _t = None; _lock = threading.Lock()
 _client = None   # tests swap in httpx.Client(transport=httpx.MockTransport(...))
 def _worker():
@@ -68,6 +74,7 @@ def capture(account_id, event, props=None):
         if not enabled() or event not in EVENTS or account_id is None or _is_test(account_id): return False
         p = {k: clean(v) for k, v in (props or {}).items() if k in EVENTS[event]}
         p = {k: v for k, v in p.items() if v is not None} | {"$lib": "aloof-api", "$process_person_profile": True}
+        if event == "signup_completed" and person_once(p): p["$set_once"] = person_once(p)
         _ensure(); _q.put_nowait({"api_key": api_key(), "event": event, "distinct_id": str(int(account_id)), "properties": p}); return True
     except Exception as e: log.debug("analytics capture skipped: %s", type(e).__name__); return False
 def once(account_id, event):

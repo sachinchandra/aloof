@@ -82,3 +82,11 @@ def test_nested_attribution_from_site(sent):
     assert c.post("/v1/auth/register", json={"email": "ana8@real.dev", "password": "long-enough-pw", "attribution": {"utm_source": "hn", "referrer": "https://news.ycombinator.com/"}}).status_code == 200
     p = [b for u, b in sent() if b["event"] == "signup_completed"][-1]["properties"]
     assert p["utm_source"] == "hn" and p["referrer"] == "https://news.ycombinator.com/"
+def test_signup_full_utm_and_first_touch_person_props(sent):
+    r = c.post("/v1/auth/register", json={"email": "utm5@real.dev", "password": "long-enough-pw",
+               "attribution": {"utm_source": "hn", "utm_medium": "social", "utm_campaign": "launch", "utm_term": "paas", "utm_content": "top", "referrer": "https://news.ycombinator.com/"}})
+    assert r.status_code == 200
+    p = [b for u, b in sent() if b["event"] == "signup_completed"][-1]["properties"]
+    assert (p["utm_term"], p["utm_content"]) == ("paas", "top")
+    assert p["$set_once"] == {"initial_utm_source": "hn", "initial_utm_medium": "social", "initial_utm_campaign": "launch",
+                              "initial_utm_term": "paas", "initial_utm_content": "top", "initial_referrer": "https://news.ycombinator.com/"}

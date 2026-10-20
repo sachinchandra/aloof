@@ -13,7 +13,8 @@ function ft(){try{return JSON.parse(sessionStorage.getItem('aloof_ft')||'{}')}ca
  window.__aloof_utm=u})();
 window.aloofAttribution=function(){var f=ft(),o={};Object.keys(f).forEach(function(k){o[k.replace(/^first_/,'')]=f[k]});return o};
 window.aloofTrack=send;
-window.aloofIdentify=function(id,email){if(!id)return;var prev=anon;uid=String(id);send('$identify',{$anon_distinct_id:prev})};
-send('$pageview',window.__aloof_utm);
+function once(){var f=ft(),o={};K.forEach(function(k){if(f['first_'+k])o['initial_'+k]=f['first_'+k]});if(f.first_referrer)o.initial_referrer=f.first_referrer;if(f.first_landing)o.initial_landing=f.first_landing;return o}
+window.aloofIdentify=function(id,email){if(!id)return;var prev=anon;uid=String(id);send('$identify',{$anon_distinct_id:prev,$set_once:once()})};
+send('$pageview',Object.assign({},window.__aloof_utm,{referrer:document.referrer&&document.referrer.indexOf(location.origin)!==0?document.referrer.split('?')[0].slice(0,300):''}));
 document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('[data-cta]');if(a)send('cta_click',{cta:a.dataset.cta,location:a.dataset.ctaLoc||location.pathname})},true);
 })();

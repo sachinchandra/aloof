@@ -79,7 +79,7 @@ def own(name, a):
 def with_url(ap): ap["url"] = f"https://{ap['name']}.{URL_DOMAIN}/"; ap["http_url"] = f"http://{ap['name']}.{URL_DOMAIN}:8080/"; ap["path_url"] = f"{PUBLIC_PROXY}/_app/{ap['name']}/"; return ap
 class Attribution(BaseModel):
     """Optional first-touch attribution from the frontend (sent to analytics only; sanitized and length-limited)."""
-    utm_source: str|None=None; utm_medium: str|None=None; utm_campaign: str|None=None; referrer: str|None=None
+    utm_source: str|None=None; utm_medium: str|None=None; utm_campaign: str|None=None; utm_term: str|None=None; utm_content: str|None=None; referrer: str|None=None
 class Signup(Attribution): email: str
 class Source(BaseModel):
     image: str|None=None; git: str|None=None; ref: str|None=None; subdir: str|None=None; path: str|None=None
