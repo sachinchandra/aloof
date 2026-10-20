@@ -53,15 +53,123 @@ def test_public_client_dcr_pkce_flow(srv):
     # PKCE is mandatory: no code_challenge -> error
     r = c.get("/authorize", params={"response_type": "code", "client_id": reg["client_id"], "redirect_uri": REDIRECT, "state": "s"}, follow_redirects=False)
     assert "error=invalid_request" in r.headers.get("location", "") or r.status_code == 400
-def test_confidential_dcr_still_works(srv):
-    c, _, _ = srv
-    reg = c.post("/register", json={"redirect_uris": ["https://claude.ai/api/mcp/auth_callback"], "client_name": "Claude",
-                                    "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]}).json()
-    assert reg["client_secret"] and reg["token_endpoint_auth_method"] == "client_secret_post"
+@pytest.fixture(autouse=True)
+def _reset_reg_limit():
+    import oauth; oauth._reg_hits.clear(); yield; oauth._reg_hits.clear()
+def _reg(c, uris, **kw):
+    return c.post("/register", json={"redirect_uris": uris, "client_name": "x", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]} | kw)
+def test_dcr_never_issues_secret(srv):
+    c, oauth, _ = srv
+    for meth in (None, "client_secret_post", "client_secret_basic", "none"):
+        r = _reg(c, ["https://claude.ai/api/mcp/auth_callback"], **({"token_endpoint_auth_method": meth} if meth else {}))
+        assert r.status_code == 201, r.text
+        reg = r.json(); assert not reg.get("client_secret") and not reg.get("client_secret_expires_at") and reg["token_endpoint_auth_method"] == "none"
+        stored = oauth.S.get("client", reg["client_id"]); assert not stored.get("client_secret") and stored["aloof_dcr"] is True
+    # a client that still sends a (made-up) secret is fine; PKCE is the proof
     v, ch = pkce(); _, code = authorize(c, reg["client_id"], ch, "https://claude.ai/api/mcp/auth_callback")
-    d = {"grant_type": "authorization_code", "code": code, "redirect_uri": "https://claude.ai/api/mcp/auth_callback", "client_id": reg["client_id"], "code_verifier": v}
+    d = {"grant_type": "authorization_code", "code": code, "redirect_uri": "https://claude.ai/api/mcp/auth_callback", "client_id": reg["client_id"], "code_verifier": v, "client_secret": "whatever"}
+    assert c.post("/token", data=d).json()["access_token"].startswith("mcp_at_")
+def test_legacy_confidential_client_still_works(srv):
+    """Clients registered before the fix that hold a secret keep working (and still need it)."""
+    c, oauth, _ = srv
+    cid, sec = "legacy-" + secrets.token_hex(4), secrets.token_hex(32)
+    oauth.S.put("client", cid, {"client_id": cid, "client_secret": sec, "client_id_issued_at": 1, "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+        "token_endpoint_auth_method": "client_secret_post", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"], "scope": "paas", "client_name": "Claude"})
+    v, ch = pkce(); _, code = authorize(c, cid, ch, "https://claude.ai/api/mcp/auth_callback")
+    d = {"grant_type": "authorization_code", "code": code, "redirect_uri": "https://claude.ai/api/mcp/auth_callback", "client_id": cid, "code_verifier": v}
     assert c.post("/token", data=d).status_code == 401   # secret required
-    assert c.post("/token", data=d | {"client_secret": reg["client_secret"]}).json()["access_token"]
+    t = c.post("/token", data=d | {"client_secret": sec}).json(); assert t["access_token"]
+    assert c.post("/token", data={"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": cid, "client_secret": sec}).json()["access_token"]
+    assert oauth.S.get("client", cid)["aloof_used"] is True
+BAD_REDIRECTS = ["javascript:alert(1)", "javascript://claude.ai/%0aalert(1)", "data:text/html,<script>alert(1)</script>", "file:///etc/passwd",
+    "vbscript:msgbox(1)", "http://evil.example.com/cb", "http://127.0.0.1.evil.com/cb", "https://*.example.com/cb", "https://evil.example.com/cb#x",
+    "https://claude.ai@evil.example.com/cb", "https://user:pw@evil.example.com/cb", "myapp://callback", "com.evil.app:/cb", "ftp://x.example.com/cb",
+    "https://evil.example.com/%2A"]
+@pytest.mark.parametrize("uri", BAD_REDIRECTS)
+def test_dcr_rejects_bad_redirects(srv, uri):
+    c, oauth, _ = srv; n = oauth.client_count()
+    r = _reg(c, ["https://claude.ai/api/mcp/auth_callback", uri]); assert r.status_code == 400, (uri, r.text)
+    assert r.json()["error"] in ("invalid_redirect_uri", "invalid_client_metadata") and oauth.client_count() == n
+    assert oauth.redirect_problem(uri) is not None or r.json()["error"] == "invalid_client_metadata"
+GOOD_REDIRECTS = ["https://claude.ai/api/mcp/auth_callback", "https://chatgpt.com/connector_platform_oauth_redirect", "http://127.0.0.1:33418/",
+    "http://localhost:6274/oauth/callback", "http://[::1]:8080/cb", "cursor://anysphere.cursor-retrieval/oauth/user-aloof/callback",
+    "vscode://vscode.github-authentication/did-authenticate", "https://vscode.dev/redirect", "https://glama.ai/api/mcp/oauth/callback"]
+@pytest.mark.parametrize("uri", GOOD_REDIRECTS)
+def test_dcr_accepts_known_client_redirects(srv, uri):
+    c, _, _ = srv; r = _reg(c, [uri]); assert r.status_code == 201, r.text
+def test_dcr_too_many_redirects(srv):
+    c, _, _ = srv; assert _reg(c, [f"https://a{i}.example.com/cb" for i in range(11)]).status_code == 400
+def test_authorize_exact_match_and_loopback_port(srv):
+    c, oauth, _ = srv
+    reg = _reg(c, ["https://chatgpt.com/cb", "http://127.0.0.1/cb"]).json(); v, ch = pkce()
+    for bad in ["https://chatgpt.com/cb/x", "https://chatgpt.com/cb?x=1", "https://chatgpt.com/CB", "https://evil.example.com/cb", "http://127.0.0.1:5000/other", "http://localhost:5000/cb"]:
+        r, code = authorize(c, reg["client_id"], ch, bad); assert code is None and r.status_code == 400, bad
+    _, code = authorize(c, reg["client_id"], ch, "http://127.0.0.1:51234/cb"); assert code   # RFC 8252 7.3: any loopback port
+    _, code = authorize(c, reg["client_id"], ch, "https://chatgpt.com/cb"); assert code
+def test_legacy_client_with_bad_redirect_blocked_at_authorize(srv):
+    c, oauth, _ = srv
+    for uri in ["javascript:alert(document.cookie)", "http://evil.example.com/cb", "myapp://cb"]:
+        cid = "legacy-bad-" + secrets.token_hex(4)
+        oauth.S.put("client", cid, {"client_id": cid, "redirect_uris": [uri], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"], "scope": "paas"})
+        _, ch = pkce(); r, code = authorize(c, cid, ch, uri); assert code is None and r.status_code == 400 and "javascript" not in r.headers.get("location", "")
+def test_pkce_s256_required(srv):
+    c, _, _ = srv; reg = _reg(c, [REDIRECT]).json(); _, ch = pkce()
+    base = {"response_type": "code", "client_id": reg["client_id"], "redirect_uri": REDIRECT, "state": "s", "code_challenge": ch}
+    for extra in ({"code_challenge_method": "plain"}, {"code_challenge": None}):
+        r = c.get("/authorize", params={k: v for k, v in (base | extra).items() if v is not None}, follow_redirects=False)
+        assert r.status_code == 400 or "error=invalid_request" in r.headers.get("location", "")
+    v, ch = pkce(); _, code = authorize(c, reg["client_id"], ch)
+    assert c.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": reg["client_id"]}).status_code == 400   # no verifier
+def _consent(c, client_id, redirect):
+    _, ch = pkce()
+    r = c.get("/authorize", params={"response_type": "code", "client_id": client_id, "redirect_uri": redirect, "code_challenge": ch, "code_challenge_method": "S256", "state": "st"}, follow_redirects=False)
+    return c.get(r.headers["location"].replace("https://mcp.aloof.test", ""))
+def test_consent_unverified_warning_and_escaping(srv):
+    c, _, _ = srv
+    reg = _reg(c, ["https://evil.example.com:8443/cb"], client_name='Claude <script>alert(1)</script>\u202e"').json()
+    r = _consent(c, reg["client_id"], "https://evil.example.com:8443/cb"); page = r.text
+    assert "Unverified app" in page and "https://evil.example.com:8443" in page and "<script>alert" not in page and "&lt;script&gt;" in page and "\u202e" not in page
+    assert r.headers["x-frame-options"] == "DENY" and "frame-ancestors 'none'" in r.headers["content-security-policy"]
+    assert "Approve" in page and r.status_code == 200   # never auto-approved: a GET only renders the form
+    reg = _reg(c, ["https://claude.ai/api/mcp/auth_callback"], client_name="Claude").json()
+    page = _consent(c, reg["client_id"], "https://claude.ai/api/mcp/auth_callback").text
+    assert "Verified app" in page and "Unverified" not in page and "https://claude.ai" in page
+    reg = _reg(c, ["https://claude.ai.evil.example.com/cb"]).json()
+    assert "Unverified app" in _consent(c, reg["client_id"], "https://claude.ai.evil.example.com/cb").text
+def test_no_skip_consent(srv):
+    """Approving needs a POST with valid credentials; nothing else issues a code."""
+    c, _, _ = srv; reg = _reg(c, [REDIRECT]).json(); _, ch = pkce()
+    r = c.get("/authorize", params={"response_type": "code", "client_id": reg["client_id"], "redirect_uri": REDIRECT, "code_challenge": ch, "code_challenge_method": "S256", "state": "st", "prompt": "none"}, follow_redirects=False)
+    lp = r.headers["location"]; assert "/oauth/login" in lp and "code=" not in lp
+    req = parse_qs(urlparse(lp).query)["req"][0]
+    for data in ({"req": req, "action": "approve"}, {"req": req, "action": "approve", "api_key": "pk_bad"}, {"req": req}):
+        r = c.post("/oauth/login", data=data, follow_redirects=False); assert r.status_code == 200 and "location" not in r.headers
+def test_register_rate_limit_per_ip(srv, monkeypatch):
+    c, oauth, _ = srv; monkeypatch.setattr(oauth, "REG_PER_IP", 3)
+    codes = [_reg(c, [REDIRECT], ).status_code for _ in range(4)]; assert codes == [201, 201, 201, 429]
+    # another IP behind the proxy is unaffected; spoofed XFF from a non-loopback peer is ignored
+    from types import SimpleNamespace as NS
+    mk = lambda peer, xff: NS(client=NS(host=peer), headers={"x-forwarded-for": xff} if xff else {})
+    assert oauth.client_ip(mk("127.0.0.1", "1.2.3.4, 5.6.7.8")) == "5.6.7.8" and oauth.client_ip(mk("9.9.9.9", "1.2.3.4")) == "9.9.9.9"
+    assert oauth.reg_rate_ok("5.6.7.8") is True
+def test_register_client_cap(srv, monkeypatch):
+    c, oauth, _ = srv; oauth.sweep_unused_clients(force=True); monkeypatch.setattr(oauth, "MAX_CLIENTS", oauth.client_count())
+    r = _reg(c, [REDIRECT]); assert r.status_code == 503
+def test_unused_clients_expire_and_delete_client(srv):
+    c, oauth, _ = srv; import time
+    old = _reg(c, [REDIRECT]).json()["client_id"]; used = _reg(c, [REDIRECT]).json()["client_id"]; fresh = _reg(c, [REDIRECT]).json()["client_id"]
+    for cid in (old, used):
+        d = oauth.S.get("client", cid); d["client_id_issued_at"] = int(time.time()) - 2 * 86400; oauth.S.put("client", cid, d)
+    v, ch = pkce(); _, code = authorize(c, used, ch)
+    assert c.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": used, "code_verifier": v}).status_code == 200
+    _, _ = authorize(c, old, ch)   # leaves a code behind but no token
+    assert oauth.sweep_unused_clients(force=True) >= 1
+    assert oauth.S.get("client", old) is None and oauth.S.get("client", used) and oauth.S.get("client", fresh)
+    assert not [k for k, v in oauth._rows("code") if oauth._owner(v) == old]
+    n = oauth.delete_client(used); assert n["client"] == 1 and n["access"] == 1 and n["refresh"] == 1 and oauth.S.get("client", used) is None
+def test_metadata_still_advertises_public_clients(srv):
+    c, _, _ = srv; m = c.get("/.well-known/oauth-authorization-server").json()
+    assert "none" in m["token_endpoint_auth_methods_supported"] and m["code_challenge_methods_supported"] == ["S256"]
 CID = "https://client.example.com/oauth/client.json"
 def _doc(**kw): return {"client_id": CID, "client_name": "Example Agent", "redirect_uris": [REDIRECT], "token_endpoint_auth_method": "none"} | kw
 def test_cimd_flow(srv, monkeypatch):

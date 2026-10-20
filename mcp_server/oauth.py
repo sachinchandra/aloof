@@ -12,7 +12,8 @@ from urllib.parse import urlsplit
 from pydantic import AnyUrl
 from mcp.server.auth.provider import (AccessToken, AuthorizationCode, AuthorizationParams, RefreshToken,
     OAuthAuthorizationServerProvider, construct_redirect_uri, TokenError)
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken, InvalidRedirectUriError
+from mcp.server.auth.provider import RegistrationError
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", "http://localhost:8000"))
@@ -76,13 +77,36 @@ def check_cimd_url(url):
     except ValueError: is_ip = False
     if is_ip: raise CIMDError("client_id URL must use a DNS name, not an IP")
     return u
-_REDIRECT_SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*\.[a-z0-9+.-]+$")   # RFC 8252 private-use (reverse-DNS) schemes
-def _ok_redirect(r):
-    u = urlsplit(r)
-    if u.fragment: return False
-    if u.scheme == "https": return bool(u.hostname)
-    if u.scheme == "http": return u.hostname in ("localhost", "127.0.0.1", "::1")   # native-app loopback
-    return bool(_REDIRECT_SCHEME.match(u.scheme or ""))
+# ---------- redirect_uri policy (shared by DCR, CIMD and /authorize) ----------
+def _csv(name, default): return tuple(x.strip().lower() for x in os.environ.get(name, default).split(",") if x.strip())
+# Native-app custom schemes we accept (MCP clients that use a private-use scheme callback). Everything else must be https or loopback http.
+REDIRECT_SCHEMES = _csv("PAAS_MCP_REDIRECT_SCHEMES", "cursor,vscode,vscode-insiders,windsurf,claude")
+_NEVER_SCHEMES = {"javascript", "data", "file", "vbscript", "about", "blob", "filesystem", "ftp", "ws", "wss"}
+# Redirect hosts operated by known MCP clients: consent shows these as verified (exact host or a subdomain of it).
+VERIFIED_HOSTS = _csv("PAAS_MCP_VERIFIED_HOSTS", "claude.ai,claude.com,chatgpt.com,chat.openai.com,openai.com,cursor.com,cursor.sh,"
+                      "smithery.ai,glama.ai,vscode.dev,insiders.vscode.dev,github.com,windsurf.com,codeium.com,mcpjam.com")
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+def redirect_problem(r):
+    """Why a redirect_uri is not acceptable, or None. https://<host>, http://<loopback>[:port], or an allowlisted native scheme.
+    No fragments, wildcards, userinfo, control characters or dangerous schemes."""
+    r = str(r or "")
+    if not r or len(r) > 2048: return "redirect_uri missing or too long"
+    if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in r): return "redirect_uri contains whitespace or control characters"
+    if "#" in r: return "redirect_uri must not contain a fragment"
+    if "*" in r or "%2a" in r.lower(): return "redirect_uri must not contain wildcards"
+    try: u = urlsplit(r); u.port
+    except ValueError: return "redirect_uri is not a valid URL"
+    sch = (u.scheme or "").lower()
+    if sch in _NEVER_SCHEMES: return f"redirect_uri scheme '{sch}' is not allowed"
+    if "@" in u.netloc or u.username or u.password: return "redirect_uri must not contain credentials"
+    if sch == "https": return None if u.hostname else "https redirect_uri needs a host"
+    if sch == "http": return None if u.hostname in LOOPBACK_HOSTS else "http redirect_uri is only allowed for loopback (127.0.0.1, [::1], localhost)"
+    if sch in REDIRECT_SCHEMES: return None
+    return f"redirect_uri scheme '{sch}' is not allowed (use https, loopback http, or a supported native app scheme)"
+def _ok_redirect(r): return redirect_problem(r) is None
+def is_verified_redirect(r):
+    u = urlsplit(str(r or "")); h = (u.hostname or "").lower()
+    return u.scheme == "https" and bool(h) and any(h == v or h.endswith("." + v) for v in VERIFIED_HOSTS)
 def _ttl(cache_control):
     m = re.search(r"max-age=(\d+)", cache_control or "")
     if re.search(r"no-store|no-cache", cache_control or ""): return CIMD_TTL_MIN
@@ -120,10 +144,14 @@ def validate_cimd(url, doc):
     return LoopbackClient.model_validate({"client_id": url, "client_name": f"{name} ({host})" if host not in name else name,
         "redirect_uris": ru, "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"], "scope": "paas", **({"client_uri": doc["client_uri"]} if isinstance(doc.get("client_uri"), str) and doc["client_uri"].startswith("https://") else {})})
-def _loopback(u): return u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1", "::1")
+def _loopback(u): return u.scheme == "http" and u.hostname in LOOPBACK_HOSTS
 class LoopbackClient(OAuthClientInformationFull):
     """RFC 8252 s7.3: for http loopback redirect URIs the port is chosen at runtime, so it is ignored when matching."""
     def validate_redirect_uri(self, redirect_uri):
+        r = self._match(redirect_uri); why = redirect_problem(r)
+        if why: raise InvalidRedirectUriError(why)
+        return r
+    def _match(self, redirect_uri):
         if redirect_uri is not None and self.redirect_uris:
             r = urlsplit(str(redirect_uri))
             if _loopback(r):
@@ -156,6 +184,7 @@ def patch_metadata():
         m.client_id_metadata_document_supported = True
         return m
     build._aloof = True; routes.build_metadata = build
+    patch_registration()
 def _track_connected(client, api_key, code):
     """mcp_connected analytics (OAuth grant completed). Sends only the client's display name and redirect host. Never raises."""
     try:
@@ -167,13 +196,102 @@ def _track_connected(client, api_key, code):
         host = urlsplit(str(code.redirect_uri or "")).hostname or (urlsplit(client.client_id).hostname if is_cimd_client_id(client.client_id) else None)
         analytics.capture(r["id"], "mcp_connected", {"client_name": getattr(client, "client_name", None), "client_host": host})
     except Exception: pass
+# ---------- Dynamic Client Registration hardening ----------
+# DCR clients are unverified public clients: no client_secret, token_endpoint_auth_method "none", PKCE S256 (enforced by the SDK at
+# /authorize and /token). Clients registered before this change that hold a secret keep working as confidential clients.
+REG_PER_IP, REG_WINDOW = int(os.environ.get("PAAS_MCP_REG_PER_IP", "10")), 3600
+MAX_CLIENTS = int(os.environ.get("PAAS_MCP_MAX_CLIENTS", "10000"))
+UNUSED_CLIENT_TTL = int(os.environ.get("PAAS_MCP_UNUSED_CLIENT_TTL", "86400"))
+SWEEP_EVERY = 600
+_reg_hits, _reg_lock, _sweep_at = {}, threading.Lock(), [0.0]
+def _clean_name(n):
+    n = re.sub(r"[\x00-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069]", "", str(n or "")).strip()
+    return n[:80] or None
+def client_ip(request):
+    """Caddy appends the real peer to X-Forwarded-For (and drops client-supplied values from untrusted peers); only trust it from loopback."""
+    peer = request.client.host if request.client else ""
+    xff = request.headers.get("x-forwarded-for", "")
+    if peer in ("127.0.0.1", "::1", "localhost") and xff: return xff.split(",")[-1].strip()
+    return peer or "unknown"
+def reg_rate_ok(ip, now=None):
+    now = now or time.time()
+    with _reg_lock:
+        hits = [t for t in _reg_hits.get(ip, []) if t > now - REG_WINDOW]
+        if len(hits) >= REG_PER_IP: _reg_hits[ip] = hits; return False
+        hits.append(now); _reg_hits[ip] = hits
+        if len(_reg_hits) > 50000: _reg_hits.clear()
+        return True
+def client_count(): return _db.q("select count(*) c from kv where kind='oauth:client'", one=True)["c"]
+def _rows(kind):
+    for r in _db.q("select k, v, exp from kv where kind=?", ("oauth:" + kind,)):
+        if r["exp"] and r["exp"] < time.time(): continue
+        try: yield r["k"], json.loads(r["v"])
+        except ValueError: continue
+def _owner(v): return v.get("client_id") or (v.get("code") or {}).get("client_id") if isinstance(v, dict) else None
+def delete_client(client_id):
+    """Remove a DCR client and every access/refresh token, auth code and pending request it holds. Returns counts."""
+    n = {}
+    for kind in ("access", "refresh", "code", "pending"):
+        ks = [k for k, v in _rows(kind) if _owner(v) == client_id]
+        for k in ks: _db.kv_del("oauth:" + kind, k)
+        n[kind] = len(ks)
+    n["client"] = 1 if _db.kv_get("oauth:client", client_id) is not None else 0
+    _db.kv_del("oauth:client", client_id); return n
+def sweep_unused_clients(now=None, force=False):
+    """Delete DCR clients older than UNUSED_CLIENT_TTL that never got a token (and hold none). Throttled."""
+    now = now or time.time()
+    if not force and now - _sweep_at[0] < SWEEP_EVERY: return 0
+    _sweep_at[0] = now
+    live = {_owner(v) for kind in ("access", "refresh") for _, v in _rows(kind)}
+    gone = 0
+    for cid, d in list(_rows("client")):
+        if d.get("aloof_used") or cid in live: continue
+        if (d.get("client_id_issued_at") or 0) < now - UNUSED_CLIENT_TTL: delete_client(cid); gone += 1
+    if gone: log.info("swept %d unused OAuth clients", gone)
+    return gone
+def _mark_used(client_id):
+    if is_cimd_client_id(client_id): return
+    try:
+        d = S.get("client", client_id)
+        if d is not None and not d.get("aloof_used"): d["aloof_used"] = True; S.put("client", client_id, d)
+    except Exception: pass
+def patch_registration():
+    """Wrap the SDK's /register handler with a per-IP rate limit and a global client cap."""
+    from mcp.server.auth.handlers.register import RegistrationHandler
+    from starlette.responses import JSONResponse
+    if getattr(RegistrationHandler.handle, "_aloof", False): return
+    orig = RegistrationHandler.handle
+    async def handle(self, request):
+        import anyio
+        if not reg_rate_ok(client_ip(request)):
+            return JSONResponse({"error": "invalid_client_metadata", "error_description": "too many client registrations from this address; try again later"},
+                                status_code=429, headers={"Retry-After": "3600"})
+        if await anyio.to_thread.run_sync(client_count) >= MAX_CLIENTS:
+            await anyio.to_thread.run_sync(lambda: sweep_unused_clients(force=True))
+            if await anyio.to_thread.run_sync(client_count) >= MAX_CLIENTS:
+                return JSONResponse({"error": "invalid_client_metadata", "error_description": "client registration is temporarily unavailable"}, status_code=503)
+        else: await anyio.to_thread.run_sync(sweep_unused_clients)
+        return await orig(self, request)
+    handle._aloof = True; RegistrationHandler.handle = handle
 class PaasOAuthProvider(OAuthAuthorizationServerProvider):
     def __init__(self, issuer): self.issuer = issuer.rstrip("/")
     async def get_client(self, client_id):
         if is_cimd_client_id(client_id):
             import anyio; return await anyio.to_thread.run_sync(resolve_cimd_client, client_id)
-        d = S.get("client", client_id); return OAuthClientInformationFull.model_validate(d) if d else None
-    async def register_client(self, client_info): S.put("client", client_info.client_id, client_info.model_dump(mode="json"))
+        d = S.get("client", client_id)
+        return LoopbackClient.model_validate({k: v for k, v in d.items() if not k.startswith("aloof_")}) if d else None
+    async def register_client(self, client_info):
+        uris = [str(u) for u in (client_info.redirect_uris or [])]
+        if not uris or len(uris) > 10: raise RegistrationError("invalid_redirect_uri", "register between 1 and 10 redirect_uris")
+        for u in uris:
+            why = redirect_problem(u)
+            if why: raise RegistrationError("invalid_redirect_uri", why)
+        # Unverified public client: never issue a secret, whatever was requested (RFC 7591 lets the server override metadata).
+        client_info.client_secret = None; client_info.client_secret_expires_at = None; client_info.token_endpoint_auth_method = "none"
+        client_info.client_name = _clean_name(client_info.client_name)
+        client_info.scope = "paas"
+        d = client_info.model_dump(mode="json") | {"aloof_dcr": True, "aloof_used": False}
+        S.put("client", client_info.client_id, d)
     async def authorize(self, client, params: AuthorizationParams) -> str:
         rid = secrets.token_urlsafe(16)
         S.put("pending", rid, {"client_id": client.client_id, "client_name": client.client_name, "params": params.model_dump(mode="json")}, ttl=600)
@@ -183,6 +301,7 @@ class PaasOAuthProvider(OAuthAuthorizationServerProvider):
         return AuthorizationCode.model_validate(d["code"]) if d and d["code"]["client_id"] == client.client_id else None
     def _issue(self, client_id, scopes, api_key, subject, resource):
         at, rt = "mcp_at_" + secrets.token_urlsafe(32), "mcp_rt_" + secrets.token_urlsafe(32)
+        _mark_used(client_id)
         meta = {"client_id": client_id, "scopes": scopes, "api_key": api_key, "subject": subject, "resource": resource}
         S.put("access", at, meta | {"expires_at": int(time.time()) + ACCESS_TTL}, ttl=ACCESS_TTL)
         S.put("refresh", rt, meta | {"expires_at": int(time.time()) + REFRESH_TTL}, ttl=REFRESH_TTL)
@@ -211,19 +330,37 @@ class PaasOAuthProvider(OAuthAuthorizationServerProvider):
 def api_key_for(token: str):
     if token.startswith("pk_"): return token
     d = S.get("access", token); return d and d["api_key"]
-PAGE = """<!doctype html><html><body style="font-family:system-ui;max-width:460px;margin:60px auto">
-<h2>Authorize {client}</h2><p><b>{client}</b> wants to deploy and manage apps on your account (scope: {scopes}).</p>
+PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize {client}</title></head>
+<body style="font-family:system-ui;max-width:480px;margin:60px auto;padding:0 16px">
+<h2>Authorize {client}</h2>{badge}
+<p><b>{client}</b> wants to deploy and manage apps on your account (scope: {scopes}).</p>
+<p>After you approve, you will be sent to: <code style="word-break:break-all">{target}</code></p>
 {err}<form method="post"><input type="hidden" name="req" value="{req}">
 <label>Email<br><input name="email" size="44" autocomplete="email"></label><br>
 <label>Password<br><input name="password" type="password" size="44"></label><br><br>
 <label>or paste an API key<br><input name="api_key" size="44" placeholder="pk_..."></label><br><br>
 <button name="action" value="approve">Approve</button> <button name="action" value="deny">Deny</button></form></body></html>"""
+VERIFIED_BADGE = '<p style="color:#0a6b2d">&#10003; Verified app: redirects to a known MCP client domain.</p>'
+UNVERIFIED_BADGE = ('<div style="border:2px solid #b42318;background:#fef3f2;padding:10px 12px;border-radius:6px"><b style="color:#b42318">&#9888; Unverified app</b><br>'
+    'Aloof has not verified this app or its name. Only approve if you just started this connection yourself and you trust <b>{host}</b>. '
+    'Approving gives it full access to your Aloof account.</div>')
+CONSENT_HEADERS = {"X-Frame-Options": "DENY", "Content-Security-Policy": "frame-ancestors 'none'",
+                   "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+def redirect_target(redirect_uri):
+    """The exact origin the user will be sent to: scheme://host[:port] (native schemes show scheme://host)."""
+    u = urlsplit(str(redirect_uri or "")); host = u.hostname or ""
+    if ":" in host: host = f"[{host}]"
+    return f"{u.scheme}://{host}" + (f":{u.port}" if u.port else "")
 async def login_page(request: Request):
     form = await request.form() if request.method == "POST" else {}
     rid = form.get("req") or request.query_params.get("req", ""); p = S.get("pending", rid)
     if not p: return HTMLResponse("authorization request expired; start again from your MCP client", 400)
     params = AuthorizationParams.model_validate(p["params"])
-    render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(p.get("client_name") or p["client_id"]), scopes=html.escape(" ".join(params.scopes or ["paas"])), req=rid, err=f'<p style="color:red">{html.escape(err)}</p>' if err else ""))
+    target = redirect_target(params.redirect_uri); verified = is_verified_redirect(params.redirect_uri)
+    badge = VERIFIED_BADGE if verified else UNVERIFIED_BADGE.format(host=html.escape(target))
+    name = _clean_name(p.get("client_name")) or p["client_id"]
+    render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(name), badge=badge, target=html.escape(target), scopes=html.escape(" ".join(params.scopes or ["paas"])),
+        req=html.escape(rid), err=f'<p style="color:red">{html.escape(err)}</p>' if err else ""), headers=CONSENT_HEADERS)
     if request.method == "GET": return render()
     if form.get("action") == "deny":
         S.rm("pending", rid); return RedirectResponse(construct_redirect_uri(str(params.redirect_uri), error="access_denied", state=params.state), 302)
