@@ -58,7 +58,8 @@ Caddy's local CA is at `data/caddy/caddy/pki/authorities/local/root.crt` (`curl 
 ## CLI (`cli/aloof`)
 ```
 aloof signup you@example.com ; aloof plans
-aloof deploy web --image nginx:alpine --port 80 | --git https://github.com/u/r.git [--ref main] [--plan shared-1x-1gb] [-e K=V] [-n 2]
+aloof deploy <your-app-name> --image nginx:alpine --port 80 |   # names are global, e.g. my-api-1234; no --plan = largest your tier allows
+            --git https://github.com/u/r.git [--ref main] [--plan shared-1x-1gb] [-e K=V] [-n 2]
 aloof status|logs|destroy <app> ; aloof scale <app> 3 ; aloof env <app> K=V K2=
 aloof volumes create data --size 2 ; aloof volumes attach <app> data --path /data ; aloof volumes list|detach|delete
 aloof autoscale <app> --min 0 --max 4 --concurrency 10 [--cpu 70] --idle 300      # min 0 = scale to zero

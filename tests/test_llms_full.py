@@ -30,7 +30,7 @@ def test_connected_apps_list_and_revoke():
     h = {"Authorization": f"Bearer {key}"}
     r = c.get("/v1/auth/connected-apps", headers=h).json()
     assert len(r) == 1 and r[0]["name"] == "Claude" and r[0]["redirect_host"] == "claude.ai" and r[0]["access_tokens"] == 1 and r[0]["refresh_tokens"] == 1
-    assert c.delete("/v1/auth/connected-apps/cid-1", headers=h).json()["tokens_revoked"] == 2
+    r = c.delete("/v1/auth/connected-apps/cid-1", headers=h).json(); assert r["tokens_revoked"] == 2 and r["codes_revoked"] == 1
     assert c.get("/v1/auth/connected-apps", headers=h).json() == []
     assert q("select count(*) n from kv where kind='oauth:access' and k='h3'", one=True)["n"] == 1   # other account untouched
     codes = {r["k"] for r in q("select k from kv where kind='oauth:code'")}
@@ -43,3 +43,32 @@ def test_cli_login_exists():
 def test_docs_deploy_button_and_revoke():
     assert "needs a signed-in browser session" in c.get("/docs/api").text
     assert "logged-in session" in c.get("/llms.txt").text and "/v1/auth/connected-apps" in c.get("/docs/mcp").text
+
+def test_revoke_codes_only_client_returns_200():
+    import json
+    from paas import engine, crypto
+    from paas.db import kv_put
+    a = engine.create_account("codes-only@real.dev"); h = {"Authorization": f"Bearer {a['api_key']}"}
+    kv_put("oauth:code", "co1", json.dumps({"code": {"client_id": "cid-codes"}, "api_key": "enc:" + crypto.enc(a["api_key"])}), 300)
+    r = c.delete("/v1/auth/connected-apps/cid-codes", headers=h)
+    assert r.status_code == 200 and r.json() == {"ok": True, "tokens_revoked": 0, "codes_revoked": 1}
+def test_default_plan_by_tier_and_errors():
+    from paas.db import q
+    a = engine_acct("plan-free@real.dev"); h = {"Authorization": f"Bearer {a['api_key']}"}
+    r = c.post("/v1/apps", headers=h, json={"name": "pf-default-1", "source": {"image": "nginx:alpine"}, "port": 80})
+    assert r.status_code == 200, r.text
+    from paas import engine
+    assert engine.default_plan(a["id"]) == "shared-1x-512mb"
+    assert '"plan": "shared-1x-512mb"' in q("select spec from apps where name='pf-default-1'", one=True)["spec"] or engine.get_app("pf-default-1")["plan"]["id"] == "shared-1x-512mb"
+    r = c.post("/v1/apps", headers=h, json={"name": "pf-big-1", "source": {"image": "nginx:alpine"}, "plan": "shared-1x-1gb", "port": 80})
+    assert r.status_code == 400 and "Allowed plans: shared-1x-256mb, shared-1x-512mb" in r.json()["detail"]
+    q("update accounts set tier='hobby' where id=?", (a["id"],)); assert engine.default_plan(a["id"]) == "shared-1x-1gb"
+    b = engine_acct("plan-other@real.dev")
+    r = c.post("/v1/apps", headers={"Authorization": f"Bearer {b['api_key']}"}, json={"name": "pf-default-1", "source": {"image": "nginx:alpine"}, "port": 80})
+    assert r.status_code == 409 and "Pick another name" in r.json()["detail"]
+def engine_acct(email):
+    from paas import engine; return engine.create_account(email)
+def test_quickstart_uses_unique_name():
+    t = c.get("/docs/quickstart").text
+    assert "deploy hello" not in t and "your-app-name" in t and "my-api-1234" in t
+    l = c.get("/llms.txt").text; assert "my-api-1234" in l and "app name taken" in l

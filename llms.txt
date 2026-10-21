@@ -13,8 +13,10 @@
 ## Deploy in 3 steps
 1. Get an API key: `POST {{API}}/v1/signup {"email": "..."}` -> `api_key` (or connect over MCP with OAuth)
 2. `POST {{API}}/v1/apps` with `Authorization: Bearer <key>`:
-   `{"name":"my-api","source":{"image":"ghcr.io/me/api:1"} | {"git":"https://github.com/me/repo","ref":"main"},"plan":"shared-1x-1gb","port":8080,"env":{"K":"V"}}`
-3. Poll `GET {{API}}/v1/apps/my-api` until `status=="running"`. The app is served at `https://my-api.{{DOMAIN}}/`
+   `{"name":"<your-app-name>","source":{"image":"ghcr.io/me/api:1"} | {"git":"https://github.com/me/repo","ref":"main"},"port":8080,"env":{"K":"V"}}`
+   App names are global (they become `<name>.{{DOMAIN}}`): pick a unique one such as `my-api-1234`; HTTP 409 "app name taken" means choose another.
+   `plan` is optional: omitted, you get the largest plan your tier allows (Free: shared-1x-512mb; Hobby/Pro: shared-1x-1gb). A plan your tier doesn't allow returns 400 listing the allowed plans.
+3. Poll `GET {{API}}/v1/apps/<your-app-name>` until `status=="running"`. The app is served at `https://<your-app-name>.{{DOMAIN}}/` (e.g. `https://my-api-1234.{{DOMAIN}}/`)
 
 ## API
 - GET /v1/plans: plans, rates, tiers, regions. Pricing (USD excl. tax, billed per second; monthly figures assume 720 hours):

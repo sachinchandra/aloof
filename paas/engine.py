@@ -94,6 +94,15 @@ def account_tier(account_id):
     from .plans import TIERS
     a = q("select tier from accounts where id=?", (account_id,), one=True); k = (a or {}).get("tier") or "free"
     return k, TIERS.get(k, TIERS["free"])
+PAID_DEFAULT_PLAN = "shared-1x-1gb"
+def default_plan(account_id):
+    """Plan used when a new app doesn't name one: the largest plan the account's tier allows (Free: shared-1x-512mb), or
+    shared-1x-1gb on paid tiers (which allow every plan). Falls back to shared-1x-256mb."""
+    try:
+        _, t = account_tier(account_id)
+        if t.get("plans"): return max(t["plans"], key=lambda p: (PLANS[p]["memory_mb"], PLANS[p]["vcpu"])) if all(p in PLANS for p in t["plans"]) else t["plans"][0]
+        return PAID_DEFAULT_PLAN
+    except Exception: return "shared-1x-256mb"
 def apply_tier_limits(account_id, spec, redeploy=False):
     """Free tier cost is bounded: small shared plans only, 1 instance, always scale-to-zero after idle, 1 GB volumes,
     and usage hard-capped at the included amount (see billing.meter_tick)."""
@@ -102,7 +111,7 @@ def apply_tier_limits(account_id, spec, redeploy=False):
         n = q("select count(*) n from apps where account_id=? and status!='destroyed' and spec not like ?", (account_id, '%"_parent": %'), one=True)["n"]
         if n >= t["max_apps"]: raise ValueError(f"{k} tier allows {t['max_apps']} apps; upgrade with PUT /v1/billing/tier")
     if t.get("plans"):
-        if spec["plan"] not in t["plans"]: raise ValueError(f"{k} tier can use {', '.join(t['plans'])}; upgrade to hobby for {spec['plan']}")
+        if spec["plan"] not in t["plans"]: raise ValueError(f"plan {spec['plan']} isn't available on the {k} tier. Allowed plans: {', '.join(t['plans'])} (or leave the plan out to get {default_plan(account_id)}). Upgrade to hobby for {spec['plan']}.")
         if spec.get("kind") == "postgres" or spec.get("_parent"): return spec   # databases/workers never sleep (compute stays inside the hard cap)
         a = spec.get("autoscale") or {}
         spec["autoscale"] = {"min": 0, "max": min(int(a.get("max") or 1), t["max_instances"]), "target_concurrency": a.get("target_concurrency") or 10,
@@ -146,6 +155,7 @@ def _set_region(spec, ex, account_id=None):
         vr = q("select region from volumes where name=?", (v["name"],), one=True)
         if vr: R.same_region("volume", v["name"], vr.get("region"), spec["name"], want)
 def deploy(account_id, spec):
+    if not spec.get("plan"): spec.pop("plan", None)   # empty/None = "not given": redeploys keep their plan, new apps get default_plan()
     ex = q("select * from apps where name=?", (spec.get("name"),), one=True)
     if ex and ex["account_id"] == account_id and ex["status"] != "destroyed":   # redeploy: keep attached state
         old = load_spec(ex["spec"])
@@ -153,8 +163,9 @@ def deploy(account_id, spec):
                   "processes", "process_counts", "cron", "release_command", "_parent", "_preview_of"):
             if k not in spec and k in old: spec[k] = old[k]
         if not spec.pop("_replace_env", False): spec["env"] = {**old.get("env", {}), **spec.get("env", {})}
+    if "plan" not in spec and account_id is not None: spec["plan"] = default_plan(account_id)
     spec = validate(spec); name = spec["name"]
-    if ex and ex["account_id"] != account_id: raise PermissionError("app name taken")
+    if ex and ex["account_id"] != account_id: raise PermissionError(f"app name taken: '{name}' belongs to another account (names are global). Pick another name, e.g. {name}-{secrets.token_hex(2)}")
     _set_region(spec, ex, account_id)
     _check_platform_image(account_id, spec)
     acct_net = f"aloof-acct-{account_id}"   # private network: <app>.internal resolves between this account's apps only
@@ -440,7 +451,7 @@ def get_app(name):
     a["instances"] = q("select id,provider,node_id,host,port,status,started from instances where app=? and status='running'", (name,))
     return a
 def logs(name, tail=200):
-    out = ["== platform events =="] + [time.strftime("%H:%M:%S ", time.localtime(e["ts"]))+e["msg"] for e in q("select * from events where app=? order by id desc limit 50", (name,))][::-1]
+    out = ["== platform events (times UTC) =="] + [time.strftime("%H:%M:%SZ ", time.gmtime(e["ts"]))+e["msg"] for e in q("select * from events where app=? order by id desc limit 50", (name,))][::-1]
     for i in q("select * from instances where app=? and status='running'", (name,)):
         out += [f"== instance {i['id']} =="] + get_drivers()[i["provider"]].logs(i["id"], tail).splitlines()
     return "\n".join(out)

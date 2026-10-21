@@ -244,7 +244,7 @@ def reg_rate_ok(ip, now=None):
     except Exception as e:
         # Fail closed: registration isn't critical, and a per-process fallback would let each worker allow its own quota.
         if not _fallback_warned[0]: log.warning("register rate limit: DB unavailable, refusing registrations: %s", e); _fallback_warned[0] = True
-        return False
+        return None   # falsy: refused, but callers can tell "unavailable" from "over the limit"
 def reset_reg_hits():
     _reg_hits.clear()
     try: _db.q("delete from kv where kind in ('oauth:reghit','oauth:regctr')")
@@ -318,7 +318,11 @@ def patch_registration():
     orig = RegistrationHandler.handle
     async def handle(self, request):
         import anyio
-        if not reg_rate_ok(client_ip(request)):
+        ok = reg_rate_ok(client_ip(request))
+        if ok is None:
+            return JSONResponse({"error": "temporarily_unavailable", "error_description": "client registration is temporarily unavailable, retry in a minute"},
+                                status_code=429, headers={"Retry-After": "60"})
+        if not ok:
             return JSONResponse({"error": "invalid_client_metadata", "error_description": "too many client registrations from this address; try again later"},
                                 status_code=429, headers={"Retry-After": "3600"})
         if await anyio.to_thread.run_sync(client_count) >= MAX_CLIENTS:

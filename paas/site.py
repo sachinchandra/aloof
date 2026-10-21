@@ -106,9 +106,9 @@ def _gpu_section():
         return f"""<h2 class=pp-h id=gpus>GPUs</h2><p class=pp-sub>Dedicated GPU per app, billed per second while running. With <code>min 0</code> autoscaling you pay only while serving.</p><div class=scroll><table class=tbl>{GPU_HEAD}{_plan_rows("gpu")}</table></div>"""
     opts = "".join(f"<option value={k}>{p['gpu']}</option>" for k, p in PLANS.items() if p["kind"] == "gpu" and k != "gpu-t4-spot")
     return f"""<h2 class=pp-h id=gpus>GPUs <span class=tag>coming soon</span></h2><div class="card pp-gpu"><p>L4, RTX 4090, L40, A100 80GB and H100, billed per second with scale to zero. GPUs launch in our second phase; leave your email and we'll tell you when they're live.</p><div style="margin-top:16px">{WAITLIST_FORM % opts}</div></div>"""
-TERM = [("p", "$ ", "aloof deploy api --git https://github.com/acme/api.git"), ("m", "", "→ cloning acme/api@main"), ("m", "", "→ building Dockerfile (cached layers: 7/9)"),
+TERM = [("p", "$ ", "aloof deploy my-api-1234 --git https://github.com/acme/api.git"), ("m", "", "→ cloning acme/api@main"), ("m", "", "→ building Dockerfile (cached layers: 7/9)"),
         ("m", "", "→ pushing image to registry"), ("c", "", "→ starting 2 instances in nbg1"), ("g", "✓ ", "health check passed /healthz (38 ms)"),
-        ("g", "✓ ", "live: https://api.{base}/"), ("p", "$ ", "aloof autoscale api --min 0 --max 6 --idle 300"), ("g", "✓ ", "scale to zero enabled · billed per second")]
+        ("g", "✓ ", "live: https://my-api-1234.{base}/"), ("p", "$ ", "aloof autoscale my-api-1234 --min 0 --max 6 --idle 300"), ("g", "✓ ", "scale to zero enabled · billed per second")]
 def _term(base):
     import json as _j
     lines = _j.dumps([[c, p, t.replace("{base}", base)] for c, p, t in TERM])
@@ -175,7 +175,7 @@ if(R){show(9);return}var n=0;function tick(){show(n);n=n>=9?0:n+1;setTimeout(tic
 var io=window.IntersectionObserver&&new IntersectionObserver(function(es){if(es[0].isIntersecting){io.disconnect();tick()}});io?io.observe(t):tick()})();</script>"""
 def _hero_visual(base):
     # step 1-3 deploy, 4-5 spike, 6-8 rollback; chart bars react via [data-step]
-    rows = [(1, "p", "$", "aloof deploy api"), (2, "m", "", "→ building v42 · pushing image"), (3, "ok", "✓", f"v42 live at https://api.{base}"),
+    rows = [(1, "p", "$", "aloof deploy my-api-1234"), (2, "m", "", "→ building v42 · pushing image"), (3, "ok", "✓", f"v42 live at https://my-api-1234.{base}"),
             (4, "warn", "!", "5xx rate 0.4% → 18% · p95 120 → 940 ms"), (5, "m", "", "self-heal: v42 worse than v41 baseline"),
             (6, "ok", "↺", "rolled back to v41 · zero downtime"), (7, "m", "", "reason: 5xx rate 18.2% vs 0.4% baseline (1,240 requests)"), (8, "ok", "✓", "healthy · recorded in release history")]
     lines = "".join(f"<div class='hv-l {c}' data-s={s}><span class=hv-p>{p}</span>{html.escape(t)}</div>" for s, c, p, t in rows)
@@ -324,8 +324,8 @@ Check it with <code>aloof --help</code>. It needs <code>python3</code>, which ma
 <li>Log in. New here? <code>aloof signup you@company.com</code> creates an account and saves the key for you. Already have an account? Create a key under Dashboard → API keys, then run:
 <pre>aloof login</pre>
 Paste the key at the hidden prompt. The CLI checks that it works and saves it to <code>~/.aloof.json</code>, readable only by you (the key has full access to your account). For scripts, <code>aloof login --key-stdin</code> reads the key from stdin. In CI, set <code>ALOOF_API_URL</code> and <code>ALOOF_API_TOKEN</code> (a <a href="/docs/ci">deploy token</a>) instead.</li>
-<li>Deploy: <pre>aloof deploy hello --image nginx:alpine --port 80
-live: https://hello.{base}/</pre></li></ol>
+<li>Deploy, with a name of your own (app names are global, so pick something unique such as <code>my-api-1234</code>): <pre>aloof deploy &lt;your-app-name&gt; --image nginx:alpine --port 80
+live: https://my-api-1234.{base}/</pre>Without <code>--plan</code> you get the largest plan your tier allows (Free: <code>shared-1x-512mb</code>). If you see <code>app name taken</code>, pick another name.</li></ol>
 <p>Your app must listen on <code>$PORT</code> (default 8080) over HTTP. Configure it with env vars, and keep persistent data on a <a href="/docs/volumes">volume</a>. If something goes wrong, see <a href="/docs/troubleshooting">Troubleshooting</a>.</p>""",
 "cli": """<h1>CLI</h1><pre>aloof plans | apps | usage
 aloof deploy &lt;app&gt; --image IMG | --git URL [--ref main] [--plan shared-1x-1gb] [--port 8080] [-e K=V] [-n 2]
@@ -496,7 +496,7 @@ MCP tools: add_domain, list_domains, verify_domain, remove_domain</pre>
 <h3 id=revoke>Revoking access</h3><p><b>Disconnect one app:</b> in the dashboard open <b>Account → Connected apps</b> and click <b>Disconnect</b>, or use the API: <code>GET /v1/auth/connected-apps</code> lists each connected client (<code>client_id</code>, <code>name</code>, <code>redirect_host</code>, token counts, <code>expires_at</code>) and <code>DELETE /v1/auth/connected-apps/{{client_id}}</code> deletes its access and refresh tokens immediately. The app has to ask you to approve it again to reconnect.</p><p><b>Cut off everything at once:</b> access is also tied to an API key, so deleting that key makes the assistant's next request fail.</p><ul><li>If you approved with your email and password, {brand} created a key named <code>mcp-oauth</code>. Delete it under <b>API keys</b> in the dashboard. Approving another assistant with your password replaces this key, which also disconnects the previous assistant.</li><li>If you approved by pasting an API key, delete that key.</li></ul>""",
 "api": f"""<h1>REST API</h1><p>Base URL <code>{api}</code>. Authenticate with <code>Authorization: Bearer pk_...</code>. The full interactive reference is at <a href="/api/docs">/api/docs</a>.</p>
 <pre>curl -X POST {api}/v1/apps -H "Authorization: Bearer $ALOOF_API_KEY" -H "Content-Type: application/json" \\
-  -d '{{"name":"api","source":{{"image":"ghcr.io/me/api:1"}},"plan":"shared-1x-1gb","port":8080,"env":{{"DATABASE_URL":"..."}}}}'</pre><h2 id=deploy-button>Deploy buttons</h2><p>The one-click deploy link <code>/deploy?template=&lt;id&gt;</code> needs a signed-in browser session: logged-out visitors are sent to <code>/login?next=…</code> (HTTP 303) and land back on the deploy page after signing in. To deploy a template without a browser, call <code>POST /v1/templates/{{id}}/deploy</code> with an API key.</p>""",
+  -d '{{"name":"my-api-1234","source":{{"image":"ghcr.io/me/api:1"}},"port":8080,"env":{{"DATABASE_URL":"..."}}}}'</pre><h2 id=deploy-button>Deploy buttons</h2><p>The one-click deploy link <code>/deploy?template=&lt;id&gt;</code> needs a signed-in browser session: logged-out visitors are sent to <code>/login?next=…</code> (HTTP 303) and land back on the deploy page after signing in. To deploy a template without a browser, call <code>POST /v1/templates/{{id}}/deploy</code> with an API key.</p>""",
 "troubleshooting": f"""<h1>Troubleshooting &amp; FAQ</h1>
 <h2 id=402>Requests return HTTP 402</h2><p>402 means the app is paused for billing, not that it crashed. On the <b>Free</b> plan it happens when the month's usage reaches the included $1: apps resume on the 1st of next month, or straight away when you upgrade. On a <b>paid</b> plan it means your prepaid credit ran out: apps resume automatically after a top-up. Both are in Dashboard → Billing &amp; usage. The API also returns 402 when an action needs credit you don't have, such as upgrading from your balance.</p>
 <h2 id=failed-releases>A deploy failed</h2><p>A failed release never takes traffic. If an earlier release was running, it keeps serving and the app shows <i>v2 failed … still serving v1</i>. Open the app in the dashboard to see which step failed and the last log lines, or run <code>aloof releases &lt;app&gt;</code>. The usual causes, in order:</p><ol>

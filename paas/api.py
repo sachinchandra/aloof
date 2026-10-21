@@ -85,7 +85,7 @@ class Source(BaseModel):
     image: str|None=None; git: str|None=None; ref: str|None=None; subdir: str|None=None; path: str|None=None
     upload: str|None=None; dockerfile: str|None=None; build_args: dict[str,str]|None=None; github_installation: int|None=None
 class DeployReq(BaseModel):
-    name: str; source: Source; plan: str="shared-1x-1gb"; port: int=8080; env: dict[str,str]={}; instances: int=1
+    name: str; source: Source; plan: str|None=None; port: int=8080; env: dict[str,str]={}; instances: int=1
     command: list[str]|None=None; region: str|None=None; provider: str|None=None
     volumes: list[dict]=[]; autoscale: dict|None=None; health: dict|None=None
     processes: dict[str, str|list[str]]|None=None; process_counts: dict[str,int]|None=None; cron: list[dict]|None=None; release_command: str|list[str]|None=None
@@ -562,8 +562,9 @@ def connected_apps(a=Depends(acct)):
 def connected_app_revoke(client_id: str, request: Request, a=Depends(acct)):
     """Disconnect an app: deletes its access and refresh tokens for this account (it must sign in again to reconnect)."""
     from . import oauth_apps; n = oauth_apps.revoke(a["id"], client_id)
-    if not n: raise HTTPException(404, "no connected app with that client_id")
-    _audit(a["id"], None, "oauth.revoke", client_id[:200], _ip(request)); return {"ok": True, "tokens_revoked": n}
+    if not sum(n.values()): raise HTTPException(404, "no connected app with that client_id")
+    _audit(a["id"], None, "oauth.revoke", client_id[:200], _ip(request))
+    return {"ok": True, "tokens_revoked": n["access"] + n["refresh"], "codes_revoked": n["code"]}
 @app.delete("/v1/auth/keys/{kid}")
 def auth_key_revoke(kid: str, request: Request, a=Depends(acct)):
     if kid == "primary": raise HTTPException(400, "the default key can be rotated, not revoked")

@@ -47,7 +47,8 @@ def list_apps(account_id):
                         "redirect_host": urlsplit(ru).hostname if ru else None, "registered_at": c.get("client_id_issued_at")})
     return sorted(out, key=lambda x: -x["expires_at"])
 def revoke(account_id, client_id):
-    n = 0
+    """Deletes this account's tokens and unexchanged codes for client_id. Returns counts per kind."""
+    n = {"access": 0, "refresh": 0, "code": 0}
     for kind, k, v in list(_tokens(account_id, client_id, ("access", "refresh", "code"))):
-        kv_del("oauth:" + kind, k); n += kind != "code"
+        kv_del("oauth:" + kind, k); n[kind] += 1
     return n

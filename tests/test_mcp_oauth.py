@@ -296,5 +296,11 @@ def test_fallback_warns_once(srv, monkeypatch, caplog):
     import logging
     with caplog.at_level(logging.WARNING):
         res = [oauth.reg_rate_ok(f"8.8.8.{i}") for i in range(3)]
-    assert res == [False, False, False]   # fail closed -> 429
+    assert res == [None, None, None]   # fail closed -> 429 'temporarily unavailable'
     assert sum("DB unavailable" in r.message for r in caplog.records) == 1
+
+def test_register_db_error_says_unavailable(srv, monkeypatch):
+    c, oauth, _ = srv
+    monkeypatch.setattr(oauth, "reg_rate_ok", lambda ip, now=None: None)
+    r = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "t", "token_endpoint_auth_method": "none"})
+    assert r.status_code == 429 and "temporarily unavailable, retry" in r.json()["error_description"] and r.headers["retry-after"] == "60"
