@@ -445,6 +445,7 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name=
 {err}<form method="post"><input type="hidden" name="req" value="{req}">
 <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" value="{email}">
 <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
+<p class="muted" style="margin:8px 0 0"><b style="color:#ffb020">Only one assistant can be connected with a password.</b> Approving with your password disconnects any assistant you connected that way before. To keep several connected, approve each one with its own API key instead.</p>
 <details{key_open}><summary>Use an API key instead</summary><label for="api_key">API key</label><input id="api_key" name="api_key" placeholder="pk_..." autocomplete="off" spellcheck="false"></details>
 <div class="row" style="flex-direction:row-reverse"><button class="btn pri" name="action" value="approve">Approve</button><button class="btn" name="action" value="deny">Deny</button></div></form>
 <div class="help"><p><b>Signed up with an email link?</b> You don't have a password yet. Open <a href="{www}/login?next=/dashboard%23keys" target="_blank" rel="noopener">the dashboard in a new tab</a>, sign in with your email link, create a key under API keys, and paste it above. Or set a password under <a href="{www}/login?next=/dashboard%23account" target="_blank" rel="noopener">Account</a>.</p>

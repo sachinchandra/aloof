@@ -321,13 +321,15 @@ sudo curl -fsSL {api}/cli/aloof -o /usr/local/bin/aloof && sudo chmod +x /usr/lo
 # or without sudo, into ~/.local/bin (make sure it's on your PATH)
 mkdir -p ~/.local/bin && curl -fsSL {api}/cli/aloof -o ~/.local/bin/aloof && chmod +x ~/.local/bin/aloof</pre>
 Check it with <code>aloof --help</code>. It needs <code>python3</code>, which macOS and most Linux distributions already have.</li>
-<li>Log in. New here? <code>aloof signup you@company.com</code> creates an account and saves the key for you. Already have an account? Copy your API key from Dashboard → API keys and save it in <code>~/.aloof.json</code>:
-<pre>{{"api": "{api}", "key": "pk_..."}}</pre>
-Then <code>chmod 600 ~/.aloof.json</code>, since the key has full access to your account. In CI, set <code>ALOOF_API_URL</code> and <code>ALOOF_API_TOKEN</code> (a <a href="/docs/ci">deploy token</a>) instead.</li>
+<li>Log in. New here? <code>aloof signup you@company.com</code> creates an account and saves the key for you. Already have an account? Create a key under Dashboard → API keys, then run:
+<pre>aloof login</pre>
+Paste the key at the hidden prompt. The CLI checks that it works and saves it to <code>~/.aloof.json</code>, readable only by you (the key has full access to your account). For scripts, <code>aloof login --key-stdin</code> reads the key from stdin. In CI, set <code>ALOOF_API_URL</code> and <code>ALOOF_API_TOKEN</code> (a <a href="/docs/ci">deploy token</a>) instead.</li>
 <li>Deploy: <pre>aloof deploy hello --image nginx:alpine --port 80
 live: https://hello.{base}/</pre></li></ol>
 <p>Your app must listen on <code>$PORT</code> (default 8080) over HTTP. Configure it with env vars, and keep persistent data on a <a href="/docs/volumes">volume</a>. If something goes wrong, see <a href="/docs/troubleshooting">Troubleshooting</a>.</p>""",
-"cli": """<h1>CLI</h1><pre>aloof plans | apps | usage
+"cli": """<h1>CLI</h1><pre>aloof signup you@company.com     # new account; saves the key
+aloof login [--key pk_... | --key-stdin]   # save an existing API key after checking it
+aloof plans | apps | usage
 aloof deploy &lt;app&gt; --image IMG | --git URL [--ref main] [--plan shared-1x-1gb] [--port 8080] [-e K=V] [-n 2]
 aloof status|logs|destroy &lt;app&gt;
 aloof scale &lt;app&gt; 3
@@ -447,7 +449,12 @@ MCP tools: add_domain, list_domains, verify_domain, remove_domain</pre>
 <p>Each domain in the response carries <code>status</code>, <code>last_checked_at</code>, <code>dns_records</code> (<code>ownership</code>, <code>routing</code>, plus <code>a</code>, <code>aaaa</code> and <code>recommended</code>) and, for root or <code>www</code> domains, <code>www_pair</code>.</p>""",
 "billing": """<h1>Billing, invoices &amp; tax</h1>
 <p><b>The short version:</b> you pick a plan (Free, Hobby $5/month or Pro $20/month), and the plan fee comes back to you as included usage. Apps are billed per second only while they run. If you use more than your plan includes, the rest comes out of a prepaid balance that you top up by card. Every new account starts with $5 of credit in that balance. Prices are in US dollars and exclude tax.</p>
-<h2 id=soon>When you see "Paid plans opening soon"</h2><p>Card payments run through Stripe, and our Stripe account isn't switched on for charging yet. Until it is, the dashboard shows <b>Paid plans opening soon</b> on the Billing page, and paying by card (subscribing, or topping up your balance) won't go through. Nothing is charged when you try, so the Hobby and Pro buttons on <a href="/pricing">pricing</a> may not complete a card payment yet. What still works: the Free plan, your $5 starting credit, and anything you can pay for from that balance. If you need a paid plan right away, <a href="/docs/support">Support</a> explains where things stand.</p>
+<h2 id=cards>Paying by card</h2><p>Card payments go through Stripe Checkout. Stripe stores your card, so we never see the number. There are two things you can pay for by card:</p><ul>
+<li><b>Prepaid credit (top-ups)</b>: a one-off payment of $10 to $5,000. The credit is added to your balance as soon as Stripe confirms the payment, and Stripe sends an invoice for it.</li>
+<li><b>A plan subscription (Hobby or Pro)</b>: Stripe charges the plan fee when you subscribe and then once a month until you cancel. Your workspace switches to the new plan as soon as Stripe confirms the first payment.</li></ul>
+<p><b>Usage is never charged to your card directly.</b> Apps are metered per second while they run. Usage up to your plan's included amount is covered by the plan; anything above it comes out of your prepaid balance. When a paid account's balance runs out, its apps are suspended (volumes and databases are kept) and they resume automatically after a top-up. Unless you turn the alerts off, we email you before that happens: when your balance has about 3 days left, and again at less than 24 hours.</p>
+<p>If a card payment fails or you close the checkout page, nothing is added and your plan doesn't change. You can try again from Dashboard → Billing &amp; usage.</p>
+<p id=soon class=muted>If card payments are ever paused on our side, the Billing page shows <b>Paid plans opening soon</b> and card payments won't go through until it's back. Nothing is charged when that happens, and your balance and Free plan keep working.</p>
 <h2>Upgrading, topping up and cancelling</h2><ul>
 <li><b>Upgrade or change plan</b>: Dashboard → Billing &amp; usage → Plan. Choose the plan and either <b>Subscribe by card</b> (Stripe charges the fee monthly) or <b>Pay from balance</b> (this month's fee comes out of your credit, pro-rated).</li>
 <li><b>Add credit</b>: Dashboard → Billing &amp; usage → Balance → <b>Add credit</b>, between $10 and $5,000 per top-up. Credit is added as soon as Stripe confirms the payment.</li>
@@ -470,7 +477,7 @@ MCP tools: add_domain, list_domains, verify_domain, remove_domain</pre>
 <h2 id=delete>Deleting your account</h2><p>Self-service deletion isn't in the dashboard yet. Request it through <a href="/docs/support">support</a> from the email address on the account, so we can confirm it's you. Before we delete it, cancel any card subscription and export what you want to keep. When the account is deleted, its apps, databases, volumes, backups, API keys and sessions are removed, and any remaining credit is forfeited. Invoices and payment records are kept as long as tax and accounting law requires.</p>
 <h2>What is metered</h2><p>Per second, in cents: compute while an instance runs (plan $/hr ÷ 3600), volumes per provisioned GB-month ($0.22, attached or not), backups and snapshots per GB-month ($0.22), and egress at $0.06/GB. Usage up to your plan's included amount (Free $1, Hobby $5, Pro $20) isn't deducted from your balance. Stopped and scaled-to-zero apps cost nothing; volumes are still billed.</p>
 <p>See this month's breakdown in Dashboard → Billing &amp; usage. When a paid account's credit runs out, its apps are suspended, and they resume automatically after a top-up.</p>
-<p><b>Invoices and tax</b>: Stripe issues an invoice for every payment. VAT, GST or US sales tax is calculated at checkout from your billing address, and you can enter a VAT/GST ID for reverse charge where it applies.</p>
+<p><b>Invoices and tax</b>: Stripe issues an invoice for every payment, and you can download past invoices and receipts from the Billing portal. Any tax that applies is shown at checkout before you pay.</p>
 <p><b>Free tier</b> is hard-capped and never draws on your wallet: 3 apps on <code>shared-1x-256mb</code>/<code>shared-1x-512mb</code>, 1 instance each, always scale-to-zero after at most 5 minutes idle, 1 GB of volumes. Once the month's usage reaches the included $1, apps pause (requests get HTTP 402) until the 1st of next month or until you upgrade.</p>
 <p>v1 plan ids (<code>cpu-small</code> etc.) still work and are billed at the equivalent current price. Indian customers can optionally be offered INR/UPI top-ups via Razorpay (off by default).</p>
 <h2>API</h2><p>Everything above is also available over the API: <code>POST /v1/billing/checkout {"credit_usd": 25}</code>, <code>POST /v1/billing/subscribe {"tier":"pro"}</code>, <code>POST /v1/billing/portal</code>, <code>PUT /v1/billing/tier {"tier":"pro"}</code> (pay from balance) and <code>GET /v1/billing</code>.</p>""",

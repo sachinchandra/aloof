@@ -45,3 +45,13 @@ def test_footer_tap_targets_and_hash_routing():
 def test_enter_key_approves_not_denies():
     sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
     assert oauth.PAGE.index('value="approve"') < oauth.PAGE.index('value="deny"')   # Enter submits the first button
+def test_billing_docs_describe_live_card_payments():
+    h = c.get("/docs/billing").text
+    assert "id=cards" in h and "Paying by card" in h and "$10 to $5,000" in h and "isn't switched on" not in h and "Usage is never charged to your card directly" in h
+def test_cli_login_documented_and_real():
+    src = open(os.path.join(ROOT, "cli/aloof")).read(); assert 's.add_parser("login")' in src
+    q = c.get("/docs/quickstart").text; cl = c.get("/docs/cli").text
+    assert "aloof login" in q and "save it in <code>~/.aloof.json</code>" not in q and "aloof login" in cl
+def test_authorize_password_replaces_warning():
+    sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
+    assert "Only one assistant can be connected with a password" in oauth.PAGE
