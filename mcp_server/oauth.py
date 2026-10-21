@@ -184,7 +184,7 @@ def patch_metadata():
         m.client_id_metadata_document_supported = True
         return m
     build._aloof = True; routes.build_metadata = build
-    patch_registration(); patch_token()
+    patch_registration(); patch_token(); patch_authorize()
 def _track_connected(client, api_key, code):
     """mcp_connected analytics (OAuth grant completed). Sends only the client's display name and redirect host. Never raises."""
     try:
@@ -287,6 +287,31 @@ def _mark_used(client_id):
         d = S.get("client", client_id)
         if d is not None and not d.get("aloof_used"): d["aloof_used"] = True; S.put("client", client_id, d)
     except Exception: pass
+def _raw_bad(r):
+    return isinstance(r, str) and any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in r)
+def raw_redirect_problem(body):
+    """Whitespace/CR/LF/control check on the redirect_uris exactly as sent, before pydantic URL normalization can strip them."""
+    try: d = json.loads(body or b"{}")
+    except ValueError: return None   # the SDK reports malformed JSON itself
+    ru = d.get("redirect_uris") if isinstance(d, dict) else None
+    if isinstance(ru, list) and any(_raw_bad(r) for r in ru): return "redirect_uri contains whitespace or control characters"
+    return None
+import contextvars
+_prompt = contextvars.ContextVar("aloof_prompt", default="")
+def patch_authorize():
+    """/authorize: reject raw redirect_uri with whitespace/control chars (before normalization), and remember `prompt` so
+    prompt=none can answer login_required (we never have a silent session) instead of showing the sign-in page."""
+    from mcp.server.auth.handlers.authorize import AuthorizationHandler
+    from starlette.responses import PlainTextResponse
+    if getattr(AuthorizationHandler.handle, "_aloof", False): return
+    orig = AuthorizationHandler.handle
+    async def handle(self, request):
+        src = request.query_params if request.method == "GET" else await request.form()
+        if _raw_bad(src.get("redirect_uri")): return PlainTextResponse("invalid_request: redirect_uri contains whitespace or control characters", 400)
+        tok = _prompt.set(str(src.get("prompt") or ""))
+        try: return await orig(self, request)
+        finally: _prompt.reset(tok)
+    handle._aloof = True; AuthorizationHandler.handle = handle
 def patch_registration():
     """Wrap the SDK's /register handler with a per-IP rate limit and a global client cap."""
     from mcp.server.auth.handlers.register import RegistrationHandler
@@ -303,6 +328,8 @@ def patch_registration():
             if await anyio.to_thread.run_sync(client_count) >= MAX_CLIENTS:
                 return JSONResponse({"error": "invalid_client_metadata", "error_description": "client registration is temporarily unavailable"}, status_code=503)
         else: await anyio.to_thread.run_sync(sweep_unused_clients)
+        bad = raw_redirect_problem(await request.body())
+        if bad: return JSONResponse({"error": "invalid_redirect_uri", "error_description": bad}, status_code=400)
         return await orig(self, request)
     handle._aloof = True; RegistrationHandler.handle = handle
 def patch_token():
@@ -342,6 +369,8 @@ class PaasOAuthProvider(OAuthAuthorizationServerProvider):
         d = client_info.model_dump(mode="json") | {"aloof_dcr": True, "aloof_used": False}
         S.put("client", client_info.client_id, d)
     async def authorize(self, client, params: AuthorizationParams) -> str:
+        if "none" in _prompt.get().split():   # OIDC-style silent auth: we always need an interactive sign-in
+            return construct_redirect_uri(str(params.redirect_uri), error="login_required", error_description="interactive sign-in required", state=params.state)
         rid = secrets.token_urlsafe(16)
         S.put("pending", rid, {"client_id": client.client_id, "client_name": client.client_name, "params": params.model_dump(mode="json")}, ttl=600)
         return f"{self.issuer}/oauth/login?req={rid}"
@@ -390,9 +419,10 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport"
 <label>or paste an API key<br><input name="api_key" size="44" placeholder="pk_..."></label><br><br>
 <button name="action" value="approve">Approve</button> <button name="action" value="deny">Deny</button></form></body></html>"""
 VERIFIED_BADGE = '<p style="color:#0a6b2d">&#10003; Verified app: redirects to a known MCP client domain.</p>'
-UNVERIFIED_BADGE = ('<div style="border:2px solid #b42318;background:#fef3f2;padding:10px 12px;border-radius:6px"><b style="color:#b42318">&#9888; Unverified app</b><br>'
-    'Aloof has not verified this app or its name. Only approve if you just started this connection yourself and you trust <b>{host}</b>. '
-    'Approving gives it full access to your Aloof account.</div>')
+UNVERIFIED_BADGE = ('<div role="alert" style="border:2px solid #b42318;background:#fef3f2;padding:10px 12px;border-radius:6px"><b style="color:#b42318">&#9888; Unverified app: be careful</b><br>'
+    'Aloof has <b>not</b> verified this app. Its name above was chosen by whoever registered it and may be fake. '
+    'Approving sends a token with <b>full access to your Aloof account</b> (deploy, change env vars and secrets, delete apps and databases, spend your balance) to <b>{host}</b>.<br>'
+    '<b>Only approve if you started this connection yourself in the last few minutes and you recognise {host}.</b> If you followed a link someone sent you, click Deny.</div>')
 CONSENT_HEADERS = {"X-Frame-Options": "DENY", "Content-Security-Policy": "frame-ancestors 'none'",
                    "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 def redirect_target(redirect_uri):

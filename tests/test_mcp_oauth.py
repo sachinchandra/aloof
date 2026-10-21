@@ -139,7 +139,7 @@ def test_consent_unverified_warning_and_escaping(srv):
 def test_no_skip_consent(srv):
     """Approving needs a POST with valid credentials; nothing else issues a code."""
     c, _, _ = srv; reg = _reg(c, [REDIRECT]).json(); _, ch = pkce()
-    r = c.get("/authorize", params={"response_type": "code", "client_id": reg["client_id"], "redirect_uri": REDIRECT, "code_challenge": ch, "code_challenge_method": "S256", "state": "st", "prompt": "none"}, follow_redirects=False)
+    r = c.get("/authorize", params={"response_type": "code", "client_id": reg["client_id"], "redirect_uri": REDIRECT, "code_challenge": ch, "code_challenge_method": "S256", "state": "st"}, follow_redirects=False)
     lp = r.headers["location"]; assert "/oauth/login" in lp and "code=" not in lp
     req = parse_qs(urlparse(lp).query)["req"][0]
     for data in ({"req": req, "action": "approve"}, {"req": req, "action": "approve", "api_key": "pk_bad"}, {"req": req}):
@@ -251,3 +251,22 @@ def test_register_rate_limit_is_in_db(srv):
     for i in range(10): assert oauth.reg_rate_ok("9.9.9.9")
     oauth._reg_hits.clear()   # a restart loses in-process state; the DB-backed count still holds
     assert oauth.reg_rate_ok("9.9.9.9") is False
+
+
+def test_prompt_none_returns_login_required(srv):
+    c, oauth, _ = srv
+    cid = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "t", "token_endpoint_auth_method": "none"}).json()["client_id"]
+    v, ch = pkce()
+    r = c.get("/authorize", params={"response_type": "code", "client_id": cid, "redirect_uri": REDIRECT, "code_challenge": ch,
+                                    "code_challenge_method": "S256", "state": "st", "prompt": "none"}, follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"].startswith(REDIRECT) and "error=login_required" in r.headers["location"] and "state=st" in r.headers["location"]
+def test_raw_redirect_whitespace_rejected(srv):
+    c, oauth, _ = srv
+    for bad in ["https://ok.example.com/cb\r\n", " https://ok.example.com/cb", "https://ok.example.com/cb\t"]:
+        r = c.post("/register", json={"redirect_uris": [bad], "client_name": "t", "token_endpoint_auth_method": "none"}); assert r.status_code == 400, bad
+    cid = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "t", "token_endpoint_auth_method": "none"}).json()["client_id"]
+    r = c.get("/authorize", params={"response_type": "code", "client_id": cid, "redirect_uri": REDIRECT + "\r\n", "code_challenge": "x" * 43,
+                                    "code_challenge_method": "S256"}, follow_redirects=False)
+    assert r.status_code == 400 and "location" not in r.headers
+def test_unverified_warning_is_strong(srv):
+    assert "full access to your Aloof account" in __import__("oauth").UNVERIFIED_BADGE and "Deny" in __import__("oauth").UNVERIFIED_BADGE

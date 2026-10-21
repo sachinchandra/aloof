@@ -665,6 +665,26 @@ def mcp_tool_names(): return site.mcp_tool_names()
 def llms():
     t = mcp_tool_names()
     return open(os.path.join(ROOT,"llms.txt")).read().replace("{{MCP_TOOL_COUNT}}", str(len(t))).replace("{{MCP_TOOLS}}", ", ".join(t)).replace("{{GPU}}", _llms_gpu()).replace("{{API}}", PUBLIC_API_URL).replace("{{MCP}}", PUBLIC_MCP_URL).replace("{{DOMAIN}}", URL_DOMAIN).replace("{{BRAND}}", BRAND)
+def _llms_text(): return llms()
+def _regions_md():
+    from . import regions as RG
+    rows = ["| Region | Location | Status | Provider |", "|---|---|---|---|"] + [f"| `{r['id']}` | {r['name']} | {'live' if r['live'] else 'coming soon (not live)'} | {r['provider']} |" for r in RG.status()]
+    return "\n## Regions\n\nGenerated from `GET " + PUBLIC_API_URL + "/v1/regions` (live = has capacity now). New apps, volumes and Postgres are only accepted in live regions; an app's region can't change.\n\n" + "\n".join(rows) + "\n"
+_MD_TYPE = "text/markdown; charset=utf-8"
+@app.get("/llms-full.txt")
+def llms_full():
+    from . import llms_full as LF
+    site_url = PUBLIC_API_URL.replace("://api.", "://www.", 1)
+    body = LF.full(site.docs, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL, site_url, _llms_text()) + _regions_md()
+    return Response(body, media_type="text/plain; charset=utf-8")
+@app.get("/mcp-tools.md")
+def mcp_tools_md():
+    from . import llms_full as LF
+    return Response(LF.mcp_tools_md(BRAND, PUBLIC_MCP_URL, PUBLIC_API_URL), media_type=_MD_TYPE)
+@app.get("/mcp-tools.json")
+def mcp_tools_json():
+    from . import llms_full as LF
+    return {"server": PUBLIC_MCP_URL, "tools": LF.mcp_tools()}
 @app.get("/.well-known/mcp.json")
 def mcp_manifest():
     m = json.load(open(os.path.join(ROOT,"mcp_server","manifest.json")))
