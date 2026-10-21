@@ -42,3 +42,6 @@ def test_authorize_page_branded_and_honest():
 def test_footer_tap_targets_and_hash_routing():
     css = open(os.path.join(ROOT, "paas/static/aloof.css")).read(); assert "footer.f .cols a:not(.logo){min-height:40px" in css
     assert "function goHash()" in open(os.path.join(ROOT, "dashboard/index.html")).read()
+def test_enter_key_approves_not_denies():
+    sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
+    assert oauth.PAGE.index('value="approve"') < oauth.PAGE.index('value="deny"')   # Enter submits the first button
