@@ -1,7 +1,9 @@
 """Docs pages for source/CI/process features (merged into site.docs)."""
 def pages(brand, base, api):
     return {
-"cli": """<h1>CLI</h1><pre>aloof launch                      # detect framework, write Dockerfile + aloof.toml + .dockerignore
+"cli": """<h1>CLI</h1><pre>aloof signup you@company.com      # new account; saves the key to ~/.aloof.json
+aloof login [--key pk_... | --key-stdin]   # save an existing API key after checking it works
+aloof launch                      # detect framework, write Dockerfile + aloof.toml + .dockerignore
 aloof deploy                      # build the current dir remotely (tar upload, .dockerignore respected) using aloof.toml
 aloof deploy &lt;app&gt; --image IMG | --git URL [--ref main] [--plan shared-1x-1gb] [--port 8080] [-e K=V] [-n 2]
 aloof config validate | show

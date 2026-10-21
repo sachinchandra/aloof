@@ -327,9 +327,7 @@ Paste the key at the hidden prompt. The CLI checks that it works and saves it to
 <li>Deploy: <pre>aloof deploy hello --image nginx:alpine --port 80
 live: https://hello.{base}/</pre></li></ol>
 <p>Your app must listen on <code>$PORT</code> (default 8080) over HTTP. Configure it with env vars, and keep persistent data on a <a href="/docs/volumes">volume</a>. If something goes wrong, see <a href="/docs/troubleshooting">Troubleshooting</a>.</p>""",
-"cli": """<h1>CLI</h1><pre>aloof signup you@company.com     # new account; saves the key
-aloof login [--key pk_... | --key-stdin]   # save an existing API key after checking it
-aloof plans | apps | usage
+"cli": """<h1>CLI</h1><pre>aloof plans | apps | usage
 aloof deploy &lt;app&gt; --image IMG | --git URL [--ref main] [--plan shared-1x-1gb] [--port 8080] [-e K=V] [-n 2]
 aloof status|logs|destroy &lt;app&gt;
 aloof scale &lt;app&gt; 3
