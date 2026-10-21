@@ -55,3 +55,6 @@ def test_cli_login_documented_and_real():
 def test_authorize_password_replaces_warning():
     sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
     assert "Only one assistant can be connected with a password" in oauth.PAGE
+def test_mcp_server_text_has_no_tax_or_wallet_claims():
+    s = open(os.path.join(ROOT, "mcp_server/server.py")).read().lower()
+    assert "tax" not in s and "apple" not in s and "google pay" not in s and "stripe checkout" in s

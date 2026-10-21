@@ -25,7 +25,7 @@ auth_kw = dict(auth_server_provider=PaasOAuthProvider(PUBLIC), auth=AuthSettings
     revocation_options=RevocationOptions(enabled=True), required_scopes=["paas"], validate_token_resource=False)) if HTTP_MODE else {}
 mcp = FastMCP(BRAND, **auth_kw, instructions=(
   f"{BRAND} hosts backend web apps, APIs and workers cheaply for anyone worldwide, billed per second in USD "
-  "(Stripe: cards, Apple/Google Pay; tax handled at checkout). Compute runs in Nuremberg, Germany on Hetzner (backups in Helsinki), so be "
+  "(card payments through Stripe Checkout: prepaid credit top-ups and Hobby/Pro plan subscriptions). Compute runs in Nuremberg, Germany on Hetzner (backups in Helsinki), so be "
   "honest about latency: ~10-40 ms within Europe, ~90-110 ms from US East, more from Asia. GPUs are coming soon: GPU plans "
   "can't be deployed yet; offer join_gpu_waitlist instead. Deploy from a Docker image or a git repo with a Dockerfile. "
   "Flow: list_plans -> (signup if no key) -> deploy_app -> get_status until running -> share url."),
@@ -43,7 +43,7 @@ def _r(method, path, key=None, **kw):
     return body
 @mcp.tool()
 def list_plans() -> dict:
-    """Aloof pricing (USD excl. tax): shared/performance CPU plans billed per second, volume $/GB-month,
+    """Aloof pricing (USD): shared/performance CPU plans billed per second, volume $/GB-month,
     egress $/GB, workspace tiers (Free $0, Hobby $5, Pro $20/workspace, each with that much usage included), regions
     (Nuremberg, Germany; backups in Helsinki) and provider availability. CPU from $1.99/mo (shared-1x-256mb), perf-1x-2gb $24/mo;
     volumes $0.22/GB-mo; egress $0.06/GB. GPUs: coming soon (see the `gpu` field; use join_gpu_waitlist).
