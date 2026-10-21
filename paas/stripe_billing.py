@@ -32,6 +32,9 @@ def payments_open(client=None, now=None):
     except Exception as e:
         log.warning("stripe account check failed: %s", e); _acct.update(t=now, open=True if _acct["open"] is None else _acct["open"])
     return _acct["open"]
+def payments_open_cached():
+    """For page rendering: the cached answer when fresh, else a live check (cached 10 min). Unconfigured Stripe = closed."""
+    return payments_open()
 def require_payments_open():
     if not payments_open(): raise RuntimeError(PAYMENTS_SOON)
 def tax_enabled(): return E("STRIPE_TAX", "0") == "1"

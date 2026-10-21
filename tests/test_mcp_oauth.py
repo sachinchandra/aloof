@@ -269,4 +269,4 @@ def test_raw_redirect_whitespace_rejected(srv):
                                     "code_challenge_method": "S256"}, follow_redirects=False)
     assert r.status_code == 400 and "location" not in r.headers
 def test_unverified_warning_is_strong(srv):
-    assert "full access to your Aloof account" in __import__("oauth").UNVERIFIED_BADGE and "Deny" in __import__("oauth").UNVERIFIED_BADGE
+    o = __import__("oauth"); assert "full access to your Aloof account" in o.PAGE and "Deny" in o.UNVERIFIED_BADGE and "may be fake" in o.UNVERIFIED_BADGE

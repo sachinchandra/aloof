@@ -20,6 +20,11 @@ from .plans import PLANS, PG_PLANS
 DIR = os.path.join(os.path.dirname(__file__), "templates")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+def _region_label(r):
+    try:
+        from .regions import CATALOG, canonical
+        return f"{CATALOG[canonical(r)]['city']} ({canonical(r)})"
+    except Exception: return r
 LIVE_REGIONS = {"nbg1": "nbg1", "eu-de": "nbg1", "eu-central": "nbg1"}
 REPO_HOSTS = {"github.com", "gitlab.com"}
 SCHEMA = {
@@ -289,7 +294,7 @@ def template_page(tid: str):
     from .plans import PLANS, PG_PLANS, RATES
     _t = get(tid); _pl = PLANS[_t['app'].get('plan', 'shared-1x-512mb')]['price_usd_month']; _vg = sum(v.get('size_gb', 1) for v in _t.get('volumes', []))
     cost_parts = f"app ${_pl:.2f}" + (f" + {_vg} GB disk ${_vg * RATES['volume_usd_gb_month']:.2f}" if _vg else "") + (f" + database ${PG_PLANS[_t['postgres'].get('plan', 'pg-dev')]['price_usd_month']:.2f}" if 'postgres' in _t else "")
-    inner = (f"<p class=thead>{tpl_logo(p['id'], p['name'], 'lg')}<a class='btn' href='{e(p['deploy_button'])}'>Deploy on Aloof</a></p><h2>What gets created</h2><ul><li>App from <code>{e(src)}</code> on port {p['port']}, plan <code>{e(p['default_plan'])}</code>, region {e(p['region'])}</li>"
+    inner = (f"<p class=thead>{tpl_logo(p['id'], p['name'], 'lg')}<a class='btn' href='{e(p['deploy_button'])}'>Deploy on Aloof</a></p><h2>What gets created</h2><ul><li>App from <code>{e(src)}</code> on port {p['port']}, plan <code>{e(p['default_plan'])}</code>, region {e(_region_label(p['region']))}</li>"
              f"{'<li>Managed Postgres (' + e(p['postgres']['plan']) + '), connection in <code>' + e(', '.join(p['postgres']['env'])) + '</code></li>' if p['postgres'] else ''}</ul>"
              f"<h3>Cost</h3><p>About <b>${p['est_monthly_usd']:.2f}/month</b> if it runs all month ({cost_parts}). Billed per second, and nothing while the app sleeps. <a href='/docs/templates'>How template costs work</a>.</p><h3>Environment</h3><ul>{envs}</ul><h3>Volumes</h3><ul>{vols}</ul>"
              f"<h3>CLI / API / MCP</h3><pre>aloof deploy --template {e(p['id'])} &lt;app-name&gt;\ncurl -X POST https://api.aloof.si/v1/templates/{e(p['id'])}/deploy -H 'Authorization: Bearer $ALOOF_API_KEY' -d '{{\"name\":\"my-{e(p['id'])}\"}}'\nMCP: deploy_template(template=\"{e(p['id'])}\", name=...)</pre>"

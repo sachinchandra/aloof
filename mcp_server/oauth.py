@@ -408,23 +408,46 @@ class PaasOAuthProvider(OAuthAuthorizationServerProvider):
 def api_key_for(token: str):
     if token.startswith("pk_"): return token
     d = S.get("access", token); return d and d["api_key"]
-PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize {client}</title></head>
-<body style="font-family:system-ui;max-width:480px;margin:60px auto;padding:0 16px">
-<h2>Authorize {client}</h2>{badge}
-<p><b>{client}</b> wants to deploy and manage apps on your account (scope: {scopes}).</p>
-<p>After you approve, you will be sent to: <code style="word-break:break-all">{target}</code></p>
+WWW = os.environ.get("PAAS_PUBLIC_WWW", "https://www.aloof.si").rstrip("/")
+PAGE_TTL_MIN = 10   # pending authorization requests live 600 s (see authorize())
+MARK = ('<svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#16120f"/>'
+        '<g fill="#ff7a1a"><rect x="5" y="7" width="15" height="4.6" rx="2.3"/><rect x="8" y="13.7" width="15" height="4.6" rx="2.3"/>'
+        '<rect x="11" y="20.4" width="15" height="4.6" rx="2.3"/></g></svg>')
+CSS = """:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0a0807;color:#f6f1ec;font:16px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+.w{max-width:480px;margin:0 auto;padding:40px 16px 56px}.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px;margin:0 0 22px;color:#f6f1ec;text-decoration:none}
+.card{background:#16120f;border:1px solid #2a221c;border-radius:16px;padding:28px}h1{font-size:24px;line-height:1.25;margin:0 0 14px}
+.badge{border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:14px}.ok{background:#0f2418;border:1px solid #1f5135;color:#bdf3d0}
+.warn{background:#2a1210;border:1px solid #7a2a20;color:#ffd7cf}.warn b.t{color:#ff8b73}.access{background:#1c1713;border:1px solid #382d24;border-radius:10px;padding:12px 14px;font-size:14px;color:#bcafa3;margin:0 0 16px}
+.access b{color:#f6f1ec}code{font:13px SFMono-Regular,Menlo,Consolas,monospace;background:#0c0a08;border:1px solid #2a221c;border-radius:6px;padding:2px 6px;word-break:break-all}
+label{display:block;font-size:14px;font-weight:600;color:#bcafa3;margin:16px 0 6px}input{width:100%;font-size:16px;padding:12px 14px;border-radius:10px;border:1px solid #382d24;background:#0c0a08;color:#f6f1ec}
+input:focus{outline:2px solid #ff7a1a;outline-offset:1px;border-color:#ff7a1a}.row{display:flex;gap:10px;margin-top:22px}
+.btn{flex:1;min-height:46px;font-size:16px;font-weight:700;border-radius:10px;cursor:pointer;border:1px solid #382d24;background:transparent;color:#f6f1ec}
+.pri{background:linear-gradient(135deg,#ff6a00,#ffb020);border:0;color:#140c06}.err{background:#2a1210;border:1px solid #7a2a20;color:#ffd7cf;border-radius:10px;padding:10px 12px;font-size:14px;margin:12px 0 0}
+details{margin-top:16px;font-size:14px;color:#bcafa3}summary{cursor:pointer;color:#ffb020;min-height:32px;display:flex;align-items:center}a{color:#ffb020}.muted{color:#998b7e;font-size:13px}
+.help{border-top:1px solid #2a221c;margin-top:22px;padding-top:16px;font-size:14px;color:#bcafa3}.help p{margin:0 0 8px}"""
+PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>Connect {client} to Aloof</title><style>{css}</style></head><body><main class="w">
+<a class="brand" href="{www}">{mark}<span>aloof</span></a><div class="card">
+<h1>Connect {client} to Aloof</h1>{badge}
+<div class="access"><b>Approving gives {client} full access to your Aloof account.</b> It can deploy and delete apps, change environment variables and secrets, manage volumes, databases and domains, and spend your credit. You can revoke it later by deleting its key under API keys. <a href="{www}/docs/mcp#revoke" target="_blank" rel="noopener">How</a></div>
+<p class="muted">After you approve, you'll be sent back to <code>{target}</code></p>
 {err}<form method="post"><input type="hidden" name="req" value="{req}">
-<label>Email<br><input name="email" size="44" autocomplete="email"></label><br>
-<label>Password<br><input name="password" type="password" size="44"></label><br><br>
-<label>or paste an API key<br><input name="api_key" size="44" placeholder="pk_..."></label><br><br>
-<button name="action" value="approve">Approve</button> <button name="action" value="deny">Deny</button></form></body></html>"""
-VERIFIED_BADGE = '<p style="color:#0a6b2d">&#10003; Verified app: redirects to a known MCP client domain.</p>'
-UNVERIFIED_BADGE = ('<div role="alert" style="border:2px solid #b42318;background:#fef3f2;padding:10px 12px;border-radius:6px"><b style="color:#b42318">&#9888; Unverified app: be careful</b><br>'
-    'Aloof has <b>not</b> verified this app. Its name above was chosen by whoever registered it and may be fake. '
-    'Approving sends a token with <b>full access to your Aloof account</b> (deploy, change env vars and secrets, delete apps and databases, spend your balance) to <b>{host}</b>.<br>'
-    '<b>Only approve if you started this connection yourself in the last few minutes and you recognise {host}.</b> If you followed a link someone sent you, click Deny.</div>')
+<label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" value="{email}">
+<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
+<details{key_open}><summary>Use an API key instead</summary><label for="api_key">API key</label><input id="api_key" name="api_key" placeholder="pk_..." autocomplete="off" spellcheck="false"></details>
+<div class="row"><button class="btn" name="action" value="deny">Deny</button><button class="btn pri" name="action" value="approve">Approve</button></div></form>
+<div class="help"><p><b>Signed up with an email link?</b> You don't have a password yet. Open <a href="{www}/login?next=/dashboard%23keys" target="_blank" rel="noopener">the dashboard in a new tab</a>, sign in with your email link, create a key under API keys, and paste it above. Or set a password under <a href="{www}/login?next=/dashboard%23account" target="_blank" rel="noopener">Account</a>.</p>
+<p class="muted">This page works for {ttl} minutes. If it expires, start the connection again from your assistant.</p></div>
+</div></main></body></html>"""
+VERIFIED_BADGE = '<div class="badge ok">&#10003; <b>Verified app.</b> It sends you back to a known MCP client\'s domain.</div>'
+UNVERIFIED_BADGE = ('<div role="alert" class="badge warn"><b class="t">&#9888; Unverified app. Be careful.</b><br>'
+    'Aloof has not checked this app. Its name was chosen by whoever registered it and may be fake. If you approve, the access token goes to <b>{host}</b>.<br>'
+    '<b>Only approve if you started this connection yourself in the last few minutes and you recognise {host}.</b> If you followed a link someone sent you, choose Deny.</div>')
+EXPIRED = None
 CONSENT_HEADERS = {"X-Frame-Options": "DENY", "Content-Security-Policy": "frame-ancestors 'none'",
                    "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+EXPIRED = PAGE.split('<h1>')[0].replace("Connect {client} to Aloof", "Request expired · Aloof").replace("{css}", CSS).replace("{mark}", MARK).replace("{www}", html.escape(WWW)) + \
+    '<h1>This request has expired</h1><p>Authorization pages work for %d minutes. Go back to your assistant and start the connection again.</p></div></main></body></html>' % PAGE_TTL_MIN
 def redirect_target(redirect_uri):
     """The exact origin the user will be sent to: scheme://host[:port] (native schemes show scheme://host)."""
     u = urlsplit(str(redirect_uri or "")); host = u.hostname or ""
@@ -433,22 +456,23 @@ def redirect_target(redirect_uri):
 async def login_page(request: Request):
     form = await request.form() if request.method == "POST" else {}
     rid = form.get("req") or request.query_params.get("req", ""); p = S.get("pending", rid)
-    if not p: return HTMLResponse("authorization request expired; start again from your MCP client", 400)
+    if not p: return HTMLResponse(EXPIRED, 400, headers=CONSENT_HEADERS)
     params = AuthorizationParams.model_validate(p["params"])
     target = redirect_target(params.redirect_uri); verified = is_verified_redirect(params.redirect_uri)
     badge = VERIFIED_BADGE if verified else UNVERIFIED_BADGE.format(host=html.escape(target))
     name = _clean_name(p.get("client_name")) or p["client_id"]
-    render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(name), badge=badge, target=html.escape(target), scopes=html.escape(" ".join(params.scopes or ["paas"])),
-        req=html.escape(rid), err=f'<p style="color:red">{html.escape(err)}</p>' if err else ""), headers=CONSENT_HEADERS)
+    render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(name), badge=badge, target=html.escape(target), css=CSS, mark=MARK, www=html.escape(WWW), ttl=PAGE_TTL_MIN,
+        email=html.escape((form.get("email") or "").strip()[:254]) if form else "", key_open=" open" if form and form.get("api_key") else "",
+        req=html.escape(rid), err=f'<p class="err" role="alert">{html.escape(err)}</p>' if err else ""), headers=CONSENT_HEADERS)
     if request.method == "GET": return render()
     if form.get("action") == "deny":
         S.rm("pending", rid); return RedirectResponse(construct_redirect_uri(str(params.redirect_uri), error="access_denied", state=params.state), 302)
     key = (form.get("api_key") or "").strip(); subject = "api-key"
     if not key and form.get("email") and form.get("password"):
         key = password_login(form["email"].strip(), form["password"]); subject = form["email"].strip().lower()
-        if not key: return render("invalid email or password")
-    if not key: return render("enter your email and password, or an API key")
-    if not check_api_key(key): return render("invalid API key")
+        if not key: return render("That email and password don't match. If you signed up with an email link, use an API key instead (see below).")
+    if not key: return render("Enter your email and password, or paste an API key.")
+    if not check_api_key(key): return render("That API key isn't valid. Check you copied all of it, or create a new one under API keys.")
     code = "mcp_ac_" + secrets.token_urlsafe(32)
     ac = AuthorizationCode(code=code, scopes=params.scopes or ["paas"], expires_at=time.time()+CODE_TTL, client_id=p["client_id"],
         code_challenge=params.code_challenge, redirect_uri=params.redirect_uri, redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,

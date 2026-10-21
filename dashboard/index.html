@@ -131,6 +131,7 @@ document.addEventListener('keydown',e=>{if(e.key=='Escape'&&document.body.classL
 const TITLE={apps:'Apps',volumes:'Volumes',pg:'Postgres',audit:'Audit log',billing:'Billing & usage',account:'Account',keys:'API keys'};
 document.querySelectorAll('a.nav[data-t]').forEach(a=>a.onclick=e=>{e.preventDefault();tab=a.dataset.t;document.querySelectorAll('a.nav[data-t]').forEach(x=>{x.classList.toggle('on',x==a);x.toggleAttribute('aria-current',x==a)});
  document.querySelectorAll('.content>section').forEach(s=>s.style.display=s.id=='t-'+tab?'':'none');$('ptitle').textContent=TITLE[tab];$('hdr_act').style.display=tab=='apps'?'':'none';if(document.body.classList.contains('navopen'))navOpen(false);refresh()});
+function goHash(){const t=(location.hash||'').slice(1),a=t&&document.querySelector('a.nav[data-t="'+t.replace(/[^a-z]/g,'')+'"]');if(a&&t!=tab)a.click()}addEventListener('hashchange',goHash);setTimeout(goHash,0);
 async function refresh(){if(tab=='apps')await apps();if(tab=='volumes')await vols();if(tab=='billing')await bill();if(tab=='pg')await pgs();if(tab=='audit')await auditlog();if(tab=='account')await account();if(tab=='keys')await keys()}
 async function apps(){const a=await api('GET','/v1/apps');APPS=a;regRO();
  $('stat_apps').textContent=a.length;$('stat_run').textContent=a.filter(x=>x.status=='running').length;$('stat_inst').textContent=a.reduce((n,x)=>n+x.instances.length,0);
