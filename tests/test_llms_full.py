@@ -16,3 +16,26 @@ def test_mcp_tools_reference_matches_server():
 def test_llms_txt_links():
     t = c.get("/llms.txt").text
     for s in ("/llms-full.txt", "/mcp-tools.md", "/api/openapi.json"): assert s in t
+def test_connected_apps_list_and_revoke():
+    import json, time
+    from paas import engine, crypto
+    from paas.db import kv_put, q
+    a = engine.create_account("conn-apps@real.dev"); key = a["api_key"]
+    other = engine.create_account("conn-other@real.dev")
+    kv_put("oauth:client", "cid-1", json.dumps({"client_id": "cid-1", "client_name": "Claude", "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"]}))
+    for kind, k, ak in (("access", "h1", key), ("refresh", "h2", key), ("access", "h3", other["api_key"])):
+        kv_put("oauth:" + kind, k, json.dumps({"client_id": "cid-1", "api_key": "enc:" + crypto.enc(ak), "expires_at": time.time() + 3600}), 3600)
+    h = {"Authorization": f"Bearer {key}"}
+    r = c.get("/v1/auth/connected-apps", headers=h).json()
+    assert len(r) == 1 and r[0]["name"] == "Claude" and r[0]["redirect_host"] == "claude.ai" and r[0]["access_tokens"] == 1 and r[0]["refresh_tokens"] == 1
+    assert c.delete("/v1/auth/connected-apps/cid-1", headers=h).json()["tokens_revoked"] == 2
+    assert c.get("/v1/auth/connected-apps", headers=h).json() == []
+    assert q("select count(*) n from kv where kind='oauth:access' and k='h3'", one=True)["n"] == 1   # other account untouched
+    assert c.delete("/v1/auth/connected-apps/cid-1", headers=h).status_code == 404
+def test_cli_login_exists():
+    import subprocess, sys, os
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "..", "cli", "aloof"), "login", "--help"], capture_output=True, text=True)
+    assert r.returncode == 0 and "--key" in r.stdout
+def test_docs_deploy_button_and_revoke():
+    assert "needs a signed-in browser session" in c.get("/docs/api").text
+    assert "logged-in session" in c.get("/llms.txt").text and "/v1/auth/connected-apps" in c.get("/docs/mcp").text

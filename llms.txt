@@ -57,7 +57,8 @@
 - GET /v1/apps/{name}/certs, GET /v1/apps/{name}/ips; WebSocket /v1/apps/{name}/proxy?port=N (aloof proxy); apps reach each other as <app>.internal
 - Previews: POST/GET /v1/apps/{name}/previews {"pr","ref"}, DELETE /v1/apps/{name}/previews/{pr}; cron: GET /v1/apps/{name}/cron, POST /v1/apps/{name}/cron/{job}/run
 - GitHub App: GET /v1/github/install -> url; GET /v1/github/repos; POST /v1/apps/{name}/github {"repo":"o/r","branch","previews"} (push-to-deploy, PR previews, check runs)
-- Templates: GET /v1/templates, GET /v1/templates/{id}, POST /v1/templates/{id}/deploy {"name","env"?,"plan"?} (one-call stacks)
+- Templates: GET /v1/templates, GET /v1/templates/{id}, POST /v1/templates/{id}/deploy {"name","env"?,"plan"?} (one-call stacks). The website deploy button /deploy?template=<id> needs a logged-in session (logged-out users get 303 to /login?next=...); agents should use the API call.
+- Connected OAuth/MCP apps: GET /v1/auth/connected-apps (client_id, name, redirect_host, token counts, expires_at); DELETE /v1/auth/connected-apps/{client_id} revokes that app's tokens (dashboard: Account > Connected apps). Deleting the bound API key also cuts access.
 - Diagnose: GET /v1/apps/{name}/diagnose (status, recent errors and a likely cause; self-heal can roll back a clearly worse release)
 - Regions: GET /v1/regions (live + coming_soon regions, per-region pricing). Only nbg1 (Nuremberg) is live; POST /v1/apps|/v1/volumes|/v1/pg accept "region" and reject regions that aren't live. The dashboard picker shows coming-soon regions disabled. Free is EU-only; an app's region can't change.
 - Low-balance alerts: GET /v1/billing/runway (hours of credit left at the current burn); PUT /v1/billing/alerts {"enabled":bool,"threshold_usd"?}. Emails at ~3 days left, <24h and on suspension (apps are scaled to zero at $0 and resume on top-up)

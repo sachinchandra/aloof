@@ -79,6 +79,8 @@
  <div class=set-b><div class=set-kv><span>Default key</span><b><code id=key_pref>–</code></b></div><div class=set-kv><span>Named keys</span><b id=key_n>–</b></div>
  <p class=muted style="font-size:13px;margin:10px 0 0">CLI config: <code>~/.aloof.json</code> = <code>{"api": "<span class=origin></span>", "key": "pk_..."}</code> · MCP: <a href="/docs/mcp">connect an assistant</a></p><div id=newkey></div></div>
  <div class=set-foot><span class=sp></span><button class="btn ghost sm" onclick="document.querySelector('[data-t=keys]').click()">Manage API keys</button></div></div>
+<div class=set-card id=s-apps><div class=set-h><h3>Connected apps</h3><p>AI assistants and MCP clients you approved (OAuth).</p></div>
+ <div class=set-b><table class=tbl id=oapps></table></div></div>
 <div class=set-card id=s-notify><div class=set-h><h3>Notifications</h3><p>Emails about your prepaid balance.</p></div>
  <div class=set-b><label class=switch><input type=checkbox id=al_on onchange="dirty('al')"><span class=sw aria-hidden=true></span><span><b>Low-balance emails</b><br><span class=muted style="font-size:13px">When credit has about 3 days left, under 24 hours left, and if apps are suspended at $0. Recommended.</span></span></label>
  <label class=set-f>Extra alert when the balance falls to <span class=muted>(optional, USD)</span><input id=al_th type=number min=1 max=5000 step=1 placeholder="e.g. 10" style="max-width:160px" oninput="dirty('al')"></label></div>
@@ -296,7 +298,11 @@ async function saveAlerts(){const v=$('al_th').value.trim();try{runwayUI(await a
 function dirty(k){$(k+'_btn').disabled=false;const st=$(k=='al'?'al_msg':k+'_state');if(st)st.textContent='Unsaved changes'}
 function saved(k,msg){$(k+'_btn').disabled=true;const st=$(k=='al'?'al_msg':k+'_state');if(st){st.textContent='Saved';setTimeout(()=>{if(st.textContent=='Saved')st.textContent=''},2500)}toast(msg)}
 const initials=(n,e)=>((n||'').trim().split(/\s+/).filter(Boolean).map(w=>w[0]).slice(0,2).join('')||(e||'?')[0]).toUpperCase();
-async function account(){const [m,ks,ss]=await Promise.all([api('GET','/v1/auth/me'),api('GET','/v1/auth/keys').catch(()=>[]),api('GET','/v1/auth/sessions').catch(()=>[])]);
+async function oapps(){const t=$('oapps');if(!t)return;let r=[];try{r=await api('GET','/v1/auth/connected-apps')}catch(e){t.innerHTML='<tr><td class=muted>Could not load connected apps.</td></tr>';return}
+ t.innerHTML=r.length?'<tr><th>App</th><th>Redirects to</th><th>Access until</th><th></th></tr>'+r.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td><code>${esc(x.redirect_host||'')}</code></td><td>${day(x.expires_at)}</td><td style="text-align:right"><button class="btn danger sm" data-cid="${esc(x.client_id)}" data-n="${esc(x.name)}" onclick="oappRevoke(this.dataset.cid,this.dataset.n)">Disconnect</button></td></tr>`).join(''):'<tr><td class=muted>No connected apps. Connect one from <a href="/docs/mcp">the MCP docs</a>.</td></tr>'}
+async function oappRevoke(cid,name){if(!await ask('',{title:'Disconnect '+name+'?',ok:'Disconnect',danger:1,html:'<p>Its tokens are deleted now. It has to ask you to approve it again to reconnect.</p>'}))return;
+ await api('DELETE','/v1/auth/connected-apps/'+encodeURIComponent(cid));toast('Disconnected');oapps()}
+async function account(){oapps();const [m,ks,ss]=await Promise.all([api('GET','/v1/auth/me'),api('GET','/v1/auth/keys').catch(()=>[]),api('GET','/v1/auth/sessions').catch(()=>[])]);
  $('pf_av').textContent=initials(m.name,m.email);$('pf_email').textContent=m.email;$('pf_name').value=m.name||'';$('pf_btn').disabled=true;$('pf_state').textContent='';
  $('pf_meta').innerHTML=`${m.email_verified?'<span class=ok>Email verified</span>':'Email not verified'} · ${esc((m.tier||'free').replace(/^./,c=>c.toUpperCase()))} plan${m.created?' · member since '+new Date(m.created*1000).toLocaleDateString(undefined,{year:'numeric',month:'short'}):''}`;
  $('sec_methods').textContent=(m.has_password?'Password and email link':'Email link only (set a password below to add one)');

@@ -554,6 +554,16 @@ def auth_key_create(b: KeyReq, request: Request, a=Depends(acct)):
     if label == "mcp-oauth": raise HTTPException(400, "that name is reserved")
     k = engine.create_named_key(a["id"], label, replace=False); _audit(a["id"], None, "key.create", label, _ip(request))
     return {"api_key": k, "prefix": k[:10], "label": label, "detail": "shown once"}
+@app.get("/v1/auth/connected-apps")
+def connected_apps(a=Depends(acct)):
+    """OAuth/MCP clients (Claude, ChatGPT, Cursor, ...) that currently hold a token for this account."""
+    from . import oauth_apps; return oauth_apps.list_apps(a["id"])
+@app.delete("/v1/auth/connected-apps/{client_id:path}")
+def connected_app_revoke(client_id: str, request: Request, a=Depends(acct)):
+    """Disconnect an app: deletes its access and refresh tokens for this account (it must sign in again to reconnect)."""
+    from . import oauth_apps; n = oauth_apps.revoke(a["id"], client_id)
+    if not n: raise HTTPException(404, "no connected app with that client_id")
+    _audit(a["id"], None, "oauth.revoke", client_id[:200], _ip(request)); return {"ok": True, "tokens_revoked": n}
 @app.delete("/v1/auth/keys/{kid}")
 def auth_key_revoke(kid: str, request: Request, a=Depends(acct)):
     if kid == "primary": raise HTTPException(400, "the default key can be rotated, not revoked")

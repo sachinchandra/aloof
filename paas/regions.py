@@ -36,16 +36,20 @@ def canonical(r):
 def name(r):
     c = CATALOG[canonical(r)]; return f"{c['city']}, {c['country']}"
 def local_capacity(): return os.environ.get("PAAS_LOCAL_CAPACITY", "1") == "1"
-def healthy_nodes(now=None):
+def _self_addrs():
+    """Addresses of the control-plane host itself (edge IPs + WireGuard hub), so it isn't counted twice if also registered as a node."""
+    return {x.strip() for x in (os.environ.get("PAAS_EDGE_IPS", "") + "," + os.environ.get("PAAS_WG_HUB_IP", "10.88.0.1")).split(",") if x.strip()}
+def healthy_nodes(now=None, exclude_self=False):
     """{region: count of healthy nodes}. Healthy = status ready and seen within NODE_STALE seconds."""
-    now = now or time.time(); out = {}
-    for n in q("select region, last_seen from nodes where status='ready'"):
+    now = now or time.time(); out = {}; me = _self_addrs() if exclude_self else set()
+    for n in q("select region, last_seen, public_ip, wg_ip from nodes where status='ready'"):
+        if me and (n.get("public_ip") in me or n.get("wg_ip") in me): continue
         if n["last_seen"] and now - n["last_seen"] <= NODE_STALE:
             r = ALIASES.get(n["region"] or DEFAULT, n["region"] or DEFAULT); out[r] = out.get(r, 0) + 1
     return out
 def status(now=None):
     """Every catalog region with its derived status. live = has capacity now; coming_soon otherwise."""
-    h = healthy_nodes(now); hm = home(); out = []
+    h = healthy_nodes(now, exclude_self=local_capacity()); hm = home(); out = []
     for rid, c in CATALOG.items():
         nodes = h.get(rid, 0); local = rid == hm and local_capacity()
         live = bool(nodes or local)

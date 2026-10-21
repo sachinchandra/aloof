@@ -230,19 +230,19 @@ def _rate_key(ip):
         m = getattr(a, "ipv4_mapped", None)
         return str(m) if m else str(ipaddress.ip_network(f"{a}/64", strict=False)) if a.version == 6 else str(a)
     except ValueError: return ip
+_fallback_warned = [False]
 def reg_rate_ok(ip, now=None):
-    """Per-IP (/64 for IPv6) /register limit, counted in the shared DB (kv kind oauth:reghit) so it holds across restarts and
-    workers. Falls back to the in-process counter if the DB is unavailable."""
+    """Per-IP (/64 for IPv6) /register limit: one counter row per (address, hour window) in the shared DB, bumped with a single
+    atomic upsert (kv kind oauth:regctr), so concurrent workers can't exceed it. Falls back to an in-process counter if the DB is down."""
     now = now or time.time(); ip = _rate_key(ip)
     try:
-        pre = _crypto.sha256(ip)[:32] + ":"
-        n = _db.q("select count(*) c from kv where kind='oauth:reghit' and k like ? and exp > ?", (pre + "%", now), one=True)["c"]
-        if n >= REG_PER_IP: return False
-        _db.kv_put("oauth:reghit", pre + secrets.token_hex(8), "1", REG_WINDOW)
-        if int(now) % 50 == 0: _db.q("delete from kv where kind='oauth:reghit' and exp < ?", (now,))
-        return True
+        k = f"{_crypto.sha256(ip)[:32]}:{int(now // REG_WINDOW)}"
+        r = _db.q("insert into kv(kind,k,v,exp) values('oauth:regctr',?,'1',?) on conflict(kind,k) do update set v=cast(cast(kv.v as integer)+1 as text) returning v",
+                  (k, (int(now // REG_WINDOW) + 1) * REG_WINDOW + 60), one=True)
+        _fallback_warned[0] = False
+        return int(r["v"]) <= REG_PER_IP
     except Exception as e:
-        log.warning("register rate limit: DB unavailable, using in-process counter: %s", e)
+        if not _fallback_warned[0]: log.warning("register rate limit: DB unavailable, using in-process counter: %s", e); _fallback_warned[0] = True
     with _reg_lock:
         hits = [t for t in _reg_hits.get(ip, []) if t > now - REG_WINDOW]
         if len(hits) >= REG_PER_IP: _reg_hits[ip] = hits; return False
@@ -251,7 +251,7 @@ def reg_rate_ok(ip, now=None):
         return True
 def reset_reg_hits():
     _reg_hits.clear()
-    try: _db.q("delete from kv where kind='oauth:reghit'")
+    try: _db.q("delete from kv where kind in ('oauth:reghit','oauth:regctr')")
     except Exception: pass
 def client_count(): return _db.q("select count(*) c from kv where kind='oauth:client'", one=True)["c"]
 def _rows(kind):
@@ -274,6 +274,8 @@ def sweep_unused_clients(now=None, force=False):
     now = now or time.time()
     if not force and now - _sweep_at[0] < SWEEP_EVERY: return 0
     _sweep_at[0] = now
+    try: _db.q("delete from kv where kind in ('oauth:regctr','oauth:reghit') and exp < ?", (now,))   # expired rate-limit windows
+    except Exception: pass
     live = {_owner(v) for kind in ("access", "refresh") for _, v in _rows(kind)}
     gone = 0
     for cid, d in list(_rows("client")):
@@ -332,6 +334,16 @@ def patch_registration():
         if bad: return JSONResponse({"error": "invalid_redirect_uri", "error_description": bad}, status_code=400)
         return await orig(self, request)
     handle._aloof = True; RegistrationHandler.handle = handle
+def _token_client_id(request, form):
+    """client_id the /token caller authenticated as (HTTP Basic or the form). The SDK has already authenticated it when it
+    returns invalid_grant (auth failures are 401 invalid_client)."""
+    import base64 as _b64
+    from urllib.parse import unquote
+    h = request.headers.get("authorization", "")
+    if h.lower().startswith("basic "):
+        try: return unquote(_b64.b64decode(h[6:]).decode().split(":", 1)[0])
+        except Exception: return None
+    return str(form.get("client_id") or "") or None
 def patch_token():
     """RFC 6749 4.1.2: a failed authorization_code exchange (wrong PKCE code_verifier, redirect_uri or client mismatch) burns the
     code (invalid_grant after client authentication), so a leaked code can't be retried with guessed verifiers. Client-auth
@@ -345,7 +357,10 @@ def patch_token():
             if resp.status_code == 400 and b'"invalid_grant"' in bytes(resp.body or b""):
                 f = await request.form()
                 if f.get("grant_type") == "authorization_code" and f.get("code"):
-                    import anyio; await anyio.to_thread.run_sync(S.rm, "code", str(f.get("code")))
+                    import anyio; code = str(f.get("code")); who = _token_client_id(request, f)
+                    d = await anyio.to_thread.run_sync(S.get, "code", code)
+                    # Only the client the code was issued to can burn it; another client presenting it just gets invalid_grant.
+                    if d and who and (d.get("code") or {}).get("client_id") == who: await anyio.to_thread.run_sync(S.rm, "code", code)
         except Exception as e: log.warning("token error cleanup failed: %s", e)
         return resp
     handle._aloof = True; TokenHandler.handle = handle

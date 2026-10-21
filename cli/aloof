@@ -180,7 +180,7 @@ HELP = {
     "ips": "show an app's IP addresses", "registry": "private container registry credentials", "git": "private git credentials and deploy keys",
     "github": "GitHub App: install, link repos, auto-deploy", "previews": "PR preview environments", "cron": "list and run cron jobs",
     "exec": "run a command in an app instance", "ssh": "open a shell in an app instance", "proxy": "forward a local port to an app",
-    "drains": "log drains", "history": "deploy history", "regions": "list regions and which are live", "login": "log in and save an API key",
+    "drains": "log drains", "history": "deploy history", "regions": "list regions and which are live", "login": "save an API key (create one in the console under API keys) after checking it works",
 }
 class _Sub(argparse._SubParsersAction):
     def add_parser(self, name, **kw):
@@ -191,6 +191,7 @@ p.register("action", "parsers", _Sub)
 p.add_argument("--version", action="version", version=f"aloof {VERSION}")
 s = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 a = s.add_parser("signup"); a.add_argument("email")
+a = s.add_parser("login"); a.add_argument("--key", help="API key (pk_...); omit to paste it at a hidden prompt"); a.add_argument("--key-stdin", action="store_true", help="read the key from stdin")
 s.add_parser("plans"); s.add_parser("apps"); s.add_parser("usage")
 a = s.add_parser("deploy", help="deploy the current directory (aloof.toml + Dockerfile/auto-detect), an image, or a git repo")
 a.add_argument("name", nargs="?"); g = a.add_mutually_exclusive_group()
@@ -275,6 +276,14 @@ if o.cmd == "signup":
     r = call("POST","/v1/signup",{"email":o.email}); fd = os.open(CFG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as f: json.dump({"api":API,"key":r["api_key"]}, f)
     print("saved key to", CFG); pj({k: v for k, v in r.items() if k != "api_key"} | {"api_key": r["api_key"][:10] + "... (saved)"})
+elif o.cmd == "login":
+    import getpass
+    k = (sys.stdin.readline() if o.key_stdin else (o.key or getpass.getpass("API key (pk_..., create one in the console under API keys): "))).strip()
+    if not k.startswith("pk_"): sys.exit("that doesn't look like an Aloof API key (pk_...)")
+    KEY = k; me = call("GET", "/v1/auth/me")
+    fd = os.open(CFG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as f: json.dump({"api": API, "key": k}, f)
+    print(f"logged in as {me.get('email') or me.get('id')}; key saved to {CFG}")
 elif o.cmd == "plans":
     for pl in call("GET","/v1/plans")["plans"]: print(f"{pl['id']:<11} {pl['kind']} {pl['vcpu']:>5} vCPU {pl['memory_mb']:>7}MB {pl['gpu'] or '':<18} ${pl['price_usd_hr']:.4f}/hr  via {pl['provider']}")
 elif o.cmd == "apps":

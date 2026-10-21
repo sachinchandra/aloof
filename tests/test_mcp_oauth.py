@@ -270,3 +270,30 @@ def test_raw_redirect_whitespace_rejected(srv):
     assert r.status_code == 400 and "location" not in r.headers
 def test_unverified_warning_is_strong(srv):
     o = __import__("oauth"); assert "full access to your Aloof account" in o.PAGE and "Deny" in o.UNVERIFIED_BADGE and "may be fake" in o.UNVERIFIED_BADGE
+
+
+def test_other_client_cannot_burn_code(srv):
+    """F1: client B presenting A's code gets invalid_grant but the code survives for A."""
+    c, oauth, _ = srv
+    va, cha = pkce()
+    a = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "A", "token_endpoint_auth_method": "none"}).json()["client_id"]
+    b = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "B", "token_endpoint_auth_method": "none"}).json()["client_id"]
+    _, code = authorize(c, a, cha)
+    r = c.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": b, "code_verifier": va})
+    assert r.status_code == 400 and oauth.S.get("code", code) is not None
+    r = c.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": a, "code_verifier": va})
+    assert r.status_code == 200 and r.json()["access_token"]
+def test_register_counter_is_atomic_upsert(srv):
+    c, oauth, _ = srv
+    import threading
+    ok = []; ts = [threading.Thread(target=lambda: ok.append(oauth.reg_rate_ok("7.7.7.7"))) for _ in range(25)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert ok.count(True) == oauth.REG_PER_IP
+def test_fallback_warns_once(srv, monkeypatch, caplog):
+    c, oauth, _ = srv
+    def boom(*a, **k): raise RuntimeError("db down")
+    monkeypatch.setattr(oauth._db, "q", boom); oauth._fallback_warned[0] = False
+    import logging
+    with caplog.at_level(logging.WARNING):
+        for i in range(3): oauth.reg_rate_ok(f"8.8.8.{i}")
+    assert sum("DB unavailable" in r.message for r in caplog.records) == 1

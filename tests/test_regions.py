@@ -93,3 +93,12 @@ def test_dashboard_region_picker_markup():
     import os
     h = open(os.path.join(os.path.dirname(__file__), "..", "dashboard", "index.html")).read()
     for s in ("id=d_region", "/v1/regions", "Coming soon", "region:rg", "id=v_region", "id=pg_region", "EU regions only", "d_err"): assert s in h, s
+def test_host_registered_as_node_not_double_counted(monkeypatch):
+    from paas.db import q
+    monkeypatch.setenv("PAAS_EDGE_IPS", "203.0.113.9"); monkeypatch.setenv("PAAS_LOCAL_CAPACITY", "1")
+    q("delete from nodes where id in ('selfnode','othernode')")
+    q("insert into nodes(id,status,public_ip,wg_ip,region,last_seen) values('selfnode','ready','203.0.113.9','10.88.0.1','nbg1',?)", (time.time(),))
+    base = next(r for r in RG.status() if r["id"] == "nbg1")["healthy_nodes"]
+    q("insert into nodes(id,status,public_ip,wg_ip,region,last_seen) values('othernode','ready','198.51.100.7','10.88.0.5','nbg1',?)", (time.time(),))
+    assert next(r for r in RG.status() if r["id"] == "nbg1")["healthy_nodes"] == base + 1
+    q("delete from nodes where id in ('selfnode','othernode')")
