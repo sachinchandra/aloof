@@ -295,5 +295,6 @@ def test_fallback_warns_once(srv, monkeypatch, caplog):
     monkeypatch.setattr(oauth._db, "q", boom); oauth._fallback_warned[0] = False
     import logging
     with caplog.at_level(logging.WARNING):
-        for i in range(3): oauth.reg_rate_ok(f"8.8.8.{i}")
+        res = [oauth.reg_rate_ok(f"8.8.8.{i}") for i in range(3)]
+    assert res == [False, False, False]   # fail closed -> 429
     assert sum("DB unavailable" in r.message for r in caplog.records) == 1

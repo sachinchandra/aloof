@@ -25,12 +25,16 @@ def test_connected_apps_list_and_revoke():
     kv_put("oauth:client", "cid-1", json.dumps({"client_id": "cid-1", "client_name": "Claude", "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"]}))
     for kind, k, ak in (("access", "h1", key), ("refresh", "h2", key), ("access", "h3", other["api_key"])):
         kv_put("oauth:" + kind, k, json.dumps({"client_id": "cid-1", "api_key": "enc:" + crypto.enc(ak), "expires_at": time.time() + 3600}), 3600)
+    for k, ak, cid in (("c1", key, "cid-1"), ("c2", other["api_key"], "cid-1"), ("c3", key, "cid-1x")):
+        kv_put("oauth:code", k, json.dumps({"code": {"client_id": cid}, "api_key": "enc:" + crypto.enc(ak)}), 300)
     h = {"Authorization": f"Bearer {key}"}
     r = c.get("/v1/auth/connected-apps", headers=h).json()
     assert len(r) == 1 and r[0]["name"] == "Claude" and r[0]["redirect_host"] == "claude.ai" and r[0]["access_tokens"] == 1 and r[0]["refresh_tokens"] == 1
     assert c.delete("/v1/auth/connected-apps/cid-1", headers=h).json()["tokens_revoked"] == 2
     assert c.get("/v1/auth/connected-apps", headers=h).json() == []
     assert q("select count(*) n from kv where kind='oauth:access' and k='h3'", one=True)["n"] == 1   # other account untouched
+    codes = {r["k"] for r in q("select k from kv where kind='oauth:code'")}
+    assert "c1" not in codes and {"c2", "c3"} <= codes   # this account's unused code burned; other account / other client kept
     assert c.delete("/v1/auth/connected-apps/cid-1", headers=h).status_code == 404
 def test_cli_login_exists():
     import subprocess, sys, os

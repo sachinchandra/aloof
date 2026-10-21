@@ -233,7 +233,7 @@ def _rate_key(ip):
 _fallback_warned = [False]
 def reg_rate_ok(ip, now=None):
     """Per-IP (/64 for IPv6) /register limit: one counter row per (address, hour window) in the shared DB, bumped with a single
-    atomic upsert (kv kind oauth:regctr), so concurrent workers can't exceed it. Falls back to an in-process counter if the DB is down."""
+    atomic upsert (kv kind oauth:regctr), so concurrent workers can't exceed it. Fails closed (429) if the DB is down."""
     now = now or time.time(); ip = _rate_key(ip)
     try:
         k = f"{_crypto.sha256(ip)[:32]}:{int(now // REG_WINDOW)}"
@@ -242,13 +242,9 @@ def reg_rate_ok(ip, now=None):
         _fallback_warned[0] = False
         return int(r["v"]) <= REG_PER_IP
     except Exception as e:
-        if not _fallback_warned[0]: log.warning("register rate limit: DB unavailable, using in-process counter: %s", e); _fallback_warned[0] = True
-    with _reg_lock:
-        hits = [t for t in _reg_hits.get(ip, []) if t > now - REG_WINDOW]
-        if len(hits) >= REG_PER_IP: _reg_hits[ip] = hits; return False
-        hits.append(now); _reg_hits[ip] = hits
-        if len(_reg_hits) > 50000: _reg_hits.clear()
-        return True
+        # Fail closed: registration isn't critical, and a per-process fallback would let each worker allow its own quota.
+        if not _fallback_warned[0]: log.warning("register rate limit: DB unavailable, refusing registrations: %s", e); _fallback_warned[0] = True
+        return False
 def reset_reg_hits():
     _reg_hits.clear()
     try: _db.q("delete from kv where kind in ('oauth:reghit','oauth:regctr')")

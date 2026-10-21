@@ -1,6 +1,8 @@
 """Connected OAuth/MCP apps for an account: list them and revoke one (deletes its access + refresh tokens, codes and pending
 requests). Reads the MCP server's token store (kv kinds oauth:*) directly; each token is bound to an account through the
-encrypted API key it carries, so an account only ever sees and revokes its own connections."""
+encrypted API key it carries, so an account only ever sees and revokes its own connections. Revoke also deletes that
+account's unexchanged auth codes for the client. Pending (not yet approved) requests carry no account, so there is nothing
+of this account's to delete there: they can only become a code after a fresh sign-in."""
 import json, time
 from .db import q, kv_del
 from . import crypto
@@ -13,13 +15,20 @@ def _mine(v, hs):
         try: k = crypto.dec(k[4:])
         except Exception: return False
     return bool(k) and crypto.sha256(k) in hs
-def _tokens(account_id):
+def _owner(v): return v.get("client_id") or (v.get("code") or {}).get("client_id")
+def _tokens(account_id, client_id=None, kinds=("access", "refresh")):
+    """Rows of this account (optionally one client). With client_id, SQL pre-filters on the JSON text (json.dumps form) so only
+    that client's rows are decrypted; the decoded client_id is still checked exactly."""
     hs, now = _key_hashes(account_id), time.time()
-    for kind in ("access", "refresh"):
-        for r in q("select k, v, exp from kv where kind=?", ("oauth:" + kind,)):
+    like = "%" + json.dumps(client_id)[1:-1].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" if client_id else None
+    for kind in kinds:
+        sql, args = "select k, v, exp from kv where kind=?", ["oauth:" + kind]
+        if like: sql += " and v like ? escape '\\'"; args.append(like)
+        for r in q(sql, tuple(args)):
             if r["exp"] and r["exp"] < now: continue
             try: v = json.loads(r["v"])
             except ValueError: continue
+            if client_id is not None and _owner(v) != client_id: continue
             if _mine(v, hs): yield kind, r["k"], v
 def _client(cid):
     raw = q("select v from kv where kind='oauth:client' and k=?", (cid,), one=True)
@@ -39,6 +48,6 @@ def list_apps(account_id):
     return sorted(out, key=lambda x: -x["expires_at"])
 def revoke(account_id, client_id):
     n = 0
-    for kind, k, v in list(_tokens(account_id)):
-        if v.get("client_id") == client_id: kv_del("oauth:" + kind, k); n += 1
+    for kind, k, v in list(_tokens(account_id, client_id, ("access", "refresh", "code"))):
+        kv_del("oauth:" + kind, k); n += kind != "code"
     return n
