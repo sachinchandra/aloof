@@ -42,3 +42,6 @@ def test_lowbal_mail_tuple():
 def test_email_logo_served():
     from fastapi.testclient import TestClient; from paas.api import app
     r = TestClient(app).get("/email-logo.png"); assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+def test_welcome_skipped_for_reserved_test_domains(monkeypatch):
+    sent = []; monkeypatch.setattr(auth, "send_mail", lambda *a, **k: sent.append(a))
+    auth.register("conv-walk@example.com", "a-long-password-1"); assert sent == []

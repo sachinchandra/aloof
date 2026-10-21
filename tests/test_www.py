@@ -123,7 +123,7 @@ def test_client_events_no_server_duplicates():
     r = os.path.join(os.path.dirname(__file__), "..")
     js = "".join(open(os.path.join(r, f)).read() for f in ("paas/static/analytics.js", "paas/site.py", "dashboard/index.html"))
     for e in ("signup_completed", "first_deploy_succeeded", "deploy_succeeded", "mcp_connected", "plan_upgraded", "gpu_waitlist_joined"): assert f"'{e}'" not in js, e
-    assert "aloofIdentify(String(me.id))" in js and "auth/magic',{{method:'POST'" in js and js.count("attribution:window.aloofAttribution") == 2
+    assert "aloofIdentify(String(me.id))" in js and "post('/v1/auth/magic'" in js and js.count("attribution:window.aloofAttribution") == 2
 def test_hero_and_footer_copy():
     h = c.get("/").text
     assert "The self-driving cloud" in h and "Infrastructure for the age of" in h and "They run in the EU" not in h
@@ -170,3 +170,11 @@ def test_no_prices_note_anywhere():
     for u in ("/", "/pricing", "/about", "/docs/billing", "/terms"):
         assert "Prices in USD, excluding tax" not in c.get(u).text
     assert "exclude tax" in c.get("/docs/billing").text and "exclude" in c.get("/terms").text
+
+def test_conversion_path_ctas_and_signup_js():
+    from fastapi.testclient import TestClient; from paas.api import app; c = TestClient(app)
+    h = c.get("/").text
+    assert "data-cta=login data-cta-loc=nav" in h and "data-cta-loc=footer_links" in h and "data-cta=pricing_free" in h
+    l = c.get("/login").text
+    assert "hashchange" in l and "errText" in l and "Could not reach Aloof" in l and "Enter your email address first" in l and "lb.disabled=true" in l
+    js = c.get("/static/analytics.js").text; assert "sessionStorage.setItem('aloof_anon'" in js

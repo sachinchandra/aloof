@@ -44,6 +44,7 @@ def register(email, password):
     if len(password or "") < 10: raise ValueError("password must be at least 10 characters")
     if q("select 1 from accounts where email=?", (email,), one=True): raise PermissionError("account exists; log in or use a magic link")
     a = engine.create_account(email, hash_password(password))
+    if engine.is_test_email(email): return a   # reserved test domains (example.com, .test, ...) never get mail
     try:
         from . import emailkit; subj, txt, htm = emailkit.welcome(a["api_key"], f"{E('PAAS_PUBLIC_API_URL','http://localhost:8000')}/dashboard")
         send_mail(email, subj, txt, html=htm)

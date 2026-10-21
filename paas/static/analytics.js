@@ -1,8 +1,8 @@
 /* Aloof analytics: PostHog US, cookieless. Loaded only when the server has a PostHog key (window.ALOOF_PH).
-   No cookies; no persistent id. The anonymous id lives in memory for the page; first-touch UTM/referrer
+   No cookies; no persistent id. The anonymous id lives in sessionStorage for this tab only (cleared when the tab closes); first-touch UTM/referrer
    is kept in sessionStorage so the signup request can carry it. After login we identify by account id. */
 (function(){var C=window.ALOOF_PH;if(!C||!C.key)return;var H=(C.host||'https://us.i.posthog.com').replace(/\/$/,'');
-var anon='anon-'+Math.random().toString(36).slice(2)+Date.now().toString(36),uid=null;
+var anon;try{anon=sessionStorage.getItem('aloof_anon')}catch(e){}if(!anon){anon='anon-'+Math.random().toString(36).slice(2)+Date.now().toString(36);try{sessionStorage.setItem('aloof_anon',anon)}catch(e){}}var uid=null;
 function send(ev,p){var b={api_key:C.key,event:ev,distinct_id:uid||anon,properties:Object.assign({$current_url:location.href,$pathname:location.pathname,$host:location.host,$referrer:document.referrer||'$direct',$process_person_profile:!!uid,$lib:'aloof-web'},ft(),p||{}),timestamp:new Date().toISOString()};
  try{fetch(H+'/i/v0/e/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b),keepalive:true,credentials:'omit'})}catch(e){}}
 var K=['utm_source','utm_medium','utm_campaign','utm_term','utm_content'];

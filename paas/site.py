@@ -44,14 +44,14 @@ def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a></nav>
 <span class=sp></span><button class=icon-btn onclick="toggleTheme()" aria-label="Toggle dark/light theme">{svg("sun")}</button>
-<a href="/login" class=hide-sm>Log in</a><a class="btn pri sm" href="/login#register" data-cta=deploy_free data-cta-loc=nav>Start free</a>
+<a href="/login" class=hide-sm data-cta=login data-cta-loc=nav>Log in</a><a class="btn pri sm" href="/login#register" data-cta=deploy_free data-cta-loc=nav>Start free</a>
 <button class="icon-btn menu-btn" aria-label="Menu" onclick="document.getElementById('nl').classList.toggle('open')">{svg("menu")}</button></div></header>"""
 def footer(brand):
     return f"""<footer class=f><div class=wrap><div class=cols><div><a class=logo href="/"><i></i>{brand}</a><p class=muted style="max-width:300px;margin-top:12px">The cloud for apps your AI ships.</p></div>
 <div><h5>Product</h5><a href="/#features">Features</a><a href="/pricing">Pricing</a><a href="/regions">Regions</a><a href="/examples">Example architectures</a><a href="/pricing#gpus">GPUs (soon)</a></div>
 <div><h5>Developers</h5><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/docs/cli">CLI</a><a href="/api/docs">API reference</a><a href="/docs/mcp">MCP</a><a href="/llms.txt">llms.txt</a><a href="/rss.xml">RSS</a></div>
 <div><h5>Company</h5><a href="/about">About</a><a href="/security">Security</a><a href="/status">Status</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
-<div><h5>Account</h5><a href="/login">Log in</a><a href="/login#register">Sign up</a><a href="/dashboard">Dashboard</a></div></div>
+<div><h5>Account</h5><a href="/login" data-cta=login data-cta-loc=footer>Log in</a><a href="/login#register" data-cta=deploy_free data-cta-loc=footer_links>Sign up</a><a href="/dashboard">Dashboard</a></div></div>
 <div class=base><span>© 2026 {brand}</span></div></div></footer>"""
 def mcp_tool_names():
     """Tool names registered with @mcp.tool() in mcp_server/server.py, in order. Parsed (not imported) so the web process
@@ -71,7 +71,7 @@ def posthog_host(): return (os.environ.get("POSTHOG_HOST") or POSTHOG_DEFAULT_HO
 def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
-    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=4" defer></script>' if k else ""
+    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=5" defer></script>' if k else ""
 def page(title, body, brand="Aloof", desc=None):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
     return _contact(f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>""")
@@ -193,7 +193,7 @@ def landing(brand, base, api, mcp):
         ("scale", "Scales to zero", "Busy, it scales up. Idle, you pay nothing.")))
     from .templating import tpl_logo
     tpl = "".join(f"<a class=tpl href='/templates/{t}' aria-label='{TPL_NAME.get(t, t)} template'>{tpl_logo(t, TPL_NAME.get(t, t), 'sm')}{TPL_NAME.get(t, t)}</a>" for t in d["templates"])
-    price = lambda k, name, sub: f"<a class='card pc{' hl' if k == 'hobby' else ''}' href='/pricing'><span>{name}</span><b>${T[k]['fee_usd']:g}<small>/mo</small></b><em>{sub}</em></a>"
+    price = lambda k, name, sub: f"<a class='card pc{' hl' if k == 'hobby' else ''}' href='/pricing' data-cta=pricing_{k} data-cta-loc=home_pricing><span>{name}</span><b>${T[k]['fee_usd']:g}<small>/mo</small></b><em>{sub}</em></a>"
     faq4 = [x for x in _faq_full() if x[0].startswith(("What does", "Will automatic", "Can an AI", "Where does"))]
     faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq4)
     body = f"""<section class="hero v5"><div class=wrap><div>
@@ -543,12 +543,14 @@ def login(brand):
 <script>
 var M='login';function mode(m){{M=m;tl.classList.toggle('on',m=='login');tr.classList.toggle('on',m=='register');title.textContent=m=='login'?'Welcome back':'Create your account';
 subt.textContent=m=='login'?'Log in to deploy and manage your apps.':'Free plan with $1/month of included usage.';lb.textContent=m=='login'?'Log in':'Create account';pwh.style.display=m=='login'?'none':'block';pw.placeholder=m=='login'?'Your password':'Choose a password';pw.autocomplete=m=='login'?'current-password':'new-password'}}
-if(location.hash=='#register')mode('register');
-async function go(kind){{if(kind=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'password'}});const r=await fetch('/v1/auth/'+kind,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,password:pw.value,attribution:window.aloofAttribution?aloofAttribution():null}})}});
- const j=await r.json(); if(!r.ok){{msg.className='bad';msg.textContent=j.detail||'error';return}}
+if(location.hash=='#register')mode('register');addEventListener('hashchange',function(){{mode(location.hash=='#register'?'register':'login')}});
+function errText(j,r){{var d=j&&j.detail;if(Array.isArray(d))d=d.map(function(x){{var f=(x.loc||[]).slice(-1)[0];return (f?f+': ':'')+(x.msg||'')}}).join('; ');if(!d)d=r&&r.status==429?'Too many attempts. Wait a minute and try again.':'Something went wrong on our side. Please try again.';d=String(d);return d.charAt(0).toUpperCase()+d.slice(1)}}
+async function post(u,b){{var r,j={{}};try{{r=await fetch(u,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(b)}})}}catch(e){{return {{ok:false,j:{{detail:'Could not reach Aloof. Check your connection and try again.'}}}}}}try{{j=await r.json()}}catch(e){{}}return {{ok:r.ok,r:r,j:j}}}}
+async function go(kind){{if(lb.disabled)return;if(kind=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'password'}});var t=lb.textContent;lb.disabled=true;lb.textContent=kind=='register'?'Creating account…':'Logging in…';msg.textContent='';
+ const x=await post('/v1/auth/'+kind,{{email:email.value,password:pw.value,attribution:window.aloofAttribution?aloofAttribution():null}}),j=x.j; if(!x.ok){{lb.disabled=false;lb.textContent=t;msg.className='bad';msg.textContent=errText(j,x.r);return}}
  if(j.api_key) sessionStorage.newKey=j.api_key; var n=new URLSearchParams(location.search).get('next'),d='/dashboard';try{{if(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&!/[\\\\\\x00-\\x20\\x7f]/.test(n)){{var u=new URL(n,location.origin);if(u.origin===location.origin&&u.pathname.charAt(1)!='/')d=u.pathname+u.search+u.hash}}}}catch(e){{}}location=d}}
-async function magic(){{if(M=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'magic_link'}});const r=await fetch('/v1/auth/magic',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email.value,attribution:window.aloofAttribution?aloofAttribution():null}})}});
- const j=await r.json(); msg.className=r.ok?'ok':'bad'; msg.textContent=j.detail}}
+async function magic(){{if(!email.value||!email.checkValidity()){{msg.className='bad';msg.textContent='Enter your email address first, then tap the sign-in link option again.';email.focus();return}}if(M=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'magic_link'}});msg.className='muted';msg.textContent='Sending…';
+ const x=await post('/v1/auth/magic',{{email:email.value,attribution:window.aloofAttribution?aloofAttribution():null}}),j=x.j; msg.className=x.ok?'ok':'bad'; msg.textContent=x.ok?(j.detail||'Check your inbox for a sign-in link.'):errText(j,x.r)}}
 </script>""", brand)
 LEGAL = {
 "security": ("Security", """<p>This page lists what the platform does today. We don't claim certifications we don't hold.</p>
