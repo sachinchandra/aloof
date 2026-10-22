@@ -497,8 +497,9 @@ def _rate_check(keys, now=None):
 @app.post("/v1/auth/login")
 def auth_login(c: Creds, request: Request):
     _rate_check(("ip:" + client_ip(request), "email:" + (c.email or "").strip().lower()))
-    try: return _login_response(auth.login(c.email, c.password))
+    try: a = auth.login(c.email, c.password)
     except PermissionError as e: raise HTTPException(401, str(e))
+    analytics.identify(a["id"]); return _login_response(a)
 @app.post("/v1/auth/magic")
 def auth_magic(m: MagicReq, request: Request):
     try: auth.start_magic(m.email, PUBLIC_API_URL if SECURE_COOKIES else str(request.base_url), attribution=analytics.attribution(m))
@@ -510,6 +511,7 @@ def auth_magic_finish(token: str):
     try: a = auth.finish_magic(token)
     except PermissionError as e: return HTMLResponse(f"<p>{e}. <a href='/login'>Request a new link</a></p>", 400)
     if a.get("_created"): analytics.capture(a["id"], "signup_completed", {"method": "magic_link"} | (a.get("_attribution") or {}))
+    else: analytics.identify(a["id"])
     r = RedirectResponse("/dashboard", 303); r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
 @app.post("/v1/auth/logout")
@@ -535,7 +537,7 @@ def auth_sessions_revoke_others(request: Request, a=Depends(acct)):
 @app.get("/v1/auth/me")
 def auth_me(a=Depends(acct)):
     return {"id": a["id"], "email": a["email"], "name": a.get("billing_name"), "created": a.get("created"), "tier": a.get("tier") or "free",
-            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")),
+            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")),
             "api_key_prefix": a.get("api_key_prefix"), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}

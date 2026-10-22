@@ -63,6 +63,8 @@ https:// {
 		header_up X-Forwarded-Proto https
 	}
 }
+# Plain HTTP on any host (apps included) only redirects to HTTPS; it used to reach the website, which then served the
+# homepage (with analytics) under an app's hostname.
 http:// {
-	reverse_proxy 127.0.0.1:8000
+	redir https://{host}{uri} permanent
 }

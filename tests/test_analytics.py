@@ -1,3 +1,4 @@
+import os
 """Server-side PostHog analytics: allow-listed props, no PII/secrets, skip test accounts, no-op without a key, never breaks requests."""
 import json, time, hmac, hashlib, httpx, pytest
 from fastapi.testclient import TestClient
@@ -24,11 +25,29 @@ def test_register_signup_event_with_utm(sent):
     a = q("select id from accounts where email='ana1@real.dev'", one=True)
     assert ev["distinct_id"] == str(a["id"]) and ev["api_key"] == "phc_testkey"
     p = ev["properties"]; assert p["method"] == "password" and len(p["utm_source"]) <= 100 and p["utm_medium"] == "social"
-    assert p["referrer"] == "https://news.ycombinator.com/item" and "@" not in _blob(p) and "sk_live" not in _blob(ev)
+    p_ev = {k: v for k, v in p.items() if k != "$set"}   # email is only a person property ($set), never an event property
+    assert p["referrer"] == "https://news.ycombinator.com/item" and "@" not in _blob(p_ev) and "sk_live" not in _blob(ev)
     assert sent()[-1][0] == "https://us.i.posthog.com/i/v0/e/"
-def test_test_accounts_skipped(sent):
-    n = len(sent()); assert c.post("/v1/auth/register", json={"email": "t@example.com", "password": "long-enough-pw"}).status_code == 200
-    assert len(sent()) == n
+def test_test_accounts_sent_flagged(sent):
+    assert c.post("/v1/auth/register", json={"email": "t@example.com", "password": "long-enough-pw"}).status_code == 200
+    ev = [b for u, b in sent() if b["event"] == "signup_completed"][-1]["properties"]
+    assert ev["is_test"] is True and ev["$set"] == {"email": "t@example.com", "is_test": True}
+def test_real_signup_sets_person_and_login_identifies(sent):
+    assert c.post("/v1/auth/register", json={"email": "real-person@real.dev", "password": "long-enough-pw"}).status_code == 200
+    ev = [b for u, b in sent() if b["event"] == "signup_completed"][-1]
+    assert ev["properties"]["is_test"] is False and ev["properties"]["$set"] == {"email": "real-person@real.dev", "is_test": False}
+    assert c.post("/v1/auth/login", json={"email": "real-person@real.dev", "password": "long-enough-pw"}).status_code == 200
+    idf = [b for u, b in sent() if b["event"] == "$identify"][-1]
+    assert idf["distinct_id"] == ev["distinct_id"] and idf["properties"]["$set"]["email"] == "real-person@real.dev"
+def test_analytics_only_on_platform_hosts():
+    from paas import site
+    hs = site.analytics_hosts(); assert "aloof.test" in hs and "www.aloof.test" in hs and "api.aloof.test" in hs
+    assert all(h.count(".") <= 2 for h in hs) and not any(h.startswith("my-app.") for h in hs)
+    js = open(os.path.join(os.path.dirname(__file__), "..", "paas", "static", "analytics.js")).read()
+    assert "C.hosts.indexOf(location.hostname)<0)return" in js
+def test_caddy_http_redirects_only():
+    t = open(os.path.join(os.path.dirname(__file__), "..", "deploy", "Caddyfile.prod")).read()
+    i = t.index("http:// {"); assert "redir https://{host}{uri}" in t[i:i+80] and "reverse_proxy" not in t[i:i+80]
 def test_magic_link_signup(sent, monkeypatch):
     toks = []
     import paas.auth as A

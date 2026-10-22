@@ -1,5 +1,5 @@
 """Public site: landing, pricing, docs, login. Server-rendered, no JS framework."""
-import html, os, re
+import html, json, os, re
 from .contact import apply as _contact
 from .plans import PLANS, TIERS, RATES, REGIONS, REGION_NOTE
 from . import plans as _plans
@@ -71,7 +71,11 @@ def posthog_host(): return (os.environ.get("POSTHOG_HOST") or POSTHOG_DEFAULT_HO
 def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
-    return f'<script>window.ALOOF_PH={{"key":"{k}","host":"{posthog_host()}"}}</script><script src="/static/analytics.js?v=5" defer></script>' if k else ""
+    return f'<script>window.ALOOF_PH={json.dumps({"key": k, "host": posthog_host(), "hosts": analytics_hosts()})}</script><script src="/static/analytics.js?v=6" defer></script>' if k else ""
+def analytics_hosts():
+    """Only platform hosts load analytics (never <app>.<domain> user apps): base, www and api for the base + alt domains."""
+    ds = [d.strip() for d in (os.environ.get("PAAS_BASE_DOMAIN", "aloof.si") + "," + os.environ.get("PAAS_ALT_DOMAINS", "")).split(",") if d.strip()]
+    return sorted({h for d in ds for h in (d, "www." + d, "api." + d)})
 def page(title, body, brand="Aloof", desc=None):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
     return _contact(f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>""")
@@ -606,7 +610,7 @@ LEGAL = {
 
 <h2 id="analytics">3. Analytics</h2>
 <p>On this website, the docs and the dashboard we use PostHog Cloud US (PostHog Inc., data stored in the United States) to count page views and clicks on sign-up buttons, and to see which campaign or referring site brought you here (UTM parameters and referrer). It runs without cookies: no identifier is stored on your device beyond the current browser tab, so no consent banner is shown. When you're logged in, events are linked to your account id so we can understand how the product is used. We don't send your email, app data or logs to PostHog.</p>
-<p>Our servers also send a small number of product events to PostHog US under the same account id (for example sign-up completed, first deploy, MCP client connected, plan upgraded, waitlist joined), with only the fields needed to count them, such as the plan, amount or MCP client name.</p>
+<p>Our servers also send a small number of product events to PostHog US under the same account id (for example sign-up completed, first deploy, MCP client connected, plan upgraded, waitlist joined), with only the fields needed to count them, such as the plan, amount or MCP client name. When you sign up or log in we also attach your account email to that account id in PostHog, so we can answer support questions about your sign-up and spot test accounts.</p>
 
 <h2 id="purposes">4. Why we use your data and our legal bases</h2>
 <p>We rely on the legal bases in the EU and UK General Data Protection Regulation (GDPR) and, where it applies, the UAE Federal Decree-Law No. 45 of 2021 on the Protection of Personal Data (PDPL). Under the PDPL, the purposes below fall within the exceptions to consent for performing a contract, complying with legal obligations, and protecting our and others' legitimate interests, or rely on your consent where we ask for it.</p>

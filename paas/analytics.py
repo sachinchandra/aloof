@@ -1,6 +1,6 @@
 """Server-side product analytics (PostHog US). Fire-and-forget: events go to a bounded background queue and a single
 daemon thread posts them with a short timeout, so analytics can never fail or slow a request. No-op unless POSTHOG_API_KEY is set.
-distinct_id is always str(accounts.id), the same value the frontend passes to posthog.identify(). Test accounts (is_test) are skipped.
+distinct_id is always str(accounts.id), the same value the frontend passes to posthog.identify(). Test accounts (is_test) are sent with is_test=true (event and person property) so dashboards can filter them.
 Never pass emails, secrets, tokens, API keys or message bodies: properties are filtered through an allow-list per event."""
 import os, re, queue, threading, logging, httpx
 log = logging.getLogger("paas.analytics")
@@ -49,34 +49,53 @@ def person_once(p):
     return o
 _q = queue.Queue(maxsize=1000); _t = None; _lock = threading.Lock()
 _client = None   # tests swap in httpx.Client(transport=httpx.MockTransport(...))
+_last_warn = [0.0]
+def _warn(msg):
+    import time
+    if time.time() - _last_warn[0] > 60: _last_warn[0] = time.time(); log.warning(msg)
 def _worker():
     global _client
     while True:
         body = _q.get()
         try:
             if _client is None: _client = httpx.Client(timeout=TIMEOUT)
-            _client.post(f"{host()}/i/v0/e/", json=body)
-        except Exception as e: log.debug("posthog send failed: %s", type(e).__name__)
+            r = _client.post(f"{host()}/i/v0/e/", json=body)
+            if r.status_code >= 300: _warn(f"posthog capture HTTP {r.status_code} for {body.get('event')}")
+        except Exception as e: _warn(f"posthog send failed: {type(e).__name__}")
         finally: _q.task_done()
 def _ensure():
     global _t
     with _lock:
         if not _t or not _t.is_alive(): _t = threading.Thread(target=_worker, name="posthog", daemon=True); _t.start()
-def _is_test(account_id):
+def _account(account_id):
     try:
         from .db import q
-        r = q("select is_test from accounts where id=?", (int(account_id),), one=True)
-        return (not r) or bool(r.get("is_test"))
-    except Exception: return True   # unknown -> don't send
+        return q("select id, email, is_test from accounts where id=?", (int(account_id),), one=True)
+    except Exception: return None
+def _person(a):
+    """Person properties set on signup/identify: email and is_test (from accounts.is_test)."""
+    return {"email": a.get("email"), "is_test": bool(a.get("is_test"))}
 def capture(account_id, event, props=None):
     """Never raises. Returns True if queued."""
     try:
-        if not enabled() or event not in EVENTS or account_id is None or _is_test(account_id): return False
+        if not enabled() or event not in EVENTS or account_id is None: return False
+        a = _account(account_id)
+        if not a: return False   # unknown account -> don't send
         p = {k: clean(v) for k, v in (props or {}).items() if k in EVENTS[event]}
-        p = {k: v for k, v in p.items() if v is not None} | {"$lib": "aloof-api", "$process_person_profile": True}
+        p = {k: v for k, v in p.items() if v is not None} | {"$lib": "aloof-api", "$process_person_profile": True, "is_test": bool(a.get("is_test"))}
+        if event == "signup_completed": p["$set"] = _person(a)
         if event == "signup_completed" and person_once(p): p["$set_once"] = person_once(p)
         _ensure(); _q.put_nowait({"api_key": api_key(), "event": event, "distinct_id": str(int(account_id)), "properties": p}); return True
-    except Exception as e: log.debug("analytics capture skipped: %s", type(e).__name__); return False
+    except Exception as e: log.warning("analytics capture skipped: %s", type(e).__name__); return False
+def identify(account_id):
+    """Server-side $identify on login: sets person email + is_test. Never raises."""
+    try:
+        if not enabled() or account_id is None: return False
+        a = _account(account_id)
+        if not a: return False
+        _ensure(); _q.put_nowait({"api_key": api_key(), "event": "$identify", "distinct_id": str(int(account_id)),
+                                  "properties": {"$lib": "aloof-api", "$set": _person(a)}}); return True
+    except Exception as e: log.warning("analytics identify skipped: %s", type(e).__name__); return False
 def once(account_id, event):
     """True the first time (account, event) is seen; used for first_deploy_succeeded."""
     try:

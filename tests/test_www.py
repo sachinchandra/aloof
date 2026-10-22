@@ -123,7 +123,7 @@ def test_client_events_no_server_duplicates():
     r = os.path.join(os.path.dirname(__file__), "..")
     js = "".join(open(os.path.join(r, f)).read() for f in ("paas/static/analytics.js", "paas/site.py", "dashboard/index.html"))
     for e in ("signup_completed", "first_deploy_succeeded", "deploy_succeeded", "mcp_connected", "plan_upgraded", "gpu_waitlist_joined"): assert f"'{e}'" not in js, e
-    assert "aloofIdentify(String(me.id))" in js and "post('/v1/auth/magic'" in js and js.count("attribution:window.aloofAttribution") == 2
+    assert "aloofIdentify(String(me.id),me.email,!!me.is_test)" in js and "post('/v1/auth/magic'" in js and js.count("attribution:window.aloofAttribution") == 2
 def test_hero_and_footer_copy():
     h = c.get("/").text
     assert "The self-driving cloud" in h and "Infrastructure for the age of" in h and "They run in the EU" not in h
