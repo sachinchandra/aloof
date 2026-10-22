@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """aloof CLI. Config: ~/.aloof.json (falls back to ~/.paas.json) {api, key} or env ALOOF_API_URL / ALOOF_API_KEY."""
 import argparse, json, os, sys, time, urllib.request, urllib.error
-VERSION = "0.4.0"   # single source of truth: `aloof --version` and the User-Agent header
+VERSION = "0.4.1"   # single source of truth: `aloof --version` and the User-Agent header
 UA = f"aloof-cli/{VERSION} (python {sys.version_info[0]}.{sys.version_info[1]}; {sys.platform})"
 CFG = os.path.expanduser("~/.aloof.json")
 if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")

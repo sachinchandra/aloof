@@ -72,3 +72,23 @@ def test_quickstart_uses_unique_name():
     t = c.get("/docs/quickstart").text
     assert "deploy hello" not in t and "your-app-name" in t and "my-api-1234" in t
     l = c.get("/llms.txt").text; assert "my-api-1234" in l and "app name taken" in l
+def test_migration_13_and_backfill_and_sql_filter():
+    import json, time
+    from paas import engine, crypto, oauth_apps
+    from paas.db import kv_put, q
+    assert q("select version from schema_migrations where version=13", one=True)
+    a = engine.create_account("acct-col@real.dev"); h = {"Authorization": f"Bearer {a['api_key']}"}
+    b = engine.create_account("acct-col2@real.dev")
+    kv_put("oauth:client", "cid-acct", json.dumps({"client_id": "cid-acct", "client_name": "Cursor", "redirect_uris": ["cursor://x/cb"]}))
+    kv_put("oauth:access", "old1", json.dumps({"client_id": "cid-acct", "api_key": "enc:" + crypto.enc(a["api_key"]), "expires_at": time.time() + 99}), 99)  # pre-v13 row: acct NULL
+    kv_put("oauth:access", "old2", json.dumps({"client_id": "cid-acct", "api_key": "enc:" + crypto.enc(b["api_key"]), "expires_at": time.time() + 99}), 99)
+    kv_put("oauth:access", "bad", "not json", 99)
+    assert oauth_apps.backfill() >= 3 and oauth_apps.backfill() == 0
+    acct = {r["k"]: r["acct"] for r in q("select k, acct from kv where kind='oauth:access' and k in ('old1','old2','bad')")}
+    assert acct == {"old1": a["api_key_hash"], "old2": b["api_key_hash"], "bad": "-"}
+    # a forged acct can't make another account's token appear: the decrypted key is still checked
+    q("update kv set acct=? where kind='oauth:access' and k='old2'", (a["api_key_hash"],))
+    r = c.get("/v1/auth/connected-apps", headers=h).json(); x = [y for y in r if y["client_id"] == "cid-acct"]
+    assert len(x) == 1 and x[0]["access_tokens"] == 1
+    assert c.delete("/v1/auth/connected-apps/cid-acct", headers=h).json()["tokens_revoked"] == 1
+    assert q("select count(*) n from kv where kind='oauth:access' and k='old2'", one=True)["n"] == 1

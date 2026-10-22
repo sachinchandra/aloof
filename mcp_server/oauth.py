@@ -26,12 +26,14 @@ class Store:
     tokens/codes are looked up by SHA-256 hash so a DB leak doesn't expose bearer tokens."""
     SECRET_FIELDS = ("api_key",)
     def _k(self, kind, k): return _crypto.sha256(k) if kind in ("access", "refresh", "code", "pkcache") else k
+    ACCT_KINDS = ("access", "refresh", "code")
     def put(self, kind, k, v, ttl=None):
         v = dict(v) if isinstance(v, dict) else v
+        acct = _crypto.sha256(v["api_key"]) if kind in self.ACCT_KINDS and isinstance(v, dict) and v.get("api_key") else None
         if isinstance(v, dict):
             for f in self.SECRET_FIELDS:
                 if v.get(f): v[f] = "enc:" + _crypto.enc(v[f])
-        _db.kv_put("oauth:" + kind, self._k(kind, k), json.dumps(v), ttl)
+        _db.kv_put("oauth:" + kind, self._k(kind, k), json.dumps(v), ttl, acct=acct)
     def get(self, kind, k):
         raw = _db.kv_get("oauth:" + kind, self._k(kind, k))
         if raw is None: return None

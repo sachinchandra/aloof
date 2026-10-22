@@ -304,3 +304,30 @@ def test_register_db_error_says_unavailable(srv, monkeypatch):
     monkeypatch.setattr(oauth, "reg_rate_ok", lambda ip, now=None: None)
     r = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "t", "token_endpoint_auth_method": "none"})
     assert r.status_code == 429 and "temporarily unavailable, retry" in r.json()["error_description"] and r.headers["retry-after"] == "60"
+
+
+def test_tool_api_error_is_mcp_error(srv, monkeypatch):
+    """4xx/5xx from the API -> the MCP tool result has isError: true (not a success carrying an error dict)."""
+    c, oauth, server = srv
+    import httpx, anyio
+    resp = lambda *a, **k: httpx.Response(400, json={"detail": "plan shared-1x-1gb isn't available on the free tier"})
+    monkeypatch.setattr(server.httpx, "request", resp); monkeypatch.setattr(server.httpx, "get", resp)
+    async def go():
+        from mcp.shared.memory import create_connected_server_and_client_session as conn
+        async with conn(server.mcp._mcp_server) as s:
+            r1 = await s.call_tool("deploy_app", {"name": "x1", "image": "nginx:alpine", "api_key": "pk_good"})
+            r2 = await s.call_tool("get_logs", {"name": "x1", "api_key": "pk_good"})
+            monkeypatch.setattr(server.httpx, "request", lambda *a, **k: httpx.Response(200, json=[]))
+            r3 = await s.call_tool("list_apps", {"api_key": "pk_good"})
+            return r1, r2, r3
+    r1, r2, r3 = anyio.run(go)
+    assert r1.isError and "Aloof API error 400" in r1.content[0].text and "free tier" in r1.content[0].text
+    assert r2.isError and not r3.isError
+def test_tokens_carry_account_hash(srv):
+    c, oauth, _ = srv
+    from paas import crypto
+    oauth.S.put("access", "mcp_at_x", {"client_id": "cx", "api_key": "pk_abc", "expires_at": 0}, ttl=60)
+    r = oauth._db.q("select acct from kv where kind='oauth:access' and k=?", (crypto.sha256("mcp_at_x"),), one=True)
+    assert r["acct"] == crypto.sha256("pk_abc")
+    oauth.S.put("client", "cx", {"client_id": "cx"})
+    assert oauth._db.q("select acct from kv where kind='oauth:client' and k='cx'", one=True)["acct"] is None

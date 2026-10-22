@@ -17,20 +17,37 @@ def _mine(v, hs):
         except Exception: return False
     return bool(k) and crypto.sha256(k) in hs
 def _owner(v): return v.get("client_id") or (v.get("code") or {}).get("client_id")
+KINDS = ("access", "refresh", "code")
+def _dec_key(v):
+    k = v.get("api_key") if isinstance(v, dict) else None
+    if isinstance(k, str) and k.startswith("enc:"):
+        try: return crypto.dec(k[4:])
+        except Exception: return None
+    return k
+def backfill(limit=5000):
+    """One-off (idempotent): set kv.acct = sha256(bound API key) on OAuth token/code rows written before migration v13."""
+    n = 0
+    for r in q("select kind, k, v from kv where kind in ('oauth:access','oauth:refresh','oauth:code') and acct is null limit ?", (limit,)):
+        try: key = _dec_key(json.loads(r["v"]))
+        except ValueError: key = None
+        q("update kv set acct=? where kind=? and k=?", (crypto.sha256(key) if key else "-", r["kind"], r["k"])); n += 1
+    return n
 def _tokens(account_id, client_id=None, kinds=("access", "refresh")):
-    """Rows of this account (optionally one client). With client_id, SQL pre-filters on the JSON text (json.dumps form) so only
-    that client's rows are decrypted; the decoded client_id is still checked exactly."""
-    hs, now = _key_hashes(account_id), time.time()
+    """This account's rows (optionally one client), selected in SQL by kv.acct (indexed) and, for one client, the client_id in the
+    JSON text; only those rows are decrypted, and the decrypted key and client_id are still checked exactly."""
+    backfill()
+    hs, now = sorted(_key_hashes(account_id)), time.time()
+    if not hs: return
     like = "%" + json.dumps(client_id)[1:-1].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" if client_id else None
     for kind in kinds:
-        sql, args = "select k, v, exp from kv where kind=?", ["oauth:" + kind]
+        sql = f"select k, v, exp from kv where kind=? and acct in ({','.join('?' * len(hs))})"; args = ["oauth:" + kind, *hs]
         if like: sql += " and v like ? escape '\\'"; args.append(like)
         for r in q(sql, tuple(args)):
             if r["exp"] and r["exp"] < now: continue
             try: v = json.loads(r["v"])
             except ValueError: continue
             if client_id is not None and _owner(v) != client_id: continue
-            if _mine(v, hs): yield kind, r["k"], v
+            if _mine(v, set(hs)): yield kind, r["k"], v
 def _client(cid):
     raw = q("select v from kv where kind='oauth:client' and k=?", (cid,), one=True)
     try: return json.loads(raw["v"]) if raw else {}

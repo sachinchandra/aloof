@@ -127,6 +127,12 @@ update domains set status='pending' where verified is null or verified=0;
 create index if not exists domains_account on domains(account_id);
 create index if not exists domains_next on domains(next_check_at);
 """)
+    # v13: OAuth token rows carry the SHA-256 of the API key they're bound to (= accounts.api_key_hash / api_keys.key_hash),
+    # so connected-app listing/revoking filters by account in SQL. Existing rows are backfilled by oauth_apps.backfill().
+    ,(13, """
+alter table kv add column acct TEXT;
+create index if not exists kv_kind_acct on kv(kind, acct);
+""")
 
 ]
 def _dialect(sql):
@@ -188,8 +194,9 @@ def migrate():
 migrate()
 def audit(account_id, app, action, detail="", ip=None): q("insert into audit(ts,account_id,app,action,detail,ip) values(?,?,?,?,?,?)", (time.time(), account_id, app, action, (detail or "")[:2000], ip))
 def event(app, msg): q("insert into events(app,ts,msg) values(?,?,?)", (app, time.time(), msg))
-def kv_put(kind, k, v, ttl=None):
-    q("insert into kv(kind,k,v,exp) values(?,?,?,?) on conflict(kind,k) do update set v=excluded.v, exp=excluded.exp", (kind, k, v, time.time()+ttl if ttl else None))
+def kv_put(kind, k, v, ttl=None, acct=None):
+    q("insert into kv(kind,k,v,exp,acct) values(?,?,?,?,?) on conflict(kind,k) do update set v=excluded.v, exp=excluded.exp, acct=excluded.acct",
+      (kind, k, v, time.time()+ttl if ttl else None, acct))
 def kv_get(kind, k):
     r = q("select v, exp from kv where kind=? and k=?", (kind, k), one=True)
     return None if not r or (r["exp"] and r["exp"] < time.time()) else r["v"]
