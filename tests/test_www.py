@@ -169,7 +169,7 @@ def test_templates_and_selfheal_docs():
 def test_no_prices_note_anywhere():
     for u in ("/", "/pricing", "/about", "/docs/billing", "/terms"):
         assert "Prices in USD, excluding tax" not in c.get(u).text
-    assert "exclude tax" in c.get("/docs/billing").text and "exclude" in c.get("/terms").text
+    assert "taxes may apply where required" in c.get("/docs/billing").text and "taxes may apply where required" in c.get("/terms").text
 
 def test_conversion_path_ctas_and_signup_js():
     from fastapi.testclient import TestClient; from paas.api import app; c = TestClient(app)

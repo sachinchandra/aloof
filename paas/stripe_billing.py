@@ -9,7 +9,7 @@
 Webhooks are verified with the Stripe-Signature header (HMAC-SHA256 over "t.payload", 5 min tolerance) and de-duplicated by event id."""
 import os, hmac, hashlib, json, time, httpx, logging
 from urllib.parse import urlencode
-from .db import q
+from .db import q, tx
 from . import billing
 from .crypto import load_spec
 log = logging.getLogger("paas.stripe")
@@ -120,10 +120,13 @@ def fulfill_topup(s):
     row = q("select * from stripe_sessions where id=?", (s["id"],), one=True)
     if not row or row["kind"] != "topup": return {"ok": False, "error": "unknown session"}
     if s.get("amount_subtotal") is not None and int(s["amount_subtotal"]) != int(row["amount_cents"]): return {"ok": False, "error": "amount mismatch"}
-    won = q("update stripe_sessions set status='paid', payment_intent=?, invoice_id=?, updated=? where id=? and status!='paid' returning id",
-            (s.get("payment_intent"), s.get("invoice"), time.time(), s["id"]))
-    if not won: return {"ok": True, "duplicate": True}
-    billing.credit(row["account_id"], row["credit_cents"], "topup", f"stripe {s['id']}" + (f" (total incl. tax ${s['amount_total']/100:.2f})" if s.get("amount_total") else ""))
+    with tx():   # status flip + wallet credit commit together; a failure rolls both back so Stripe's retry credits it
+        won = q("update stripe_sessions set status='paid', payment_intent=?, invoice_id=?, updated=? where id=? and status!='paid' returning id",
+                (s.get("payment_intent"), s.get("invoice"), time.time(), s["id"]))
+        if not won: return {"ok": True, "duplicate": True}
+        billing.credit_rows(row["account_id"], row["credit_cents"], "topup", f"stripe {s['id']}" + (f" (total incl. tax ${s['amount_total']/100:.2f})" if s.get("amount_total") else ""))
+    try: billing.resume_suspended(row["account_id"])
+    except Exception: log.exception("resume after top-up failed for account %s", row["account_id"])
     return {"ok": True, "credited_cents": row["credit_cents"]}
 def set_tier(acct, tier, sub_id=None, why="stripe"):
     from .plans import TIERS
@@ -172,7 +175,9 @@ def tier_for_price(price_id):
 def _sub_tier(o):
     items = ((o.get("items") or {}).get("data") or [])
     pid = ((items[0].get("price") or {}).get("id")) if items else None
-    return tier_for_price(pid) or (o.get("metadata") or {}).get("tier")
+    tier = tier_for_price(pid)
+    if not tier: log.warning("stripe subscription %s: unknown price id %r; plan unchanged", o.get("id"), pid)
+    return tier
 def _process(ev):
     t = ev.get("type"); o = (ev.get("data") or {}).get("object") or {}
     if t in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):

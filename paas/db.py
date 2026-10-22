@@ -130,15 +130,17 @@ create index if not exists domains_next on domains(next_check_at);
     # v13: OAuth token rows carry the SHA-256 of the API key they're bound to (= accounts.api_key_hash / api_keys.key_hash),
     # so connected-app listing/revoking filters by account in SQL. Existing rows are backfilled by oauth_apps.backfill().
     ,(13, """
-alter table kv add column acct TEXT;
+alter table kv add column if not exists acct TEXT;
 create index if not exists kv_kind_acct on kv(kind, acct);
 """)
 
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
-    return sql.replace("AUTOPK", "integer primary key autoincrement")
+    return sql.replace("AUTOPK", "integer primary key autoincrement").replace("add column if not exists", "add column")   # sqlite has no IF NOT EXISTS here
 _lock = threading.RLock()
+import contextvars, contextlib
+_tx = contextvars.ContextVar("paas_db_tx", default=None)   # connection pinned by tx(); q()/executescript() use it when set
 import psycopg, logging, time as _t
 _log = logging.getLogger("paas.db")
 def wait_for_db(url=DB_URL, timeout=None, connect=None, sleep=_t.sleep, now=_t.monotonic):
@@ -163,6 +165,10 @@ if PG:
     def q(sql, args=(), one=False, _retries=3):
         """Connection-level failures (DB restarting, connection killed) are retried with backoff; the statement is autocommit,
         so a statement cut off by a disconnect was rolled back and is safe to re-run."""
+        c = _tx.get()
+        if c is not None:    # inside tx(): same connection, no retry (the whole transaction rolls back on error)
+            cur = c.execute(sql.replace("?", "%s"), args); rows = cur.fetchall() if cur.description else []
+            return (rows[0] if rows else None) if one else rows
         for attempt in range(_retries + 1):
             try:
                 with _pool.connection() as c:
@@ -173,19 +179,46 @@ if PG:
                 if attempt == _retries: raise
                 _log.warning("db connection error, retrying (%d/%d): %s", attempt + 1, _retries, str(e).splitlines()[0]); _t.sleep(0.5 * 2 ** attempt)
     def executescript(sql):
+        c = _tx.get()
+        if c is not None:
+            for stmt in [s for s in sql.split(";") if s.strip()]: c.execute(stmt)
+            return
         with _pool.connection() as c:
             for stmt in [s for s in sql.split(";") if s.strip()]: c.execute(stmt)
+    @contextlib.contextmanager
+    def tx():
+        """One DB transaction: every q() inside commits together or rolls back together. Re-entrant."""
+        if _tx.get() is not None: yield; return
+        with _pool.connection() as c, c.transaction():
+            tok = _tx.set(c)
+            try: yield
+            finally: _tx.reset(tok)
 else:
     DB = os.environ.get("PAAS_DB", os.path.join(ROOT, "data", "paas.sqlite"))
     os.makedirs(os.path.dirname(DB), exist_ok=True)
     _c = sqlite3.connect(DB, check_same_thread=False); _c.row_factory = sqlite3.Row
     def q(sql, args=(), one=False):
         with _lock:
-            cur = _c.execute(sql, args); rows = [dict(r) for r in cur.fetchall()] if cur.description else []; _c.commit()
+            cur = _c.execute(sql, args); rows = [dict(r) for r in cur.fetchall()] if cur.description else []
+            if _tx.get() is None: _c.commit()
         return (rows[0] if rows else None) if one else rows
     def executescript(sql):
         with _lock: _c.executescript(sql); _c.commit()
+    @contextlib.contextmanager
+    def tx():
+        if _tx.get() is not None: yield; return
+        with _lock:
+            _c.commit(); tok = _tx.set(_c)
+            try: yield; _c.commit()
+            except BaseException: _c.rollback(); raise
+            finally: _tx.reset(tok)
+MIGRATE_LOCK = 0x616C6F6F66   # pg advisory lock key ("aloof"): API and MCP both migrate at boot; serialise them
 def migrate():
+    if PG:
+        with tx():
+            q("select pg_advisory_xact_lock(?)", (MIGRATE_LOCK,)); _migrate()
+    else: _migrate()
+def _migrate():
     q("create table if not exists schema_migrations(version int primary key, applied double precision)" if PG else "create table if not exists schema_migrations(version int primary key, applied REAL)")
     done = {r["version"] for r in q("select version from schema_migrations")}
     for v, sql in MIGRATIONS:

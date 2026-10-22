@@ -11,10 +11,12 @@ E = lambda k, d=None: os.environ.get(k, d)
 def usd(cents): return round((cents or 0) / 100.0, 2)
 def credit(acct, cents, kind, ref):
     """Add to the wallet + ledger, then resume suspended apps."""
+    credit_rows(acct, cents, kind, ref); resume_suspended(acct)
+def credit_rows(acct, cents, kind, ref):
+    """Wallet + ledger writes only (no side effects), so callers can put them in a db.tx() with other writes."""
     q("update accounts set credit_cents = credit_cents + ? where id=?", (cents, acct))
     q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (acct, time.time(), round(cents, 4), kind, ref))
     if cents > 0: q("update accounts set lowbal_sent='' where id=?", (acct,))   # a top-up re-arms the low-balance alerts
-    resume_suspended(acct)
 EGRESS = {}   # filled by the edge proxy: app -> bytes since last tick
 def month_key(ts=None): return time.strftime("%Y-%m", time.localtime(ts or time.time()))
 def _bump(acct, month, kind, qty, cost):
