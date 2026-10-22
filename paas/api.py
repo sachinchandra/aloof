@@ -113,7 +113,7 @@ def plans(legacy: bool = False):
     out = [{"id": k, **{x: y for x, y in v.items() if x not in ("providers",)}} for k, v in PLANS.items()
            if (legacy or not v["legacy"]) and (v["kind"] != "gpu" or _plans.GPU_ENABLED)]
     gpu = _plans.gpu_status() | ({} if _plans.GPU_ENABLED else {"coming_soon": [{"id": k, "gpu": v["gpu"]} for k, v in PLANS.items() if v["kind"] == "gpu"]})
-    return {"currency": "USD", "tax": "excluded; VAT/GST/sales tax added at checkout where applicable", "billing": "per second while running; volumes per provisioned GB-month; egress per GB (counts toward included usage)",
+    return {"currency": "USD", "tax": "Prices in USD; taxes may apply where required", "billing": "per second while running; volumes per provisioned GB-month; egress per GB (counts toward included usage)",
             "plans": out, "gpu": gpu, "rates": RATES, "tiers": TIERS, "regions": _live_regions(), "region_pricing": __import__("paas.regions", fromlist=["x"]).live_prices(), "region_note": REGION_NOTE}
 class WaitlistReq(BaseModel):
     email: str; gpu: str | None = None; note: str | None = None; kind: str = "gpu"; region: str | None = None; company: str | None = None

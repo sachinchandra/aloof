@@ -155,7 +155,7 @@ def test_stripe_subscription_tier_and_cancel(monkeypatch):
     assert c.post("/v1/billing/subscribe", json={"tier": "pro"}).status_code == 200
     form = dict(httpx.QueryParams(sess.calls[-1].request.content.decode()))
     assert form["mode"] == "subscription" and form["line_items[0][price]"] == "price_pro" and form["automatic_tax[enabled]"] == "true" and form["tax_id_collection[enabled]"] == "true"
-    raw, h = _stripe_ev("evt_sub1", "checkout.session.completed", {"id": "cs_sub", "mode": "subscription", "customer": "cus_s", "subscription": "sub_1",
+    raw, h = _stripe_ev("evt_sub1", "checkout.session.completed", {"id": "cs_sub", "mode": "subscription", "payment_status": "paid", "customer": "cus_s", "subscription": "sub_1",
                                                                    "metadata": {"account_id": str(aid), "tier": "pro"}})
     assert w.post("/v1/billing/stripe/webhook", content=raw, headers=h).json()["tier"] == "pro"
     b = c.get("/v1/billing").json(); assert b["month"]["tier"] == "pro" and b["subscription"] == "sub_1"

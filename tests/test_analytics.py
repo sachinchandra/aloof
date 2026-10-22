@@ -75,7 +75,7 @@ def _sig(body):
     t = str(int(time.time())); s = hmac.new(b"whsec_test", f"{t}.".encode() + body, hashlib.sha256).hexdigest(); return f"t={t},v1={s}"
 def test_plan_upgraded_from_webhook(sent):
     a = engine.create_account("ana5@real.dev")
-    ev = {"id": "evt_ana5", "type": "checkout.session.completed", "data": {"object": {"id": "cs_ana5", "mode": "subscription", "amount_total": 2000,
+    ev = {"id": "evt_ana5", "type": "checkout.session.completed", "data": {"object": {"id": "cs_ana5", "mode": "subscription", "payment_status": "paid", "amount_total": 2000,
           "customer": "cus_x", "subscription": "sub_x", "client_reference_id": str(a["id"]), "metadata": {"tier": "pro", "account_id": str(a["id"])}}}}
     body = json.dumps(ev).encode(); code, _ = stripe_billing.handle_webhook(body, _sig(body)); assert code == 200
     e = [b for u, b in sent() if b["event"] == "plan_upgraded"][-1]

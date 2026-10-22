@@ -155,12 +155,33 @@ def handle_webhook(raw: bytes, sig_header):
     if not eid: return 400, {"error": "no event id"}
     if not q("insert into stripe_events(id,type,received) values(?,?,?) on conflict(id) do nothing returning id", (eid, ev.get("type"), time.time())):
         return 200, {"ok": True, "duplicate_event": True}
+    try: return _process(ev)
+    except Exception:
+        # F1: un-record the event so Stripe's retry is processed again instead of being answered "duplicate_event".
+        log.exception("stripe webhook %s (%s) failed; event un-recorded for retry", eid, ev.get("type"))
+        try: q("delete from stripe_events where id=?", (eid,))
+        except Exception: log.exception("could not un-record stripe event %s", eid)
+        return 500, {"error": "processing failed; retry"}
+PAID_OK = ("paid", "no_payment_required")
+def tier_for_price(price_id):
+    """F3: map a Stripe price id to our tier using the configured STRIPE_PRICE_HOBBY / STRIPE_PRICE_PRO."""
+    if not price_id: return None
+    for tier, env in (("hobby", "STRIPE_PRICE_HOBBY"), ("pro", "STRIPE_PRICE_PRO")):
+        if E(env) and E(env) == price_id: return tier
+    return None
+def _sub_tier(o):
+    items = ((o.get("items") or {}).get("data") or [])
+    pid = ((items[0].get("price") or {}).get("id")) if items else None
+    return tier_for_price(pid) or (o.get("metadata") or {}).get("tier")
+def _process(ev):
     t = ev.get("type"); o = (ev.get("data") or {}).get("object") or {}
     if t in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
         if o.get("mode") == "payment":
             return 200, (fulfill_topup(o) if o.get("payment_status") == "paid" else {"ok": True, "pending": o.get("payment_status")})
         if o.get("mode") == "subscription":
             acct = _acct_from(o); tier = (o.get("metadata") or {}).get("tier")
+            if acct and tier and o.get("payment_status") not in PAID_OK:   # F2: async/delayed methods wait for async_payment_succeeded
+                return 200, {"ok": True, "pending": o.get("payment_status")}
             if acct and tier:
                 if o.get("customer"): q("update accounts set stripe_customer=? where id=? and stripe_customer is null", (o["customer"], acct))
                 q("update stripe_sessions set status='paid', updated=? where id=?", (time.time(), o.get("id")))
@@ -179,7 +200,7 @@ def handle_webhook(raw: bytes, sig_header):
         if not r: return 200, {"ok": True, "ignored": "unknown subscription"}
         if t.endswith("deleted") or o.get("status") in ("canceled", "unpaid", "incomplete_expired"):
             set_tier(r["id"], "free", None, why=f"stripe {t} ({o.get('status')})"); return 200, {"ok": True, "tier": "free"}
-        tier = (o.get("metadata") or {}).get("tier")
+        tier = _sub_tier(o)
         if tier and tier != r["tier"]:
             set_tier(r["id"], tier, o["id"], why="stripe plan change")
             if _rank(tier) > _rank(r["tier"]): _track_upgrade(r["id"], tier, o)
