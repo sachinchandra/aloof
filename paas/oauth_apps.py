@@ -4,6 +4,7 @@ encrypted API key it carries, so an account only ever sees and revokes its own c
 account's unexchanged auth codes for the client. Pending (not yet approved) requests carry no account, so there is nothing
 of this account's to delete there: they can only become a code after a fresh sign-in."""
 import json, time
+REFRESH_TTL = 30 * 86400   # must equal mcp_server/oauth.py REFRESH_TTL (tested)
 from .db import q, kv_del
 from . import crypto
 def _key_hashes(account_id):
@@ -37,8 +38,10 @@ def _client(cid):
 def list_apps(account_id):
     apps = {}
     for kind, _, v in _tokens(account_id):
-        cid = v.get("client_id"); a = apps.setdefault(cid, {"client_id": cid, "access_tokens": 0, "refresh_tokens": 0, "expires_at": 0})
+        cid = v.get("client_id"); a = apps.setdefault(cid, {"client_id": cid, "access_tokens": 0, "refresh_tokens": 0, "expires_at": 0, "last_token_at": None})
         a[kind + "_tokens"] += 1; a["expires_at"] = max(a["expires_at"], v.get("expires_at") or 0)
+        if kind == "refresh" and v.get("expires_at"):   # a refresh token is issued on approval and on every renewal
+            a["last_token_at"] = max(a["last_token_at"] or 0, int(v["expires_at"]) - REFRESH_TTL)
     out = []
     for cid, a in apps.items():
         c = _client(cid); ru = (c.get("redirect_uris") or [None])[0]

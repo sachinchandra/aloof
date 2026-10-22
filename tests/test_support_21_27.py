@@ -58,3 +58,14 @@ def test_authorize_password_replaces_warning():
 def test_mcp_server_text_has_no_tax_or_wallet_claims():
     s = open(os.path.join(ROOT, "mcp_server/server.py")).read().lower()
     assert "tax" not in s and "apple" not in s and "google pay" not in s and "stripe checkout" in s
+def test_connected_apps_last_token_and_ttl():
+    sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
+    from paas import oauth_apps; assert oauth_apps.REFRESH_TTL == oauth.REFRESH_TTL
+    d = open(os.path.join(ROOT, "dashboard/index.html")).read()
+    assert "Last token" in d and "Not recorded" in d and "Try again" in d and "Disconnecting…" in d and "No connected apps" in d and "e.key=='Tab'" in d
+def test_authorize_page_formats_with_submit_state():
+    sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
+    p = oauth.PAGE.format(client="X", badge="", target="t", css=oauth.CSS, mark="", www="w", ttl=10, email="", key_open="", req="r", err="")
+    assert "Approving…" in p and "min-height:40px" in p
+def test_signup_tabs_aria():
+    h = c.get("/login").text; assert 'aria-selected=true' in h and "setAttribute('aria-selected'" in h and "class=maglink" in h

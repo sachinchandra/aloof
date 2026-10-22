@@ -39,7 +39,7 @@ def head(title, desc):
 <meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
 <link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
-<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=22">{THEME_JS}</head>"""
+<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=23">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a></nav>
@@ -550,15 +550,15 @@ curl -fsSL '{api}/v1/nodes/bootstrap.sh?node=n-…&token=jt_…' | sudo bash</pr
 def login(brand):
     return page(f"Log in · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
 <h1 id=title>Welcome back</h1><p class=muted id=subt style="margin:0">Log in to deploy and manage your apps.</p>
-<div class=tabs role=tablist><button type=button role=tab id=tl class=on onclick="mode('login')">Log in</button><button type=button role=tab id=tr onclick="mode('register')">Create account</button></div>
+<div class=tabs role=tablist aria-label="Log in or create an account"><button type=button role=tab id=tl class=on aria-selected=true onclick="mode('login')">Log in</button><button type=button role=tab id=tr aria-selected=false onclick="mode('register')">Create account</button></div>
 <form onsubmit="event.preventDefault();go(M)"><div id=msg role=status aria-live=polite class=muted style="min-height:20px;font-size:14px"></div>
 <label for=email>Email</label><input id=email type=email autocomplete=email required placeholder="you@company.com">
 <label for=pw id=pwl>Password</label><input id=pw type=password autocomplete=current-password placeholder="Your password" aria-describedby=pwh><small id=pwh class="muted helper" style="display:none">At least 10 characters.</small>
 <p style="margin-top:18px"><button class="btn pri" style="width:100%;justify-content:center" id=lb>Log in</button></p></form>
-<p class=muted style="text-align:center;font-size:14px">or <a href="#" onclick="magic();return false">email me a sign-in link</a></p>
+<p class=muted style="text-align:center;font-size:14px;margin:6px 0">or <a href="#" class=maglink role=button onclick="magic();return false">email me a sign-in link</a></p>
 <p class="muted secure-note">{svg("lock")}<span>Sessions use HttpOnly cookies. By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy policy</a>.</span></p></div></div>
 <script>
-var M='login';function mode(m){{M=m;tl.classList.toggle('on',m=='login');tr.classList.toggle('on',m=='register');title.textContent=m=='login'?'Welcome back':'Create your account';
+var M='login';function mode(m){{M=m;tl.classList.toggle('on',m=='login');tr.classList.toggle('on',m=='register');tl.setAttribute('aria-selected',m=='login');tr.setAttribute('aria-selected',m=='register');title.textContent=m=='login'?'Welcome back':'Create your account';
 subt.textContent=m=='login'?'Log in to deploy and manage your apps.':'Free plan with $1/month of included usage.';lb.textContent=m=='login'?'Log in':'Create account';pwh.style.display=m=='login'?'none':'block';pw.placeholder=m=='login'?'Your password':'Choose a password';pw.autocomplete=m=='login'?'current-password':'new-password'}}
 if(location.hash=='#register')mode('register');addEventListener('hashchange',function(){{mode(location.hash=='#register'?'register':'login')}});
 function errText(j,r){{var d=j&&j.detail;if(Array.isArray(d))d=d.map(function(x){{var f=(x.loc||[]).slice(-1)[0];return (f?f+': ':'')+(x.msg||'')}}).join('; ');if(!d)d=r&&r.status==429?'Too many attempts. Wait a minute and try again.':'Something went wrong on our side. Please try again.';d=String(d);return d.charAt(0).toUpperCase()+d.slice(1)}}

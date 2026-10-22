@@ -438,7 +438,7 @@ label{display:block;font-size:14px;font-weight:600;color:#bcafa3;margin:16px 0 6
 input:focus{outline:2px solid #ff7a1a;outline-offset:1px;border-color:#ff7a1a}.row{display:flex;gap:10px;margin-top:22px}
 .btn{flex:1;min-height:46px;font-size:16px;font-weight:700;border-radius:10px;cursor:pointer;border:1px solid #382d24;background:transparent;color:#f6f1ec}
 .pri{background:linear-gradient(135deg,#ff6a00,#ffb020);border:0;color:#140c06}.err{background:#2a1210;border:1px solid #7a2a20;color:#ffd7cf;border-radius:10px;padding:10px 12px;font-size:14px;margin:12px 0 0}
-details{margin-top:16px;font-size:14px;color:#bcafa3}summary{cursor:pointer;color:#ffb020;min-height:32px;display:flex;align-items:center}a{color:#ffb020}.muted{color:#998b7e;font-size:13px}
+details{margin-top:16px;font-size:14px;color:#bcafa3}summary{cursor:pointer;color:#ffb020;min-height:40px;display:flex;align-items:center}.btn:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #ffb020;outline-offset:2px}.btn:disabled{opacity:.7;cursor:progress}a{color:#ffb020}.muted{color:#998b7e;font-size:13px}
 .help{border-top:1px solid #2a221c;margin-top:22px;padding-top:16px;font-size:14px;color:#bcafa3}.help p{margin:0 0 8px}"""
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Connect {client} to Aloof</title><style>{css}</style></head><body><main class="w">
@@ -446,7 +446,7 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name=
 <h1>Connect {client} to Aloof</h1>{badge}
 <div class="access"><b>Approving gives {client} full access to your Aloof account.</b> It can deploy and delete apps, change environment variables and secrets, manage volumes, databases and domains, and spend your credit. You can revoke it later by deleting its key under API keys. <a href="{www}/docs/mcp#revoke" target="_blank" rel="noopener">How</a></div>
 <p class="muted">After you approve, you'll be sent back to <code>{target}</code></p>
-{err}<form method="post"><input type="hidden" name="req" value="{req}">
+{err}<form method="post" onsubmit="var b=event.submitter;if(b)setTimeout(function(){{b.disabled=true;b.textContent=b.value=='approve'?'Approving…':'Denying…'}},0)"><input type="hidden" name="req" value="{req}">
 <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" value="{email}">
 <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
 <p class="muted" style="margin:8px 0 0"><b style="color:#ffb020">Only one assistant can be connected with a password.</b> Approving with your password disconnects any assistant you connected that way before. To keep several connected, approve each one with its own API key instead.</p>
