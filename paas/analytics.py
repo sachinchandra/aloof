@@ -70,11 +70,11 @@ def _ensure():
 def _account(account_id):
     try:
         from .db import q
-        return q("select id, email, is_test from accounts where id=?", (int(account_id),), one=True)
+        return q("select id, is_test from accounts where id=?", (int(account_id),), one=True)
     except Exception: return None
 def _person(a):
-    """Person properties set on signup/identify: email and is_test (from accounts.is_test)."""
-    return {"email": a.get("email"), "is_test": bool(a.get("is_test"))}
+    """Person properties set on signup/identify: is_test only (from accounts.is_test). Never the email (privacy policy)."""
+    return {"is_test": bool(a.get("is_test"))}
 def capture(account_id, event, props=None):
     """Never raises. Returns True if queued."""
     try:
@@ -88,7 +88,7 @@ def capture(account_id, event, props=None):
         _ensure(); _q.put_nowait({"api_key": api_key(), "event": event, "distinct_id": str(int(account_id)), "properties": p}); return True
     except Exception as e: log.warning("analytics capture skipped: %s", type(e).__name__); return False
 def identify(account_id):
-    """Server-side $identify on login: sets person email + is_test. Never raises."""
+    """Server-side $identify on login: sets person is_test (never email). Never raises."""
     try:
         if not enabled() or account_id is None: return False
         a = _account(account_id)

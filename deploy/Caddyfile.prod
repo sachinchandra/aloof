@@ -63,8 +63,12 @@ https:// {
 		header_up X-Forwarded-Proto https
 	}
 }
-# Plain HTTP on any host (apps included) only redirects to HTTPS; it used to reach the website, which then served the
-# homepage (with analytics) under an app's hostname.
+# Plain HTTP: Caddy answers ACME http-01 challenges itself (before routes). Everything else asks the control plane, which
+# 301s known hosts (platform, *.domain, verified custom domains) to https and 404s unknown hosts (no reflected redirect).
 http:// {
-	redir https://{host}{uri} permanent
+	rewrite * /v1/tls/http-redirect
+	reverse_proxy 127.0.0.1:8000 {
+		header_up X-Aloof-Uri {http.request.orig_uri}
+		header_up -X-Forwarded-For
+	}
 }

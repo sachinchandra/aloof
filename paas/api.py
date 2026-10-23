@@ -333,6 +333,21 @@ def tls_ask(domain: str):
     if q("select 1 from domains where domain=? and verified=1", (d,), one=True): return {"ok": True}
     if pair_target(d): return {"ok": True}        # www/apex twin of a verified domain (served as a 308 redirect)
     raise HTTPException(403, "unknown domain")
+def http_host_known(host):
+    """Plain-HTTP redirect gate: platform hosts, any *.<our domain>, verified custom domains (and their www/apex twins)."""
+    d = (host or "").split(":")[0].lower().rstrip(".")
+    if not d: return False
+    if d in SYSTEM_HOSTS or any(d == b or d.endswith("." + b) for b in APP_DOMAINS): return True
+    try: tls_ask(d); return True
+    except HTTPException: return False
+@app.get("/v1/tls/http-redirect", include_in_schema=False)
+def tls_http_redirect(request: Request):
+    """Caddy's http:// catch-all proxies here (ACME http-01 challenges are answered by Caddy before this). Known hosts get a
+    301 to https; unknown hosts get a 404 instead of a reflected redirect."""
+    host = request.headers.get("host", ""); uri = request.headers.get("x-aloof-uri") or "/"
+    if not uri.startswith("/") or uri.startswith("//"): uri = "/"
+    if not http_host_known(host): return PlainTextResponse("not found", status_code=404)
+    return RedirectResponse(f"https://{host.split(':')[0].lower()}{uri}", status_code=301)
 def _wallet(a): return {"credit_cents": round(a.get("credit_cents") or 0, 4), "credit_usd": billing.usd(a.get("credit_cents"))}
 @app.get("/v1/usage")
 def usage(a=Depends(acct)): return engine.usage(a["id"]) | _wallet(a) | {"month": billing.month_summary(a["id"])}
