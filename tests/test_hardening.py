@@ -42,7 +42,7 @@ def test_mcp_manifest_region_and_tools():
     m = c.get("/.well-known/mcp.json").json()
     assert m["region"] == "Nuremberg, Germany (backups in Helsinki)" and "Finland" not in m["description"]
     src = open(os.path.join(os.path.dirname(__file__), "..", "mcp_server", "server.py")).read()
-    assert len(m["tools"]) == src.count("@mcp.tool()") and "deploy_app" in m["tools"]
+    assert len(m["tools"]) == src.count("@mcp.tool(") and "deploy_app" in m["tools"]
     from paas import www_blog
     post = next(p for p in www_blog.posts() if p["slug"] == "mcp-let-your-agent-deploy")
     assert f"{len(m['tools'])} tools cover" in post["html"] and "__MCP" not in post["html"]

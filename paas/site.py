@@ -54,11 +54,8 @@ def footer(brand):
 <div><h5>Account</h5><a href="/login" data-cta=login data-cta-loc=footer>Log in</a><a href="/login#register" data-cta=deploy_free data-cta-loc=footer_links>Sign up</a><a href="/dashboard">Dashboard</a></div></div>
 <div class=base><span>© 2026 {brand}</span></div></div></footer>"""
 def mcp_tool_names():
-    """Tool names registered with @mcp.tool() in mcp_server/server.py, in order. Parsed (not imported) so the web process
-    doesn't load the MCP server; llms.txt and the MCP docs use this so the list can't drift from the code."""
-    try: src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp_server", "server.py")).read()
-    except OSError: return []
-    return re.findall(r"@mcp\.tool\([^)]*\)\s*\n(?:@[^\n]*\n)*\s*(?:async\s+)?def\s+(\w+)", src)
+    """Tool names registered with @mcp.tool() in mcp_server/server.py (parsed, not imported; see paas.mcp_tools)."""
+    from .mcp_tools import mcp_tool_names as _n; return _n()
 def posthog_key():
     k = (os.environ.get("POSTHOG_KEY") or os.environ.get("POSTHOG_API_KEY") or "").strip()
     if not k:
@@ -145,7 +142,7 @@ def _faq_full():
     d = _sd(); sh = d["sh"]
     return [("What does “self-driving” mean today?", "Aloof rolls back deploys that raise errors or latency, replaces instances that fail health checks, routes traffic away from failing instances and autoscales, all without you stepping in. Predictive scaling, auto right-sizing and AI auto-fix are coming soon and not live yet."),
             ("Will automatic rollback cover my app?", f"Only if it gets enough traffic in the {d['win_min']} minutes after a deploy: at least {sh['min_requests']} requests, with at least {sh['min_bad']} bad requests from at least {sh['min_ips']} IPs. Low-traffic apps aren't covered, but health-gated deploys and one-command rollback still are. You can turn automatic rollback off per app."),
-            ("Does <code>diagnose_app</code> send my data to an AI model?", "No. It's a read-only MCP tool that applies rules to your app's recent errors, health checks, deploys, rollbacks, restarts and exit codes, and redacts secrets. Your own assistant reads the result and explains it."),
+            ("Does <code>inspect(what=&quot;diagnose&quot;)</code> send my data to an AI model?", "No. It's a read-only MCP tool that applies rules to your app's recent errors, health checks, deploys, rollbacks, restarts and exit codes, and redacts secrets. Your own assistant reads the result and explains it."),
             ("Can an AI agent deploy for me safely?", "Yes. Agents use OAuth 2.1 with PKCE and get tokens you can revoke at any time."),
             ("What can I deploy?", "Any Docker image, or a git repo with a Dockerfile. This covers Node.js, Python, Go, Rust, Ruby, Java/JVM, PHP and static sites."),
             ("How does scale-to-zero affect latency?", "Idle apps sleep and wake on the next request in about a second."),
@@ -158,7 +155,7 @@ def _selfdriving_doc():
     return f"""<h1>How self-driving works</h1><p>What Aloof does on its own today, with the exact limits it uses. These numbers come straight from the platform code.</p>
 <h2 id=rollback>Bad deploys roll themselves back</h2><p>For {d['win_min']} minutes after every deploy, Aloof compares the new release with the previous one. If the 5xx rate is more than {sh['err_pp']:g} points higher and more than {d['ex']}, or p95 latency is more than {d['px']} and over {sh['p95_ms']:g} ms slower, it rolls back with zero downtime and records why. You see the reason in release history, the CLI, the dashboard, over MCP and in the audit log. You can turn it off per app (<code>set_self_heal</code> over MCP).</p>
 <div class=note><b>Fine print:</b> a rollback needs at least {sh['min_requests']} requests and at least {sh['min_bad']} bad requests from at least {sh['min_ips']} IPs, so low-traffic apps aren't covered.</div>
-<h2 id=diagnose>Ask your assistant why it broke</h2><p>The <code>diagnose_app</code> MCP tool gathers recent errors, failed health checks, deploys, rollbacks, restarts and exit codes, then names the likely cause and fix. Your assistant explains it in plain language. It's read-only and redacts secrets. The causes come from rules, not an AI model.</p>
+<h2 id=diagnose>Ask your assistant why it broke</h2><p>The <code>inspect</code> MCP tool (<code>what=&quot;diagnose&quot;</code>) gathers recent errors, failed health checks, deploys, rollbacks, restarts and exit codes, then names the likely cause and fix. Your assistant explains it in plain language. It's read-only and redacts secrets. The causes come from rules, not an AI model.</p>
 <h2 id=lb>Traffic routes around failing instances</h2><p>Requests go to the instance with the fewest open connections. {_w(l['fails'], True)} failures in a row (connection errors, timeouts, 502 to 504) take an instance out for {d['cd0']} seconds, backing off up to {d['cdmax_t']}. {_w(l['health_fails'], True)} failed health checks also take it out. Aloof never removes more than half your instances, or the last one. This applies when you run 2 or more instances.</p>
 <h2 id=health>Deploys that only switch over when healthy</h2><p>Redeploys only take traffic after the new instance passes its health check, with zero downtime. Health checks run every 5 seconds and replace unhealthy instances automatically. Roll back to any of your last {d['releases']} releases with one command.</p>
 <h2 id=scale>Scales itself, down to zero</h2><p>Autoscaling checks in-flight requests every 3 seconds. Idle apps sleep and wake on the next request in about a second, and you pay nothing while they sleep.</p>
@@ -211,9 +208,9 @@ def landing(brand, base, api, mcp):
 <p class=c style="margin-top:22px"><a href="/docs/self-driving">How self-driving works →</a></p></div></section>
 <section class="s v5s" id=ai><div class="wrap v5-split"><div><div class=eyebrow>AI ops</div><h2 class=t>Your AI runs ops</h2><p class=lead2>Connect Claude, ChatGPT or Cursor. They deploy, debug and scale for you.</p>
 <p><a class="btn ghost sm" href="/docs/mcp" data-cta=connect_mcp data-cta-loc=ai_ops>Connect your AI</a></p></div>
-<div class="chat reveal" role=img aria-label="Chat: you ask why your app is down; the assistant uses diagnose_app and answers that it ran out of memory after the last deploy, and offers to scale to 512 MB.">
+<div class="chat reveal" role=img aria-label="Chat: you ask why your app is down; the assistant uses inspect(what=diagnose) and answers that it ran out of memory after the last deploy, and offers to scale to 512 MB.">
 <div class="msg you" aria-hidden=true>Why is my app down?</div>
-<div class=tool aria-hidden=true>{svg("term")} diagnose_app <span>api</span></div>
+<div class=tool aria-hidden=true>{svg("term")} inspect <span>api · diagnose</span></div>
 <div class="msg ai" aria-hidden=true>It ran out of memory after the last deploy (exit 137). Scale to 512 MB?</div>
 <div class=chips aria-hidden=true><span>Scale to 512 MB</span><span>Show logs</span></div></div></div></section>
 <section class="s v5s" id=how><div class=wrap><h2 class="t c">Ship in 3 steps</h2><ol class=flow>
@@ -428,7 +425,7 @@ aloof autoscale preview --min 0 --max 2 --idle 120    # scale to zero after 2 id
 <h3 id=namecheap>Namecheap</h3><p>Domain List → Manage → Advanced DNS → Add New Record. Host is <code>api</code> or <code>@</code>. For the root domain you can use an <b>ALIAS Record</b> to <code>&lt;app&gt;.{base}</code> or the A record{AAAA_SENT}. Delete the default "URL Redirect" or parking records for the same host. TXT Host: <code>_aloof-challenge.api</code>. The nameservers must be Namecheap BasicDNS or PremiumDNS for Advanced DNS to apply.</p>
 <h3 id=route53>Amazon Route 53</h3><p>Hosted zones → your zone → Create record. Name is <code>api</code> (leave it empty for the root domain). Route 53's "Alias" option only targets AWS resources, so it can't point at us: for the root domain use <b>A</b> and <b>AAAA</b> records with the plain values, and for subdomains a <b>CNAME</b>. Put the TXT value in quotes: <code>"aloof-verify=…"</code>.</p>
 <h2 id=propagation>Propagation</h2><p>New records usually show up within a few minutes, but resolvers can cache the old answer for as long as the previous record's TTL (often up to an hour, rarely 24–48 hours). There's nothing to do while you wait: we keep checking, and you can also press Check now. Manual checks are rate limited (see Limits).</p>
-<h2 id=status>Status and monitoring</h2><p>Each domain has a status and a last-checked time (dashboard, CLI <code>aloof domains &lt;app&gt; list</code>, API <code>GET /v1/domains</code>, MCP <code>list_domains</code>):</p><ul>
+<h2 id=status>Status and monitoring</h2><p>Each domain has a status and a last-checked time (dashboard, CLI <code>aloof domains &lt;app&gt; list</code>, API <code>GET /v1/domains</code>, MCP <code>list(kind=&quot;domains&quot;)</code>):</p><ul>
 <li><b>pending</b>: not verified yet. We keep re-checking. An unverified claim is <b>released after {DAYS} days</b>, which frees the name for anyone to claim, so add it again if you need more time.</li>
 <li><b>verified</b>: ownership and routing both check out, and HTTPS is on. We re-check every 30 minutes.</li>
 <li><b>dns_error</b>: it was verified, but its DNS no longer checks out (a record was changed or deleted, or a proxy was switched on). The domain is <b>not removed</b> and keeps being served and renewed as long as traffic still reaches us, but fix the records. It returns to verified automatically once DNS is right again. One failed lookup doesn't flag a domain: it has to fail on two checks in a row.</li></ul>
@@ -447,7 +444,7 @@ POST   /v1/apps/&lt;app&gt;/domains            {{"domain": "example.com"}}
 POST   /v1/apps/&lt;app&gt;/domains/&lt;domain&gt;/verify
 GET    /v1/apps/&lt;app&gt;/domains            (one app)     GET /v1/domains  (whole account, with your limit)
 DELETE /v1/apps/&lt;app&gt;/domains/&lt;domain&gt;
-MCP tools: add_domain, list_domains, verify_domain, remove_domain</pre>
+MCP tools: add_domain, verify_domain, remove_domain, list(kind=&quot;domains&quot;)</pre>
 <p>Each domain in the response carries <code>status</code>, <code>last_checked_at</code>, <code>dns_records</code> (<code>ownership</code>, <code>routing</code>, plus <code>a</code>, <code>aaaa</code> and <code>recommended</code>) and, for root or <code>www</code> domains, <code>www_pair</code>.</p>""",
 "billing": """<h1>Billing, invoices &amp; tax</h1>
 <p><b>The short version:</b> you pick a plan (Free, Hobby $5/month or Pro $20/month), and the plan fee comes back to you as included usage. Apps are billed per second only while they run. If you use more than your plan includes, the rest comes out of a prepaid balance that you top up by card. Every new account starts with $5 of credit in that balance. Prices are in US dollars; taxes may apply where required.</p>
@@ -511,7 +508,7 @@ MCP tools: add_domain, list_domains, verify_domain, remove_domain</pre>
 <li><b>Image or repo can't be pulled</b>: for private sources, run <code>aloof registry login</code> or set up a <a href="/docs/private">deploy key</a>.</li>
 <li><b>The build failed</b>: see build logs below.</li></ol>
 <p>After fixing it, deploy again or press <b>Retry deploy</b> on the app. To go back to a known-good version without rebuilding, run <code>aloof rollback &lt;app&gt;</code>.</p>
-<p><b>Diagnose</b>: <code>GET /v1/apps/&lt;app&gt;/diagnose</code> (or the <code>diagnose_app</code> MCP tool) returns recent error log lines, failed health checks, recent deploys, rollbacks and restarts, instance states and exit codes, and likely causes with a suggested fix. It is read-only and redacts secrets and env values.</p>
+<p><b>Diagnose</b>: <code>GET /v1/apps/&lt;app&gt;/diagnose</code> (or the MCP tool <code>inspect(what=&quot;diagnose&quot;)</code>) returns recent error log lines, failed health checks, recent deploys, rollbacks and restarts, instance states and exit codes, and likely causes with a suggested fix. It is read-only and redacts secrets and env values.</p>
 <h2 id=build-logs>Where are the build logs?</h2><p>Build and deploy output is recorded as platform events. You'll find it in the deploy panel on the app's page in the dashboard (shown while a deploy runs and when it fails), under the app's <b>Logs</b> tab, and with <code>aloof logs &lt;app&gt;</code> (the <i>platform events</i> section). The build step stores the last 40 lines of <code>docker build</code> output when the build finishes, so you'll see them in one batch rather than line by line.</p>
 <h2 id=release-command>What happens when the release command fails?</h2><p><code>release_command</code> (for example database migrations) runs once, in a separate machine, after the build and before any new instance starts. If it exits with a non-zero code, the deploy stops: no new instances start, the release is marked failed, the previous release keeps serving, and the last 30 lines of its output are in the logs prefixed with <code>[release]</code>. Fix the command and deploy again. Make migrations safe to run twice, because a retry runs them again.</p>
 <h2 id=brief-downtime>A short gap during a deploy</h2><p>Apps with a volume attached are single-writer, so the old instance stops before the new one starts, which causes a brief gap. Apps without a volume roll with no downtime.</p>

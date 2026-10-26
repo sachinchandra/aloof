@@ -150,8 +150,8 @@ def test_global_cap_keeps_domain_pending(dns, monkeypatch):
     assert TestClient(api.app).get("/v1/tls/ask?domain=cap3.example.com").status_code == 403
 def test_mcp_tools_present_and_cli_flags():
     from paas import site
-    names = site.mcp_tool_names(); assert {"add_domain", "list_domains", "verify_domain", "remove_domain"} <= set(names)
-    import json; m = json.load(open(os.path.join(os.path.dirname(__file__), "..", "mcp_server", "manifest.json"))); assert {"list_domains", "verify_domain", "remove_domain"} <= set(m["tools"])
+    names = site.mcp_tool_names(); assert {"add_domain", "verify_domain", "remove_domain"} <= set(names)
+    import json; m = json.load(open(os.path.join(os.path.dirname(__file__), "..", "mcp_server", "manifest.json"))); assert {"verify_domain", "remove_domain"} <= set(m["tools"])
 def test_docs_page_accurate():
     h = TestClient(api.app, base_url="http://www.aloof.test").get("/docs/domains").text
     for s in ["id=steps", "id=subdomain-vs-apex", "id=www", "id=cloudflare", "id=godaddy", "id=namecheap", "id=route53", "id=limits", "id=status", "dns_error", "grey cloud", "ALIAS", "Free 1, Hobby 3, Pro 10", "7 days", "308"]: assert s in h, s

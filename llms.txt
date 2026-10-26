@@ -74,6 +74,7 @@
 - stdio: `python mcp_server/server.py` (env ALOOF_API_URL, ALOOF_API_KEY)
 - Connect: add {{MCP}} as a custom connector / remote MCP server in Claude, ChatGPT or Cursor (Cursor mcp.json: `{"mcpServers":{"aloof":{"url":"{{MCP}}"}}}`). The client registers itself (dynamic client registration), opens the {{BRAND}} sign-in page to approve, then gets a scoped token (PKCE). Clients without OAuth send `Authorization: Bearer pk_...`.
 - Tools ({{MCP_TOOL_COUNT}}, generated from mcp_server/server.py; parameters in {{API}}/mcp-tools.md): {{MCP_TOOLS}}
+- Reads are grouped: inspect(name, what=status|details|logs|diagnose|releases|metrics|events|domains) and list(kind=apps|domains|volumes|snapshots|postgres|backups|templates|plans|regions|usage). Changes stay separate tools; destroy_app and restore are standalone. Pre-v2 names (get_status, list_apps, diagnose_app, ...) still work when called; list them with {{MCP}}?tools=legacy or header X-Aloof-Tools: legacy. Mapping: {{API}}/mcp-tools.md
 
 ## App contract
 Listen on $PORT (default 8080) over HTTP. Put persistent data on a mounted volume, or use managed Postgres via $DATABASE_URL. (Once GPUs launch, GPU plans expose one NVIDIA GPU via CUDA.)

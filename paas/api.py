@@ -739,7 +739,8 @@ def mcp_tools_md():
 @app.get("/mcp-tools.json")
 def mcp_tools_json():
     from . import llms_full as LF
-    return {"server": PUBLIC_MCP_URL, "tools": LF.mcp_tools()}
+    from .mcp_tools import legacy_map
+    return {"server": PUBLIC_MCP_URL, "tools": LF.mcp_tools(), "legacy": legacy_map(), "legacy_opt_in": f"{PUBLIC_MCP_URL}?tools=legacy or header X-Aloof-Tools: legacy"}
 @app.get("/.well-known/mcp.json")
 def mcp_manifest():
     m = json.load(open(os.path.join(ROOT,"mcp_server","manifest.json")))

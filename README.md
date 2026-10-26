@@ -74,7 +74,7 @@ Add `https://mcp.aloof.si/mcp` as a connector in Claude, ChatGPT or Cursor (OAut
 {"mcpServers": {"aloof": {"command": "python3", "args": ["mcp_server/server.py"],
   "env": {"ALOOF_API_URL": "http://localhost:8000", "ALOOF_API_KEY": "pk_..."}}}}
 ```
-Tools (42, parsed from `mcp_server/server.py`): `list_plans, signup, deploy_app, get_status, list_apps, get_logs, scale_app, set_env, destroy_app, get_usage, list_templates, deploy_template, create_volume, list_volumes, attach_volume, detach_volume, set_autoscale, add_domain, list_domains, verify_domain, remove_domain, join_gpu_waitlist, list_releases, diagnose_app, rollback_app, set_self_heal, create_postgres, list_regions, list_postgres, attach_postgres, backup_postgres, snapshot_volume, restore_volume, exec_command, add_log_drain, list_offsite_backups, restore_offsite_backup, registry_login, add_git_credential, deploy_with_config, app_status, create_deploy_token`.
+Tools (25, parsed from `mcp_server/server.py`): `inspect, list, signup, deploy_app, deploy_template, scale_app, set_env, rollback_app, set_self_heal, exec_command, destroy_app, add_domain, verify_domain, remove_domain, create_volume, attach_volume, detach_volume, create_postgres, attach_postgres, backup, restore, add_log_drain, add_credential, create_deploy_token, join_gpu_waitlist`. The 22 pre-v2 names (get_status, list_apps, diagnose_app, ...) still work when called and are listed with `?tools=legacy` or header `X-Aloof-Tools: legacy`; mapping in /mcp-tools.md.
 
 ## Custom domains: how to connect one
 
@@ -98,7 +98,7 @@ aloof domains my-app remove api.example.com
 - **Status**: `pending` (re-checked after 2 min, then 5, 10, 30 min, 1 h, 3 h, 6 h), `verified` (re-checked every 30 min), `dns_error` (was verified, DNS later broke: still served, never removed, recovers by itself). Unverified claims are released after 7 days.
 - **www/apex**: once `example.com` is verified, `www.example.com` redirects to it with a 308 (and the reverse for a verified `www`), if it points at us too. Only to verified domains.
 - **Limits** per account: Free 1, Hobby 3, Pro 10 domains (`PAAS_DOMAIN_LIMIT_<TIER>` overrides); 20 adds and 30 manual verifies per hour per account (HTTP 429 + `Retry-After`); `PAAS_MAX_CUSTOM_DOMAINS` (500) caps certificate-issuing hostnames platform-wide.
-- **API / MCP**: `POST /v1/apps/{app}/domains`, `POST .../{domain}/verify`, `GET /v1/apps/{app}/domains`, `GET /v1/domains`, `DELETE .../{domain}`; MCP tools `add_domain`, `list_domains`, `verify_domain`, `remove_domain`.
+- **API / MCP**: `POST /v1/apps/{app}/domains`, `POST .../{domain}/verify`, `GET /v1/apps/{app}/domains`, `GET /v1/domains`, `DELETE .../{domain}`; MCP tools `add_domain`, `verify_domain`, `remove_domain`, `list(kind="domains")`.
 - **Operator config**: `PAAS_EDGE_IPS` is a comma list of the edge's public IPv4 *and* IPv6 addresses (e.g. `178.104.200.75,2a01:4f8:1c1f:71d2::1`); the controller re-check interval is `PAAS_DOMAIN_TICK_S` (60 s). Migration v12 adds the status columns.
 
 ## Layout

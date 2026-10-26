@@ -134,7 +134,7 @@ def test_llms_txt_tools_and_copy():
     from paas import site
     src = open(os.path.join(os.path.dirname(__file__), "..", "mcp_server", "server.py")).read(); live = None
     assert len(site.mcp_tool_names()) == src.count("@mcp.tool(")
-    names = site.mcp_tool_names(); assert "diagnose_app" in names and "list_templates" in names and "deploy_template" in names
+    names = site.mcp_tool_names(); assert "inspect" in names and "list" in names and "diagnose_app" not in names and "deploy_template" in names
     if live is not None: assert names == live
     assert f"Tools ({len(names)}" in t and ", ".join(names) in t and ", ".join(names) in c.get("/docs/mcp").text
     for bad in ("fly.io", "Fly.io", "Render", "Railway", "Heroku", "per workspace", "/workspace", "Unlimited seats", "for teams"): assert bad not in t, bad
@@ -152,7 +152,7 @@ def test_home_v5():
     h = c.get("/").text; b = re.sub(r"<script.*?</script>|<style.*?</style>", "", h, flags=re.S)
     assert "Give your superintelligence a stronger engine." in h and "babysit" not in h.lower() and "Coming soon" in h and "/pricing#gpus" in h and "/docs/self-driving" in h and 'href="/templates"' in h
     for t in ("uptime-kuma", "n8n", "umami", "vaultwarden", "ntfy", "pocketbase", "linkding"): assert f"/templates/{t}" in h, t
-    assert h.count("<details class=faq>") <= 4 and "diagnose_app" in h and 'role=img aria-label="Animation' in h and "prefers-reduced-motion" in h
+    assert h.count("<details class=faq>") <= 4 and "inspect" in h and 'role=img aria-label="Animation' in h and "prefers-reduced-motion" in h
     for comp in ("Fly", "Render", "Railway", "Heroku", "testimonial"): assert comp not in b
     assert len(h.encode()) < 40000
     from paas import site

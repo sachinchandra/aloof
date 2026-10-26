@@ -65,15 +65,13 @@ def full(docs, brand, base, api, mcp, site_url, llms_txt):
 def mcp_tools(path=None):
     """[{name, description, params:[{name, type, default, required}]}] for every @mcp.tool() function, in source order."""
     path = path or os.path.join(ROOT, "mcp_server", "server.py")
-    src = open(path).read(); tree = ast.parse(src); out = []
-    is_tool = lambda d: isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "tool"
-    for f in tree.body:
-        if not isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) or not any(is_tool(d) for d in f.decorator_list): continue
+    from .mcp_tools import tool_defs, tool_name; out = []
+    for f in tool_defs(path):
         args = f.args.args; defs = [None] * (len(args) - len(f.args.defaults)) + list(f.args.defaults); ps = []
         for a, d in zip(args, defs):
             ps.append({"name": a.arg, "type": ast.unparse(a.annotation) if a.annotation else "any",
                        "default": None if d is None else ast.unparse(d), "required": d is None})
-        out.append({"name": f.name, "description": " ".join((ast.get_docstring(f) or "").split()), "params": ps})
+        out.append({"name": tool_name(f), "description": " ".join((ast.get_docstring(f) or "").split()), "params": ps})
     return out
 def mcp_tools_md(brand, mcp_url, api):
     ts = mcp_tools()
@@ -88,4 +86,9 @@ def mcp_tools_md(brand, mcp_url, api):
             o += [f"| `{p['name']}` | `{p['type'].replace('|', '/')}` | {'yes' if p['required'] else 'no'} | {'' if p['default'] is None else '`' + p['default'].replace('|', '/') + '`'} |" for p in ps]
             o.append("")
         else: o.append("No parameters (besides `api_key`).\n")
+    from .mcp_tools import legacy_map; lm = legacy_map()
+    if lm:
+        o += ["## Legacy tool names\n", f"Before v2 the server had {len(ts) + len(lm)} separate tools. The old names still work when called, but are only listed "
+              f"if you opt in: connect to `{mcp_url}?tools=legacy`, or send the header `X-Aloof-Tools: legacy` (stdio package: `ALOOF_MCP_TOOLS=legacy`).\n",
+              "| Old tool | Use instead |\n|---|---|"] + [f"| `{k}` | `{v.replace('|', '/')}` |" for k, v in lm.items()] + [""]
     return "\n".join(o).rstrip() + "\n"

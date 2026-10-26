@@ -192,7 +192,7 @@ def test_docs_pricing_llms_list_new_features():
     for d in ("releases", "postgres", "console", "logs"): assert c.get(f"/docs/{d}").status_code == 200, d
     assert "pg-basic" in c.get("/docs/postgres").text and "Managed Postgres" in c.get("/pricing").text
     t = c.get("/llms.txt").text; assert "/rollback" in t and "/v1/pg" in t and "/drains" in t and "/console" in t
-    tools = set(c.get("/.well-known/mcp.json").json()["tools"]); assert {"rollback_app", "create_postgres", "exec_command", "add_log_drain", "snapshot_volume"} <= tools
+    tools = set(c.get("/.well-known/mcp.json").json()["tools"]); assert {"rollback_app", "create_postgres", "exec_command", "add_log_drain", "backup", "inspect", "list"} <= tools
 
 def test_destroy_during_redeploy_leaves_nothing_running(fake, user, monkeypatch):
     deploy(user, "racer", "good:r1"); orig = fake.start_instance
