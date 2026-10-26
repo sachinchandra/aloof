@@ -1,14 +1,14 @@
 [Unit]
 Description=Aloof: block cloud metadata (169.254.169.254) from containers
-After=docker.service
-PartOf=docker.service
+# Independent of how dockerd is run (supervisord here): re-applies the DOCKER-USER rule every 10 s
+After=network-online.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/local/sbin/aloof-metadata-block.sh
-ExecStop=/usr/local/sbin/aloof-metadata-block.sh stop
+Type=simple
+ExecStart=/usr/local/sbin/aloof-metadata-block.sh watch
+ExecStopPost=/usr/local/sbin/aloof-metadata-block.sh stop
+Restart=always
+RestartSec=5
 
 [Install]
-# WantedBy docker: re-applied every time Docker (re)starts; PartOf: stopped with it
-WantedBy=docker.service multi-user.target
+WantedBy=multi-user.target

@@ -26,7 +26,7 @@ sudo mkdir -p /var/lib/aloof/caddy
 if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then
   sudo install -m 755 metadata-block.sh /usr/local/sbin/aloof-metadata-block.sh
   sudo install -m 644 aloof-metadata-block.service /etc/systemd/system/aloof-metadata-block.service
-  sudo systemctl daemon-reload && sudo systemctl enable aloof-metadata-block.service >/dev/null 2>&1 && sudo systemctl restart aloof-metadata-block.service
+  sudo systemctl daemon-reload && sudo systemctl reenable aloof-metadata-block.service >/dev/null 2>&1 && sudo systemctl restart aloof-metadata-block.service
 fi
 sudo supervisorctl -c supervisord.conf reread && sudo supervisorctl -c supervisord.conf update
 sudo supervisorctl -c supervisord.conf restart paas mcp caddy
