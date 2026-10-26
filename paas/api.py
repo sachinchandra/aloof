@@ -529,7 +529,12 @@ def auth_magic(m: MagicReq, request: Request):
 @app.get("/auth/magic")
 def auth_magic_finish(token: str):
     try: a = auth.finish_magic(token)
-    except PermissionError as e: return HTMLResponse(f"<p>{e}. <a href='/login'>Request a new link</a></p>", 400)
+    except PermissionError:
+        from . import www
+        body = www.shell("Sign in", "This sign-in link doesn't work anymore",
+                         "Links last 15 minutes and work once. If you already clicked it, you may be signed in.",
+                         "<p><a class='btn pri' href='/login'>Get a new link</a> <a class='btn ghost' href='/dashboard'>Open dashboard</a></p>", narrow=True)
+        return HTMLResponse(www.render("/auth/magic", "Sign-in link expired", "Request a new sign-in link.", body), 400)
     if a.get("_created"): analytics.capture(a["id"], "signup_completed", {"method": "magic_link"} | (a.get("_attribution") or {}))
     else: analytics.identify(a["id"])
     r = RedirectResponse("/dashboard", 303); r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")

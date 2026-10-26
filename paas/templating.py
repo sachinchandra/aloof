@@ -359,13 +359,17 @@ def deploy_button(request: Request, template: str | None = None, repo: str | Non
     ep = f"/v1/templates/{e(template)}/deploy" if p else "/v1/deploy/repo"
     extra = "" if p else "<label>Port<input name=port type=number value=8080></label>"
     title = f"Deploy {p['name']}" if p else "Deploy repository"
+    default_name = (re.sub(r"[^a-z0-9-]", "", (template or "").lower())[:17].strip("-") or "app") + "-" + secrets.token_hex(2) if p else ""
+    if default_name and not default_name[0].isalpha(): default_name = "app-" + default_name
+    plan_note = (f"<p class=muted style='font-size:14px'>Creates one app on plan <code>{e(p['default_plan'])}</code> in {e(_region_label(p['region']))}. "
+                 "It's billed per second from your credit; you can stop or destroy it from the dashboard at any time.</p>") if p else ""
     inner = f"""<p>{e(p['description']) if p else 'From <code>' + e(repo) + '</code>'}</p>
-<form id=f class=card><label>App name<input name=name required pattern='(?!pg-)[a-z][a-z0-9\-]{{1,21}}[a-z0-9]' minlength=3 maxlength=23 title='3-23 chars: lowercase letters, digits, hyphens; starts with a letter'></label>{fields}{extra}<button class=btn>Deploy</button></form><pre id=o></pre>
+{plan_note}<form id=f class=card><label>App name<input name=name value='{e(default_name)}' required pattern='(?!pg-)[a-z][a-z0-9\-]{{1,21}}[a-z0-9]' minlength=3 maxlength=23 title='3-23 chars: lowercase letters, digits, hyphens; starts with a letter'><span class=muted style='font-size:13px'>Becomes https://&lt;name&gt;.aloof.si. Lowercase letters, digits and hyphens.</span></label>{fields}{extra}<p style='margin:14px 0 0'><button class='btn pri' id=fb>Deploy</button></p></form><pre id=o style='display:none;white-space:pre-wrap'></pre>
 <script>document.getElementById('f').onsubmit=async function(ev){{ev.preventDefault();var fd=new FormData(this),b={{name:fd.get('name'),env:{{}}}};
 for(var [k,v] of fd.entries()){{if(k.indexOf('env_')==0)b.env[k.slice(4)]=v}}{'' if p else "b.repo=" + json.dumps(repo) + ";b.port=+fd.get('port');"}
-var r=await fetch({json.dumps(ep)},{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json','X-Aloof-CSRF':'1'}},body:JSON.stringify(b)}});
-var j=await r.json();document.getElementById('o').textContent=r.ok?('Deploying '+j.app.name+' at '+j.app.url+(Object.keys(j.generated_secrets||{{}}).length?'\\nSave these generated secrets now: '+JSON.stringify(j.generated_secrets,null,1):'')):('Error: '+(j.detail||r.status));
-if(r.ok)setTimeout(function(){{location='/dashboard'}},8000)}}</script>"""
+var fb=document.getElementById('fb'),o=document.getElementById('o');fb.disabled=true;fb.textContent='Deploying…';var r=await fetch({json.dumps(ep)},{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/json','X-Aloof-CSRF':'1'}},body:JSON.stringify(b)}});
+var j={{}};try{{j=await r.json()}}catch(x){{}}o.style.display='';if(!r.ok){{fb.disabled=false;fb.textContent='Deploy'}}o.textContent=r.ok?('Deploying '+j.app.name+'. It will be at '+j.app.url+' in about a minute.'+(Object.keys(j.generated_secrets||{{}}).length?'\\nSave these generated secrets now: '+JSON.stringify(j.generated_secrets,null,1):'')):('Could not deploy: '+(typeof j.detail=='string'?j.detail:'error '+r.status));
+if(r.ok){{var gen=Object.keys(j.generated_secrets||{{}}).length;o.textContent+=gen?'\\n\\nCopy the secrets above, then open your dashboard to watch the deploy.':'\\n\\nOpening your dashboard to show progress…';if(gen){{var a=document.createElement('a');a.className='btn pri';a.href='/dashboard';a.textContent='Open dashboard';o.after(a)}}else setTimeout(function(){{location='/dashboard'}},3000)}}}}</script>"""
     return _page("/deploy", title, "Confirm to deploy on Aloof.", inner)
 
 BUTTON_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" width="164" height="32" role="img" aria-label="Deploy on Aloof"><rect width="164" height="32" rx="6" fill="#111"/>'

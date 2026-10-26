@@ -19,7 +19,7 @@
 3. Poll `GET {{API}}/v1/apps/<your-app-name>` until `status=="running"`. The app is served at `https://<your-app-name>.{{DOMAIN}}/` (e.g. `https://my-api-1234.{{DOMAIN}}/`)
 
 ## API
-- GET /v1/plans: plans, rates, tiers, regions. Pricing (USD excl. tax, billed per second; monthly figures assume 720 hours):
+- GET /v1/plans: plans, rates, tiers, regions. Prices are in US dollars; taxes may apply where required. Pricing (billed per second; monthly figures assume 720 hours):
   shared CPU: shared-1x-256mb $1.99/mo, shared-1x-512mb $3.49, shared-1x-1gb $5.99, shared-2x-2gb $11.99, shared-4x-8gb $44
   performance CPU: perf-1x-2gb $24, perf-2x-4gb $59, perf-4x-8gb $119, perf-8x-16gb $239
   {{GPU}}
