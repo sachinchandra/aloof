@@ -9,7 +9,8 @@ from .db import q, kv_put, kv_get
 from . import auth, site
 log = logging.getLogger("paas.waitlist")
 R = APIRouter()
-KINDS = ("gpu", "region", "design_partner")
+KINDS = ("gpu", "region", "design_partner", "byo_server")
+BYO_PROVIDERS = {"hetzner": "Hetzner", "digitalocean": "DigitalOcean", "aws": "AWS", "other": "Other"}
 LIMIT = int(os.environ.get("PAAS_WAITLIST_LIMIT", "5")); WINDOW = float(os.environ.get("PAAS_WAITLIST_WINDOW", "600"))
 TEST_RE = re.compile(os.environ.get("PAAS_WAITLIST_TEST_RE", r"^ux-test|\+test@|@aloof\.si$|@example\.(com|org|net)$"), re.I)
 _hits = {}; _hl = threading.Lock()
@@ -52,6 +53,8 @@ def upsert(kind, email, *, gpu=None, region=None, company=None, note=None, sourc
       (kind, email, item, gpu, region, company, note, source, now, now, now, ip, int(is_test_email(email))))
     return q("select * from waitlist where kind=? and email=? and item=?", (kind, email, item), one=True), True
 
+def byo_status(email): return q("select id, note, created from waitlist where kind='byo_server' and email=? and item=''", (email,), one=True)
+
 # ---------- emails ----------
 def _what(r):
     from .plans import PLANS
@@ -59,6 +62,7 @@ def _what(r):
     if r["kind"] == "region":
         from .www_content import SOON_REGIONS
         names = {c: l for c, l, _, _ in SOON_REGIONS}; return f"the Aloof waitlist for {names.get(r['region'], r['region'])}"
+    if r["kind"] == "byo_server": return "the Aloof waitlist for deploying to your own server"
     return "the Aloof design partner program"
 def _html(title, paras, link_text, link):
     ps = "".join(f'<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#3a2e24">{p}</p>' for p in paras)
@@ -73,6 +77,8 @@ def confirmation(r):
     what = _what(r); link = unsub_url(r["id"], r["email"])
     if r["kind"] == "design_partner":
         subj = "We received your Aloof design partner application"; body = "Thanks for applying. We read every application and will reply by email."
+    elif r["kind"] == "byo_server":
+        subj = "You're on the Aloof own-server waitlist"; body = "Deploying to your own server is in early access and isn't available yet. We'll email you when we can let you in. We won't use your address for anything else."
     elif r["kind"] == "region":
         subj = "You're on the Aloof region waitlist"; body = "We'll email you once, when the region is live. We won't use your address for anything else."
     else:
@@ -138,7 +144,7 @@ def counts():
         c[r["kind"]] = c.get(r["kind"], 0) + r["n"]
         if r["kind"] == "region": reg[r["region"]] = r["n"]
     t = q("select count(*) n from waitlist where is_test=1", one=True)["n"]
-    return {"gpu": c["gpu"], "regions": c["region"], "by_region": reg, "design_partners": c["design_partner"], "test_entries": t}
+    return {"gpu": c["gpu"], "regions": c["region"], "by_region": reg, "design_partners": c["design_partner"], "byo_server": c["byo_server"], "test_entries": t}
 def mail_health():
     out = {"smtp_configured": bool(os.environ.get("SMTP_HOST")), "admin_recipients": notify_recipients(), "last_error": None}
     v = kv_get("mail_status", "last_error")

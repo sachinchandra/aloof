@@ -123,7 +123,7 @@ def waitlist(w: WaitlistReq, request: Request, bg: BackgroundTasks):
     """Waitlists: kind=gpu (phase 2 GPUs), kind=region (a coming-soon region), kind=design_partner. One entry per email (and region);
     signing up again keeps the first signup date and updates the choice. Sends a confirmation (with a removal link) and notifies the admin."""
     from . import waitlist as W
-    if w.kind not in W.KINDS: raise HTTPException(400, "kind must be gpu, region or design_partner")
+    if w.kind not in ("gpu", "region", "design_partner"): raise HTTPException(400, "kind must be gpu, region or design_partner")
     ip = client_ip(request)
     try: e = auth._check_email(w.email)
     except ValueError as x: raise HTTPException(400, str(x))
@@ -147,6 +147,23 @@ def waitlist(w: WaitlistReq, request: Request, bg: BackgroundTasks):
         if acc: analytics.capture(acc["id"], "gpu_waitlist_joined", {"gpu": w.gpu})
     if created: bg.add_task(W.send_emails, r["id"]); return {"ok": True, "message": msgs[w.kind], "duplicate": False}
     return {"ok": True, "message": "You're already on the list, we updated your choice." if w.kind != "design_partner" else "You're already on the list, we updated your application.", "duplicate": True}
+class ByoReq(BaseModel):
+    provider: str | None = None
+@app.get("/v1/waitlist/byo-server")
+def byo_get(a=Depends(acct)):
+    from . import waitlist as W
+    r = W.byo_status(a["email"]); return {"joined": bool(r), "provider": r["note"] if r else None, "joined_at": r["created"] if r else None}
+@app.post("/v1/waitlist/byo-server")
+def byo_join(b: ByoReq, request: Request, bg: BackgroundTasks, a=Depends(acct)):
+    """Signed-in early-access waitlist for deploying to your own server. One entry per account email; a second join changes nothing."""
+    from . import waitlist as W
+    p = (b.provider or "").strip().lower() or None
+    if p and p not in W.BYO_PROVIDERS: raise HTTPException(400, "provider must be one of: " + ", ".join(W.BYO_PROVIDERS))
+    if W.byo_status(a["email"]): return {"ok": True, "joined": True, "duplicate": True, "message": "You're already on the waitlist."}
+    r, created = W.upsert("byo_server", a["email"], note=p, source="dashboard", ip=client_ip(request))
+    if created:
+        analytics.capture(a["id"], "byo_waitlist_join", {"provider": p or "none"}); bg.add_task(W.send_emails, r["id"])
+    return {"ok": True, "joined": True, "duplicate": not created, "message": "You're on the waitlist. We'll email you when we can let you in."}
 @app.get("/v1/providers")
 def providers():
     out = []
@@ -750,6 +767,7 @@ def docs_page(page: str = "quickstart"):
 def login_page(request: Request):
     n = request.query_params.get("next")
     if n is not None and auth.safe_next(n, None) is None: return RedirectResponse("/login", 303)   # F1: drop unsafe next server-side
+    if n and auth.session_account(request.cookies.get(auth.COOKIE)): return RedirectResponse(auth.safe_next(n, "/dashboard"), 303)   # already signed in: go where the link pointed
     return www.at("/login", "default", site.login, BRAND)
 @app.get("/static/analytics.js", include_in_schema=False)
 def static_analytics(): return FileResponse(os.path.join(ROOT, "paas", "static", "analytics.js"), media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"})

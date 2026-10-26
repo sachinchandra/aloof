@@ -18,6 +18,7 @@ Sending is a background queue + one thread, 2 s timeout; failures are dropped an
 | `mcp_connected` | OAuth authorization code exchanged in mcp_server | `client_name`, `client_host` (redirect URI host) |
 | `plan_upgraded` | Stripe webhook: subscription checkout completed, or subscription moved to a higher tier | `plan` (`hobby`\|`pro`), `amount_usd` (number), `interval` (`month`) |
 | `gpu_waitlist_joined` | new GPU waitlist entry whose email matches an account | `gpu` (plan id or absent) |
+| `byo_waitlist_join` | signed-in user joins the "deploy to your own server" early-access waitlist (`POST /v1/waitlist/byo-server`, dashboard). Sent once per account; a repeat join sends nothing | `provider` (`hetzner`\|`digitalocean`\|`aws`\|`other`\|`none`) |
 
 Also accepted: the site's nested `"attribution": {...}` object (same keys). `/v1/config` returns `posthog_key`, `posthog_host` (and the older `posthog: {key, host}`).
 Frontend passes UTM/referrer as optional JSON fields on the signup bodies: `{"email", "password", "utm_source", "utm_medium", "utm_campaign", "referrer"}`

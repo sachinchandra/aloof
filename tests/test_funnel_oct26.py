@@ -21,3 +21,30 @@ def test_doc_bugs_33_to_37():
     r = c.get("/guides/node", follow_redirects=False); assert r.status_code == 301 and r.headers["location"] == "/guides/express"
     qs = c.get("/docs/quickstart").text; assert "live: https://&lt;your-app-name&gt;." in qs
     assert "aloof health app " not in c.get("/docs/deploy").text and "aloof health &lt;app&gt;" in c.get("/docs/deploy").text
+
+def _client(email):
+    from paas import auth
+    c = TestClient(api.app); r = c.post("/v1/auth/register", json={"email": email, "password": "correct-horse-9"}); assert r.status_code == 200, r.text
+    return c
+
+def test_byo_waitlist_join_once_admin_and_event(monkeypatch):
+    from paas import analytics, waitlist as W
+    sent = []; monkeypatch.setattr(analytics, "capture", lambda a, e, p=None: sent.append((e, p)))
+    monkeypatch.setattr(W, "send_emails", lambda i: None)
+    import time; c = _client(f"byo{int(time.time()*1000)}@example.org")
+    assert c.get("/v1/waitlist/byo-server", headers={"X-Aloof-CSRF": "1"}).json()["joined"] is False
+    assert c.post("/v1/waitlist/byo-server", json={"provider": "mars"}, headers={"X-Aloof-CSRF": "1"}).status_code == 400
+    r = c.post("/v1/waitlist/byo-server", json={"provider": "hetzner"}, headers={"X-Aloof-CSRF": "1"}).json(); assert r["joined"] and not r["duplicate"]
+    r = c.post("/v1/waitlist/byo-server", json={"provider": "aws"}, headers={"X-Aloof-CSRF": "1"}).json(); assert r["duplicate"]
+    g = c.get("/v1/waitlist/byo-server").json(); assert g["joined"] and g["provider"] == "hetzner"
+    assert [e for e, _ in sent].count("byo_waitlist_join") == 1 and ("byo_waitlist_join", {"provider": "hetzner"}) in sent
+    assert "byo_waitlist_join" in analytics.EVENTS and "byo_server" in W.counts()
+    assert any(x["kind"] == "byo_server" for x in W.rows(kind="byo_server"))
+    assert TestClient(api.app).post("/v1/waitlist/byo-server", json={}).status_code in (401, 403)
+    assert TestClient(api.app).post("/v1/waitlist", json={"email": "x@example.org", "kind": "byo_server"}).status_code == 400
+
+def test_byo_ui_and_docs():
+    h = open("dashboard/index.html").read(); assert "Deploy to your own server" in h and "Join the waitlist" in h and "id=own-server" in h
+    assert "byo_server" in open("dashboard/admin.html").read()
+    d = TestClient(api.app).get("/docs/mcp").text; assert "Coming: your own servers" in d and "next=%2Fdashboard%23own-server#register" in d
+    assert "byo_waitlist_join" in open("docs/analytics-events.md").read()

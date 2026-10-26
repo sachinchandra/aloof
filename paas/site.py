@@ -489,6 +489,7 @@ MCP tools: add_domain, list_domains, verify_domain, remove_domain</pre>
   "env": {{"ALOOF_API_URL": "{api}", "ALOOF_API_KEY": "pk_..."}}}}}}}}</pre>
 <p>Tools ({len(mcp_tool_names())}): {", ".join(mcp_tool_names())}.</p>
 <p>Discovery: <a href="/llms.txt">/llms.txt</a>, <a href="/.well-known/mcp.json">/.well-known/mcp.json</a>.</p>
+<h2 id=own-servers>Coming: your own servers</h2><p>We're testing a mode where Aloof deploys onto a VPS you already run, over SSH, with the same dashboard and MCP tools. It isn't available yet. If you'd use it, <a href="/login?next=%2Fdashboard%23own-server#register">join the early-access waitlist</a> from your dashboard (you'll be asked to create an account or log in first).</p>
 <h2 id=oauth>How OAuth sign-in works</h2>
 <h3 id=authorize>The Authorize page</h3><p>When you add the connector, your assistant opens an {brand} page titled <b>Connect &lt;app&gt; to {brand}</b>. It shows the app's name, whether the app is verified, and the address you'll be sent back to. Sign in with your email and password, or paste an API key, then choose <b>Approve</b> or <b>Deny</b>. The page is valid for 10 minutes. If it expires, start the connection again from your assistant.</p>
 <p><b>Approving gives the app full access to your account.</b> It can deploy and delete apps, change environment variables and secrets, manage volumes, databases and domains, and spend your credit. There are no narrower permissions yet.</p>

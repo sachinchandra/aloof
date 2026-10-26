@@ -12,6 +12,7 @@ EVENTS = {   # event -> allowed property names (anything else is dropped)
     "mcp_connected": {"client_name", "client_host"},
     "plan_upgraded": {"plan", "amount_usd", "interval"},
     "gpu_waitlist_joined": {"gpu"},
+    "byo_waitlist_join": {"provider"},
 }
 UTM = ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content")
 _SECRETish = re.compile(r"(sk|pk|rk|whsec|dt|mcp_at|mcp_rt|mcp_ac|ml|s)_[A-Za-z0-9_\-]{8,}|[^\s@]+@[^\s@]+\.[^\s@]+")
