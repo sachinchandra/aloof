@@ -20,7 +20,15 @@ GUIDES = {
 def guide_html(slug):
     n, lang, detect, cmd, rel, notes = GUIDES[slug]
     rel_toml = f'\n\n[deploy]\n  release_command = "{rel}"' if rel else ""
-    return f"""<p>Deploy a {n} app to Aloof in a few minutes. You need the CLI (<code>curl -fsSL https://www.aloof.si/cli/aloof -o aloof &amp;&amp; chmod +x aloof</code>) and an account (<code>aloof signup you@example.com</code>, free tier, no card).</p>
+    return f"""<p>Deploy a {n} app to Aloof in a few minutes. You need the CLI and an account.</p>
+<pre># install the CLI into ~/.local/bin (make sure that folder is on your PATH)
+$ mkdir -p ~/.local/bin && curl -fsSL https://api.aloof.si/cli/aloof -o ~/.local/bin/aloof && chmod +x ~/.local/bin/aloof
+
+# new here: create a free account (no card) and save the key
+$ aloof signup you@example.com
+# already have an account: paste an API key from Dashboard → API keys
+$ aloof login</pre>
+<p>Prefer a system-wide install? See the <a href="/docs/quickstart">Quickstart</a>. If you'd rather not touch your PATH, download it into the current folder and run it as <code>./aloof</code>.</p>
 <h2>1. Generate config</h2><p><code>aloof launch</code> detects {n} from {detect} and writes a Dockerfile (unless you have one), <code>aloof.toml</code> and <code>.dockerignore</code>.</p>
 <pre>$ aloof launch --name my-{slug}</pre>
 <h2>2. Review aloof.toml</h2><pre>app = "my-{slug}"

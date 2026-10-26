@@ -329,7 +329,7 @@ Check it with <code>aloof --help</code>. It needs <code>python3</code>, which ma
 <pre>aloof login</pre>
 Paste the key at the hidden prompt. The CLI checks that it works and saves it to <code>~/.aloof.json</code>, readable only by you (the key has full access to your account). For scripts, <code>aloof login --key-stdin</code> reads the key from stdin. In CI, set <code>ALOOF_API_URL</code> and <code>ALOOF_API_TOKEN</code> (a <a href="/docs/ci">deploy token</a>) instead.</li>
 <li>Deploy, with a name of your own (app names are global, so pick something unique such as <code>my-api-1234</code>): <pre>aloof deploy &lt;your-app-name&gt; --image nginx:alpine --port 80
-live: https://my-api-1234.{base}/</pre>Without <code>--plan</code> you get the largest plan your tier allows (Free: <code>shared-1x-512mb</code>). If you see <code>app name taken</code>, pick another name.</li></ol>
+live: https://&lt;your-app-name&gt;.{base}/</pre>Without <code>--plan</code> you get the largest plan your tier allows (Free: <code>shared-1x-512mb</code>). If you see <code>app name taken</code>, pick another name.</li></ol>
 <p>Your app must listen on <code>$PORT</code> (default 8080) over HTTP. Configure it with env vars, and keep persistent data on a <a href="/docs/volumes">volume</a>. If something goes wrong, see <a href="/docs/troubleshooting">Troubleshooting</a>.</p>""",
 "cli": """<h1>CLI</h1><pre>aloof plans | apps | usage
 aloof deploy &lt;app&gt; --image IMG | --git URL [--ref main] [--plan shared-1x-1gb] [--port 8080] [-e K=V] [-n 2]
@@ -349,7 +349,7 @@ aloof drains &lt;app&gt; add https://logs.example.com/ingest ; aloof history &lt
 "deploy": f"""<h1>Deploying apps</h1><p><b>From an image</b>: any public image or private registry image (<code>--image ghcr.io/me/api:1.4</code>).</p>
 <p><b>From git</b>: we build the repo's <code>Dockerfile</code> (<code>--git URL --ref main</code>, optional <code>subdir</code>) and push it to the {brand} registry, where your nodes pull it.</p>
 <p>Redeploys are rolling: new instances must pass a readiness check before old ones stop, and a release that fails it never takes traffic (see <a href="/docs/releases">releases &amp; rollback</a>). Env vars, volumes, autoscale and health settings carry over between deploys.</p>
-<p>Health checks: set an HTTP path with <code>aloof health app --path /healthz</code>. After N consecutive failures the instance is replaced.</p>""",
+<p>Health checks: set an HTTP path with <code>aloof health &lt;app&gt; --path /healthz</code>. After N consecutive failures the instance is replaced.</p>""",
 "gpu": """<h1>GPU workloads</h1><p><b>Coming soon.</b> GPUs aren't deployable yet; join the waitlist on the <a href='/pricing#gpus'>pricing page</a> or with <code>POST /v1/waitlist</code>. When they launch:</p><p>Pick a GPU plan: <code>gpu-l4</code>, <code>gpu-rtx4090</code>, <code>gpu-l40</code>, <code>gpu-a100</code> or <code>gpu-h100</code> (billed per second; see <a href='/pricing'>pricing</a>). Each GPU instance gets a dedicated node with the NVIDIA container runtime, and your container sees the GPU via CUDA (<code>--gpus</code>).</p>
 <pre>aloof deploy llm --image vllm/vllm-openai:latest --plan gpu-l4 --port 8000 -e MODEL=Qwen/Qwen2.5-7B-Instruct
 aloof autoscale llm --min 0 --max 2 --idle 600</pre>
