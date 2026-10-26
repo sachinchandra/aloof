@@ -205,7 +205,9 @@ class Env(BaseModel): env: dict[str, str|None]
 @app.post("/v1/apps/{name}/env")
 def env(name: str, e: Env, a=Depends(acct)): own(name, a); return with_url(engine.set_env(name, e.env))
 @app.delete("/v1/apps/{name}")
-def delete(name: str, a=Depends(acct)): own(name, a); engine.destroy(name); return {"ok":True}
+def delete(name: str, with_volumes: bool = False, a=Depends(acct)):
+    """Delete the app plus the volumes and Postgres its template created. Volumes you attached yourself are kept unless with_volumes=true."""
+    own(name, a); return engine.destroy_app(name, with_volumes=with_volumes)
 class Autoscale(BaseModel):
     min: int=1; max: int=3; target_concurrency: int=10; cpu_percent: float|None=None; idle_seconds: int=60
 @app.put("/v1/apps/{name}/autoscale")
@@ -333,6 +335,9 @@ def tls_ask(domain: str):
     if q("select 1 from domains where domain=? and verified=1", (d,), one=True): return {"ok": True}
     if pair_target(d): return {"ok": True}        # www/apex twin of a verified domain (served as a 308 redirect)
     raise HTTPException(403, "unknown domain")
+def key_hint(k):
+    """Displayed key prefix everywhere (CLI, API, dashboard): 'pk_' + the first 4 key characters."""
+    return (k or "")[:7] or None
 def http_host_known(host):
     """Plain-HTTP redirect gate: platform hosts, any *.<our domain>, verified custom domains (and their www/apex twins)."""
     d = (host or "").split(":")[0].lower().rstrip(".")
@@ -553,7 +558,7 @@ def auth_sessions_revoke_others(request: Request, a=Depends(acct)):
 def auth_me(a=Depends(acct)):
     return {"id": a["id"], "email": a["email"], "name": a.get("billing_name"), "created": a.get("created"), "tier": a.get("tier") or "free",
             "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")),
-            "api_key_prefix": a.get("api_key_prefix"), **_wallet(a)}
+            "api_key_prefix": key_hint(a.get("api_key_prefix")), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}
 class KeyReq(BaseModel): label: str
@@ -561,8 +566,8 @@ class KeyReq(BaseModel): label: str
 def auth_keys(a=Depends(acct)):
     """Full-access API keys: the primary key (rotate-only) plus named extra keys. Scoped deploy tokens live at /v1/tokens."""
     ac = q("select id,api_key_prefix,created from accounts where id=?", (a["id"],), one=True)
-    return [{"id": "primary", "label": "Default key", "prefix": ac["api_key_prefix"], "created": ac["created"], "last_used": None, "kind": "primary", "scope": "full access"}] + \
-           [{"id": r["id"], "label": r["label"], "prefix": r["prefix"], "created": r["created"], "last_used": r["last_used"], "kind": "named", "scope": "full access"}
+    return [{"id": "primary", "label": "Default key", "prefix": key_hint(ac["api_key_prefix"]), "created": ac["created"], "last_used": None, "kind": "primary", "scope": "full access"}] + \
+           [{"id": r["id"], "label": r["label"], "prefix": key_hint(r["prefix"]), "created": r["created"], "last_used": r["last_used"], "kind": "named", "scope": "full access"}
             for r in q("select * from api_keys where account_id=? order by created desc", (a["id"],))]
 @app.post("/v1/auth/keys")
 def auth_key_create(b: KeyReq, request: Request, a=Depends(acct)):
@@ -570,7 +575,7 @@ def auth_key_create(b: KeyReq, request: Request, a=Depends(acct)):
     if not label: raise HTTPException(400, "name the key")
     if label == "mcp-oauth": raise HTTPException(400, "that name is reserved")
     k = engine.create_named_key(a["id"], label, replace=False); _audit(a["id"], None, "key.create", label, _ip(request))
-    return {"api_key": k, "prefix": k[:10], "label": label, "detail": "shown once"}
+    return {"api_key": k, "prefix": key_hint(k), "label": label, "detail": "shown once"}
 @app.get("/v1/auth/connected-apps")
 def connected_apps(a=Depends(acct)):
     """OAuth/MCP clients (Claude, ChatGPT, Cursor, ...) that currently hold a token for this account."""

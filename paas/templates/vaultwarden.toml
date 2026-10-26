@@ -12,15 +12,20 @@ region = "nbg1"
 [[env]]
 name = "ADMIN_TOKEN"
 generate = "secret:48"
-description = "Token for the /admin panel. Shown once after deploy; also in the app's env."
+description = "Token for the /admin panel. Generated, shown once after deploy, stored as a secret. HTTPS is enforced by the Aloof edge (http redirects to https); Vaultwarden itself sends no HSTS header."
 [[env]]
 name = "DOMAIN"
 value = "${APP_URL}"
 [[env]]
 name = "SIGNUPS_ALLOWED"
+value = "false"
+required = false
+description = "Off by default so strangers can't register. Create your account by inviting your email from /admin (log in with ADMIN_TOKEN), then register with that email; or set true briefly and back to false."
+[[env]]
+name = "INVITATIONS_ALLOWED"
 value = "true"
 required = false
-description = "Set to false after creating your account."
+description = "Lets the admin panel invite users (works without SMTP: invited emails can register directly)."
 [[volumes]]
 name = "data"
 path = "/data"

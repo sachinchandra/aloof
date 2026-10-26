@@ -212,7 +212,7 @@ def test_github_manifest_setup(gh, monkeypatch):
 def test_named_api_keys():
     c = TestClient(api.app, base_url="http://api.aloof.test"); k = c.post("/v1/signup", json={"email": f"k{time.time_ns()}@example.com"}).json()["api_key"]
     c.headers["Authorization"] = f"Bearer {k}"
-    ks = c.get("/v1/auth/keys").json(); assert [x["id"] for x in ks] == ["primary"] and ks[0]["prefix"] == k[:10]
+    ks = c.get("/v1/auth/keys").json(); assert [x["id"] for x in ks] == ["primary"] and ks[0]["prefix"] == k[:7]
     n = c.post("/v1/auth/keys", json={"label": "laptop"}).json(); assert n["api_key"].startswith("pk_")
     assert c.get("/v1/auth/me", headers={"Authorization": f"Bearer {n['api_key']}"}).status_code == 200
     row = [x for x in c.get("/v1/auth/keys").json() if x["label"] == "laptop"][0]; assert row["last_used"] and "api_key" not in row

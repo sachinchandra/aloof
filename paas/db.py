@@ -133,6 +133,11 @@ create index if not exists domains_next on domains(next_check_at);
 alter table kv add column if not exists acct TEXT;
 create index if not exists kv_kind_acct on kv(kind, acct);
 """)
+    # v14: resources a template created for an app (volumes, Postgres) record that app, so destroying the app removes them.
+    ,(14, """
+alter table volumes add column if not exists template_app TEXT;
+alter table pg_dbs add column if not exists template_app TEXT;
+""")
 
 ]
 def _dialect(sql):

@@ -97,7 +97,8 @@ def cmd_deploy(o):
         env = dict(e.split("=", 1) for e in o.env)
         r = call("POST", f"/v1/templates/{o.template}/deploy", {"name": name, "env": env, **({"plan": o.plan} if o.plan else {})})
         print("deploying", r["app"]["name"], "from template", r["template"])
-        for k, v in (r.get("generated_secrets") or {}).items(): print(f"generated {k}={v}  (shown once; also in the app env)")
+        for k, v in (r.get("generated_secrets") or {}).items():
+            print(f"generated {k}={v}  " + ("(shown once and NOT stored: save it now)" if k == "ADMIN_LOGIN" else "(shown once; also in the app env)"))
         if o.no_wait: return
         r = wait_deploy(name, time.time() - 1); print(r.get("error") or f"live: {r['url']}")
         if r["status"] == "failed": sys.exit(1)
@@ -204,6 +205,7 @@ s.add_parser("templates", help="list one-click templates")
 for c in ("status","logs","destroy"):
     x = s.add_parser(c); x.add_argument("name", nargs="?"); x.add_argument("-a", "--app", dest="app_opt")
     if c == "logs": x.add_argument("-f", "--follow", action="store_true"); x.add_argument("-n", "--lines", type=int, default=200)
+    if c == "destroy": x.add_argument("--with-volumes", action="store_true", help="also delete volumes you attached yourself (template-created volumes and databases are always deleted)")
 a = s.add_parser("scale", help="scale <app> <n> | scale count web=2 worker=1 | scale vm <plan>"); a.add_argument("args", nargs="+"); a.add_argument("-a", "--app", dest="app_opt"); a.add_argument("--group")
 a = s.add_parser("env"); a.add_argument("name"); a.add_argument("pairs", nargs="+", help="K=V or K= to unset")
 a = s.add_parser("volumes"); vs = a.add_subparsers(dest="vcmd", required=True)
@@ -275,7 +277,7 @@ pj = lambda x: print(json.dumps(x, indent=2))
 if o.cmd == "signup":
     r = call("POST","/v1/signup",{"email":o.email}); fd = os.open(CFG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as f: json.dump({"api":API,"key":r["api_key"]}, f)
-    print("saved key to", CFG); pj({k: v for k, v in r.items() if k != "api_key"} | {"api_key": r["api_key"][:10] + "... (saved)"})
+    print("saved key to", CFG); pj({k: v for k, v in r.items() if k != "api_key"} | {"api_key": r["api_key"][:7] + "… (saved to " + CFG + "; run `aloof keys` to manage)"})
 elif o.cmd == "login":
     import getpass
     k = (sys.stdin.readline() if o.key_stdin else (o.key or getpass.getpass("API key (pk_..., create one in the console under API keys): "))).strip()
@@ -299,7 +301,14 @@ elif o.cmd == "status": cmd_status(o)
 elif o.cmd == "logs": cmd_logs(o)
 elif o.cmd == "scale": cmd_scale(o)
 elif o.cmd == "env": pj(call("POST", f"/v1/apps/{o.name}/env", {"env": {k:(v or None) for k,v in (x.split("=",1) for x in o.pairs)}}))
-elif o.cmd == "destroy": pj(call("DELETE", f"/v1/apps/{app_of(o)}"))
+elif o.cmd == "destroy":
+    r = call("DELETE", f"/v1/apps/{app_of(o)}" + ("?with_volumes=true" if o.with_volumes else ""))
+    d = r.get("deleted") or {}; k = (r.get("kept") or {}).get("volumes") or []
+    print(f"destroyed {r.get('app', app_of(o))}")
+    for v in d.get("volumes") or []: print(f"  deleted volume {v}")
+    for p in d.get("postgres") or []: print(f"  deleted postgres {p}")
+    for v in k: print(f"  kept volume {v} (detached; still billed; delete with `aloof volumes delete {v}` or rerun with --with-volumes)")
+    for e in r.get("errors") or []: print(f"  error: {e}", file=sys.stderr)
 elif o.cmd == "usage": pj(call("GET","/v1/usage"))
 elif o.cmd == "volumes":
     if o.vcmd == "create": pj(call("POST","/v1/volumes",{"name":o.name,"size_gb":o.size,**({"region":o.region} if o.region else {})}))

@@ -443,6 +443,48 @@ def destroy(name):
     q("update apps set status='destroyed' where name=?", (name,)); event(name, "destroyed")
     try: from . import selfheal; selfheal.forget(name)
     except Exception: pass
+def destroy_app(name, with_volumes=False):
+    """User-facing delete: destroy the app, then remove what its template created (volumes, Postgres). Volumes the user
+    attached separately are detached and kept unless with_volumes. Returns what was deleted and kept."""
+    tpl_vols = [r["name"] for r in q("select name from volumes where template_app=?", (name,))]
+    other_vols = [r["name"] for r in q("select name from volumes where app=? and (template_app is null or template_app!=?)", (name, name))]
+    pgs = [r["name"] for r in q("select name from pg_dbs where template_app=?", (name,))]
+    destroy(name)
+    out = {"ok": True, "app": name, "deleted": {"volumes": [], "postgres": []}, "kept": {"volumes": []}, "errors": []}
+    from . import parity
+    for p in pgs:
+        try: parity.pg_destroy(p); out["deleted"]["postgres"].append(p)
+        except Exception as e: out["errors"].append(f"postgres {p}: {e}")
+    for v in tpl_vols + (other_vols if with_volumes else []):
+        try: q("update volumes set app=null, mount_path=null where name=?", (v,)); delete_volume(v); out["deleted"]["volumes"].append(v)
+        except Exception as e: out["errors"].append(f"volume {v}: {e}")
+    if not with_volumes: out["kept"]["volumes"] = other_vols
+    if not out["errors"]: out.pop("errors")
+    event(name, f"deleted with app: volumes={out['deleted']['volumes']} postgres={out['deleted']['postgres']} kept={out['kept']['volumes']}")
+    return out
+def template_orphans():
+    """Template-created volumes/Postgres whose app is gone (left by destroys before v14), plus legacy rows inferred from
+    template.deploy audit records. Read-only."""
+    gone = lambda app: not q("select 1 from apps where name=? and status!='destroyed'", (app,), one=True)
+    vols = [dict(r) for r in q("select name, account_id, size_gb, app, template_app from volumes where template_app is not null") if gone(r["template_app"])]
+    pgs = [dict(r) for r in q("select name, account_id, plan, template_app from pg_dbs where template_app is not null") if gone(r["template_app"])]
+    return {"volumes": vols, "postgres": pgs}
+def backfill_template_owned():
+    """One-off (idempotent): mark resources created by template deploys before v14, using template.deploy audit rows and the
+    naming the template deployer uses (<app>-<vol>, <app>-db)."""
+    import json as _j
+    from . import templating
+    n = 0
+    for r in q("select app, account_id, detail from audit where action='template.deploy'"):
+        app = r["app"]
+        try: t = templating.get(_j.loads(r["detail"] or "{}").get("template"))
+        except Exception: t = None
+        if not t: continue
+        for v in t.get("volumes", []):   # exact names the deployer used
+            vn = f"{app}-{v['name']}"[:32].rstrip("-")
+            if q("update volumes set template_app=? where name=? and account_id=? and template_app is null returning name", (app, vn, r["account_id"])): n += 1
+        if "postgres" in t and q("update pg_dbs set template_app=? where name=? and account_id=? and template_app is null returning name", (app, f"{app}-db", r["account_id"])): n += 1
+    return n
 def get_app(name):
     a = q("select * from apps where name=?", (name,), one=True)
     if not a: return None

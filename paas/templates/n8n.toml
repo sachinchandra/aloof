@@ -3,6 +3,7 @@ name = "n8n"
 description = "Workflow automation with 400+ integrations, backed by managed Postgres."
 category = "Automation"
 website = "https://n8n.io"
+min_tier = "hobby"
 [source]
 image = "n8nio/n8n:latest"
 [app]

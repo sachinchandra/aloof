@@ -10,7 +10,7 @@
 
 Single service per template for now (a `services` table is rejected). Deploy-button URLs: https://www.aloof.si/deploy?template=<id>
 or ?repo=<https github/gitlab url>; they go through login/signup and an explicit confirm click (no deploy on GET)."""
-import os, re, json, secrets, tomllib, functools, html, urllib.parse
+import os, re, json, secrets, time, tomllib, functools, html, urllib.parse
 from fastapi import APIRouter, Request, HTTPException, Header
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from pydantic import BaseModel
@@ -39,6 +39,8 @@ SCHEMA = {
         "app": {"type": "object", "required": ["port"], "properties": {"port": {"type": "integer"}, "plan": {"type": "string"}, "region": {"type": "string"}}},
         "env": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}, "value": {"type": "string"},
                 "generate": {"type": "string", "pattern": "^(secret|hex):[0-9]+$"}, "required": {"type": "boolean"}, "description": {"type": "string"}}}},
+        "min_tier": {"enum": ["free", "hobby", "pro"]},
+        "init": {"enum": ["umami-admin"]},
         "volumes": {"type": "array", "items": {"type": "object", "required": ["name", "path"], "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "size_gb": {"type": "integer"}}}},
         "postgres": {"type": "object", "properties": {"plan": {"type": "string"}, "var": {"type": "string"},
                      "env": {"type": "object", "additionalProperties": {"enum": ["url", "host", "port", "database", "user", "password"]}}}},
@@ -131,9 +133,41 @@ def public(t):
             "required_env": [e["name"] for e in t.get("env", []) if not ("value" in e or "generate" in e)],
             "volumes": [{"name": v["name"], "path": v["path"], "size_gb": v.get("size_gb", 1)} for v in t.get("volumes", [])],
             "postgres": ({"plan": t["postgres"].get("plan", "pg-dev"), "env": pg_vars(t["postgres"])} if "postgres" in t else None),
+            "min_tier": t.get("min_tier", "free"), "requires": REQUIRES.get(t.get("min_tier", "free")),
             "page": f"https://www.aloof.si/templates/{t['id']}", "deploy_button": f"https://www.aloof.si/deploy?template={t['id']}",
             "api": f"POST /v1/templates/{t['id']}/deploy"}
 
+TIER_RANK = {"free": 0, "hobby": 1, "pro": 2}
+REQUIRES = {"free": None, "hobby": "Requires Hobby or Pro", "pro": "Requires Pro"}
+def check_min_tier(account_id, t):
+    from . import engine
+    need = t.get("min_tier", "free"); have = engine.account_tier(account_id)[0]
+    if TIER_RANK.get(have, 0) < TIER_RANK[need]:
+        raise TemplateError(f"{t["name"]} requires the {need.title()} plan or above (it needs more memory and storage than Free allows: "
+                              f"{t['app'].get('plan')}, {sum(v.get('size_gb', 1) for v in t.get('volumes', []))} GB volume"
+                              + (" + Postgres" if "postgres" in t else "") + "). Upgrade in Billing, then deploy again. Nothing was created.")
+UMAMI_SQL = """create schema if not exists aloof_init; create extension if not exists pgcrypto schema aloof_init;
+update "user" set password = aloof_init.crypt('{pw}', aloof_init.gen_salt('bf', 10)) where username = 'admin';
+drop extension if exists pgcrypto; drop schema if exists aloof_init;"""
+def _umami_admin(app, pgn, pw, timeout=900, sleep=1.0):
+    """Replace Umami's seeded admin/umami login with the generated password as soon as its migration creates the user (before
+    the web server starts serving). Runs in a thread; on timeout the app is scaled to 0 so the default login is never exposed."""
+    from . import engine, parity
+    dbn = parity._dbname(pgn); end = time.time() + timeout; log = __import__("logging").getLogger("paas.templates")
+    while time.time() < end:
+        try:
+            i, d = parity._inst(parity.pg_app(pgn))
+            rc, out = d.exec_run(i["id"], ["psql", "-U", "aloof", "-d", dbn, "-tAc", "select count(*) from \"user\" where username='admin'"])
+            if rc == 0 and out.strip().startswith(b"1" if isinstance(out, bytes) else "1"):
+                rc, out = d.exec_run(i["id"], ["psql", "-v", "ON_ERROR_STOP=1", "-U", "aloof", "-d", dbn, "-c", UMAMI_SQL.format(pw=pw)])
+                if rc == 0: engine.event(app, "umami: default admin password replaced with the generated one"); return True
+                log.warning("umami admin init for %s failed (rc %s)", app, rc)
+        except Exception as e: log.debug("umami init %s waiting: %s", app, e)
+        time.sleep(sleep)
+    engine.event(app, "ERROR: couldn't replace Umami's default admin password; app scaled to 0 for safety. Log in as admin/umami from a private network and change it, or redeploy.")
+    try: engine.scale(app, 0, reason="umami init failed")
+    except Exception: log.exception("umami init: scale to 0 failed for %s", app)
+    return False
 def _gen(g):
     kind, n = g.split(":"); n = int(n)
     return secrets.token_hex(n) if kind == "hex" else secrets.token_urlsafe(n)
@@ -152,6 +186,7 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
     if not engine.NAME_RE.match(name or "") or name.startswith("pg-") or len(name) > 23:
         raise TemplateError("app name must be 3-23 chars: lowercase letters, digits, hyphens; starts with a letter")
     if q("select 1 from apps where name=? and status!='destroyed'", (name,), one=True): raise PermissionError("app name taken")
+    check_min_tier(account_id, t)
     for k in env:
         if not ENV_RE.match(k): raise TemplateError(f"bad env var name {k}")
     app_url = f"https://{name}.{url_domain}/" if url_domain else ""
@@ -179,7 +214,7 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
         vols = []
         for v in t.get("volumes", []):
             vn = f"{name}-{v['name']}"[:32].rstrip("-"); engine.create_volume(account_id, vn, v.get("size_gb", 1)); created_vols.append(vn)
-            q("update volumes set app=?, mount_path=? where name=?", (name, v["path"], vn)); vols.append({"name": vn, "path": v["path"]})
+            q("update volumes set app=?, mount_path=?, template_app=? where name=?", (name, v["path"], name, vn)); vols.append({"name": vn, "path": v["path"]})
         if vols: spec["volumes"] = vols
         pg = None
         if "postgres" in t:
@@ -191,7 +226,7 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
                      "user": urllib.parse.unquote(u.username or ""), "password": urllib.parse.unquote(u.password or "")}
             spec["networks"] = [parity.pg_net(pgn)]
             for k, f in vmap.items(): spec["env"][k] = parts[f]
-            q("update pg_dbs set attached=? where name=?", (json.dumps([{"app": name, "var": var}]), pgn))
+            q("update pg_dbs set attached=?, template_app=? where name=?", (json.dumps([{"app": name, "var": var}]), name, pgn))
         r = engine.deploy(account_id, spec)
     except Exception:
         if created_pg:
@@ -201,10 +236,13 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
             try: q("update volumes set app=null, mount_path=null where name=?", (vn,)); engine.delete_volume(vn)
             except Exception: pass
         raise
+    if t.get("init") == "umami-admin" and created_pg:
+        pw = secrets.token_urlsafe(18); generated["ADMIN_LOGIN"] = f"admin / {pw}"
+        __import__("threading").Thread(target=_umami_admin, args=(name, created_pg, pw), daemon=True).start()
     from .db import audit as _audit   # F5
     _audit(account_id, name, "template.deploy" if t["id"] != "from-repo" else "repo.deploy", json.dumps({"template": t["id"], "source": src, "plan": plan}))
     return {"app": r, "template": t["id"], "generated_secrets": generated, "volumes": vols, "postgres": pg and pg["name"],
-            "note": "generated secrets are shown once here and stored in the app's env"}
+            "note": "generated secrets are shown once here" + (" and stored in the app's env" if t.get("init") != "umami-admin" else "; ADMIN_LOGIN is not stored anywhere, save it now")}
 
 # ---------------- HTTP ----------------
 R = APIRouter()
@@ -296,7 +334,7 @@ def template_page(tid: str):
     cost_parts = f"app ${_pl:.2f}" + (f" + {_vg} GB disk ${_vg * RATES['volume_usd_gb_month']:.2f}" if _vg else "") + (f" + database ${PG_PLANS[_t['postgres'].get('plan', 'pg-dev')]['price_usd_month']:.2f}" if 'postgres' in _t else "")
     inner = (f"<p class=thead>{tpl_logo(p['id'], p['name'], 'lg')}<a class='btn' href='{e(p['deploy_button'])}'>Deploy on Aloof</a></p><h2>What gets created</h2><ul><li>App from <code>{e(src)}</code> on port {p['port']}, plan <code>{e(p['default_plan'])}</code>, region {e(_region_label(p['region']))}</li>"
              f"{'<li>Managed Postgres (' + e(p['postgres']['plan']) + '), connection in <code>' + e(', '.join(p['postgres']['env'])) + '</code></li>' if p['postgres'] else ''}</ul>"
-             f"<h3>Cost</h3><p>About <b>${p['est_monthly_usd']:.2f}/month</b> if it runs all month ({cost_parts}). Billed per second, and nothing while the app sleeps. <a href='/docs/templates'>How template costs work</a>.</p><h3>Environment</h3><ul>{envs}</ul><h3>Volumes</h3><ul>{vols}</ul>"
+             f"{'<p class=warn><b>' + e(p['requires']) + '.</b> This template needs more memory and storage than the Free plan includes.</p>' if p.get('requires') else ''}" f"<h3>Cost</h3><p>About <b>${p['est_monthly_usd']:.2f}/month</b> if it runs all month ({cost_parts}). Billed per second, and nothing while the app sleeps. <a href='/docs/templates'>How template costs work</a>.</p><h3>Environment</h3><ul>{envs}</ul><h3>Volumes</h3><ul>{vols}</ul>"
              f"<h3>CLI / API / MCP</h3><pre>aloof deploy --template {e(p['id'])} &lt;app-name&gt;\ncurl -X POST https://api.aloof.si/v1/templates/{e(p['id'])}/deploy -H 'Authorization: Bearer $ALOOF_API_KEY' -d '{{\"name\":\"my-{e(p['id'])}\"}}'\nMCP: deploy_template(template=\"{e(p['id'])}\", name=...)</pre>"
              f"<p class=muted>Button markdown: <code>[![Deploy on Aloof](https://www.aloof.si/button.svg)]({e(p['deploy_button'])})</code></p>")
     return _page(f"/templates/{tid}", f"Deploy {p['name']} on Aloof", p["description"], inner)
