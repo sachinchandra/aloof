@@ -42,7 +42,7 @@ def test_f3_mcp_template_traversal(monkeypatch):
     assert not calls
     server.deploy_template("uptime-kuma", "abc"); assert calls[-1][1] == "/v1/templates/uptime-kuma/deploy"
 
-def test_f4_precheck_and_rollback(fake, monkeypatch):
+def test_f4_precheck_and_rollback(fake, monkeypatch, umami_enabled):
     c = _client("f4@qa.dev")
     r = c.post("/v1/templates/umami/deploy", json={"name": "forphan", "plan": "shared-4x-8gb"}); assert r.status_code in (400, 402, 403)
     assert not q("select 1 from pg_dbs where name='forphan-db'", one=True) and not q("select 1 from volumes where name like 'forphan-%'", one=True)

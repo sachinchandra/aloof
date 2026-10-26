@@ -47,7 +47,7 @@ def test_vaultwarden_secure_defaults(fake):
     env = fake["spec"]["env"]; assert env["SIGNUPS_ALLOWED"] == "false" and env["INVITATIONS_ALLOWED"] == "true"
     assert len(r["generated_secrets"]["ADMIN_TOKEN"]) >= 48 and "HSTS" in TestClient(api.app).get("/templates/vaultwarden").text
 
-def test_umami_admin_password_generated_and_applied(fake, monkeypatch):
+def test_umami_admin_password_generated_and_applied(fake, monkeypatch, umami_enabled):
     started = []
     monkeypatch.setattr(T.__dict__["__builtins__"]["__import__"]("threading"), "Thread", lambda target, args, daemon: type("X", (), {"start": lambda s: started.append(args)})())
     c = _client("um@example.in"); r = c.post("/v1/templates/umami/deploy", json={"name": "umx"}).json()
@@ -70,3 +70,10 @@ def test_cli_signup_and_key_hint():
     assert 'r["api_key"][:7] + "…' in cli and "[:10]" not in cli.split('if o.cmd == "signup":')[1].split("elif")[0]
     assert api.key_hint("pk_abcdefghij") == "pk_abcd"
     assert "--with-volumes" in cli and "deleted volume" in cli and "kept volume" in cli
+
+def test_disabled_template_hidden_and_rejected(fake):
+    c = TestClient(api.app)
+    if not T.registry()["umami"].get("disabled"): return
+    assert "umami" not in [t["id"] for t in c.get("/v1/templates").json()["templates"]] and "umami" not in c.get("/llms-templates.md").text
+    k = _client("dis@example.in"); r = k.post("/v1/templates/umami/deploy", json={"name": "umdis"})
+    assert r.status_code == 503 and "temporarily disabled" in r.text and "spec" not in fake and not q("select 1 from pg_dbs where name='umdis-db'")

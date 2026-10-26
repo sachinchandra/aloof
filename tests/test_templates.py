@@ -18,7 +18,7 @@ def fake(monkeypatch):
 
 def test_registry_valid_and_public():
     reg = T.registry(); assert {"uptime-kuma", "n8n", "umami", "vaultwarden", "ntfy", "pocketbase", "linkding"} <= set(reg)
-    r = TestClient(api.app).get("/v1/templates").json(); assert r["version"] == 1 and len(r["templates"]) == len(reg)
+    r = TestClient(api.app).get("/v1/templates").json(); assert r["version"] == 1 and len(r["templates"]) == len(T.listed())
     n8n = TestClient(api.app).get("/v1/templates/n8n").json()
     assert n8n["postgres"]["env"]["DB_POSTGRESDB_HOST"] == "host" and "DATABASE_URL" not in n8n["postgres"]["env"] and any(e["kind"] == "generated" for e in n8n["env"])
     assert "value" not in str(n8n["env"]) or True

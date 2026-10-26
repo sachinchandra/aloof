@@ -41,6 +41,7 @@ SCHEMA = {
                 "generate": {"type": "string", "pattern": "^(secret|hex):[0-9]+$"}, "required": {"type": "boolean"}, "description": {"type": "string"}}}},
         "min_tier": {"enum": ["free", "hobby", "pro"]},
         "init": {"enum": ["umami-admin"]},
+        "disabled": {"type": "string"},
         "volumes": {"type": "array", "items": {"type": "object", "required": ["name", "path"], "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "size_gb": {"type": "integer"}}}},
         "postgres": {"type": "object", "properties": {"plan": {"type": "string"}, "var": {"type": "string"},
                      "env": {"type": "object", "additionalProperties": {"enum": ["url", "host", "port", "database", "user", "password"]}}}},
@@ -108,6 +109,9 @@ def registry():
             with open(os.path.join(DIR, f), "rb") as fh: t = tomllib.load(fh)
             out[t["id"]] = validate(t, f[:-5])
     return out
+def listed():
+    """Templates shown in lists/pages/llms: disabled ones (temporarily pulled for a safety issue) are hidden."""
+    return {k: t for k, t in registry().items() if not t.get("disabled")}
 
 def get(tid):
     t = registry().get(tid)
@@ -125,7 +129,7 @@ def est_monthly(t):
 def public(t):
     """Machine-readable view. Never includes generated values."""
     a = t["app"]
-    return {"id": t["id"], "name": t["name"], "description": t["description"], "category": t.get("category"), "website": t.get("website"),
+    return {**({"disabled": t["disabled"]} if t.get("disabled") else {}), "id": t["id"], "name": t["name"], "description": t["description"], "category": t.get("category"), "website": t.get("website"),
             "source": {k: v for k, v in t["source"].items() if k in ("image", "repo", "ref", "subdir")}, "port": a["port"],
             "default_plan": a.get("plan", "shared-1x-512mb"), "est_monthly_usd": est_monthly(t), "region": LIVE_REGIONS[a.get("region", "nbg1")],
             "env": [{"name": e["name"], "kind": "generated" if "generate" in e else ("default" if "value" in e else "required"),
@@ -180,6 +184,7 @@ def repo_template(repo, ref=None, port=8080, plan=None):
 
 def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
     """Create volumes + Postgres the template needs, then deploy the app. Returns app record plus the generated secrets (once)."""
+    if t.get("disabled"): raise TemplateError(f"The {t['name']} template is temporarily disabled: {t['disabled']} Nothing was created.")
     from . import engine, parity
     env = dict(env or {}); plan = plan or t["app"].get("plan", "shared-1x-512mb")
     if plan not in PLANS: raise TemplateError(f"unknown plan {plan}")
@@ -271,7 +276,7 @@ def _run(a, t, b):
         raise HTTPException(503, "deploy could not be started; nothing was created. Try again, or contact support if it persists")
 
 @R.get("/v1/templates")
-def list_templates(): return {"version": 1, "schema": "/v1/templates/schema", "templates": [public(t) for t in registry().values()]}
+def list_templates(): return {"version": 1, "schema": "/v1/templates/schema", "templates": [public(t) for t in listed().values()]}
 @R.get("/v1/templates/schema")
 def template_schema(): return SCHEMA
 @R.get("/v1/templates/{tid}")
@@ -283,6 +288,7 @@ def deploy_template(tid: str, b: TplDeploy, request: Request):
     a = _acct(request)
     try: t = get(tid)
     except KeyError: raise HTTPException(404, "template not found")
+    if t.get("disabled"): raise HTTPException(503, f"The {t['name']} template is temporarily disabled: {t['disabled']} Nothing was created.")
     return _run(a, t, b)
 @R.post("/v1/deploy/repo")
 def deploy_repo(b: RepoDeploy, request: Request):
@@ -293,7 +299,7 @@ def deploy_repo(b: RepoDeploy, request: Request):
 @R.get("/llms-templates.md", response_class=PlainTextResponse)
 def llms_templates():
     lines = ["# Aloof one-click templates", "", "Deploy: POST https://api.aloof.si/v1/templates/<id>/deploy {\"name\": \"<app>\"} or MCP deploy_template, or `aloof deploy --template <id>`.", ""]
-    for t in registry().values(): lines.append(f"- [{t['name']}](https://www.aloof.si/templates/{t['id']}) (`{t['id']}`): {t['description']}")
+    for t in listed().values(): lines.append(f"- [{t['name']}](https://www.aloof.si/templates/{t['id']}) (`{t['id']}`): {t['description']}")
     return "\n".join(lines) + "\n"
 
 # Template logos: committed SVGs in paas/static/logos (sources and licenses in LICENSES.md), inlined so they stay crisp.
@@ -318,7 +324,7 @@ def _page(path, title, desc, inner):
 
 @R.get("/templates", response_class=HTMLResponse)
 def templates_page():
-    cards = "".join(f"<a class=tcard href='/templates/{t['id']}'>{tpl_logo(t['id'], t['name'])}<div><h3>{html.escape(t['name'])}</h3><p>{html.escape(t['description'])}</p></div></a>" for t in registry().values())
+    cards = "".join(f"<a class=tcard href='/templates/{t['id']}'>{tpl_logo(t['id'], t['name'])}<div><h3>{html.escape(t['name'])}</h3><p>{html.escape(t['description'])}</p></div></a>" for t in listed().values())
     return _page("/templates", "One-click templates", "Deploy open-source apps on Aloof in one click. Machine-readable: /v1/templates.", f"<div class=tgrid>{cards}</div>")
 
 @R.get("/templates/{tid}", response_class=HTMLResponse)

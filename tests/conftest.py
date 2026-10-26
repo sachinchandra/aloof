@@ -1,3 +1,4 @@
+import pytest
 import os, sys, tempfile
 from cryptography.fernet import Fernet
 _d = tempfile.mkdtemp(prefix="aloof-test-")
@@ -9,3 +10,11 @@ os.environ.update(PAAS_DB=os.path.join(_d, "t.sqlite"), PAAS_SECRET_KEY=Fernet.g
 os.environ.pop("PAAS_DB_URL", None); os.environ.pop("STRIPE_TAX", None); os.environ.pop("PAAS_ENV_FILE", None); os.environ.pop("PAAS_RAZORPAY_ENABLED", None)
 for k in [k for k in os.environ if k.startswith(("POSTHOG_", "E2E_", "JARVISLABS_", "KRUTRIM_", "AWS_", "SMTP_", "HCLOUD_", "HYPERSTACK_", "RUNPOD_", "PAAS_GPU_", "PAAS_CPU_POOLS"))]: os.environ.pop(k)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+
+@pytest.fixture
+def umami_enabled(monkeypatch):
+    """Exercise the Umami template's logic even while it's disabled in production."""
+    from paas import templating as T
+    orig = T.registry
+    monkeypatch.setattr(T, "registry", lambda: {k: {kk: vv for kk, vv in t.items() if kk != "disabled"} for k, t in orig().items()})
