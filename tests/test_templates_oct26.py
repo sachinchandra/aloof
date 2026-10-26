@@ -52,19 +52,23 @@ def test_umami_admin_password_set_synchronously(fake, monkeypatch, umami_enabled
     class D:
         def exec_run(self, iid, cmd, **k):
             calls.append(cmd); return (0, b"1\n")
+        def exec_stdin(self, iid, cmd, data, **k):
+            calls.append(cmd + [data.decode()]); return (0, b"1\n")
     monkeypatch.setattr(parity, "_inst", lambda app: ({"id": "i1"}, D()))
     c = _client("um@example.in"); r = c.post("/v1/templates/umami/deploy", json={"name": "umx"}); assert r.status_code == 200, r.text
     pw = r.json()["generated_secrets"]["ADMIN_LOGIN"].split(" / ")[1]; assert len(pw) >= 24 and pw not in json.dumps(fake["spec"])
-    sql = calls[-1][-1]; assert f"crypt('{pw}', gen_salt('bf', 10))" in sql and "drop extension" not in sql and "crypt('umami', password)" in sql
+    assert not any(pw in a for c_ in calls for a in c_[:-1]) and calls[-1][-3:-1] == ["-f", "-"]   # pw only on stdin
+    sql = calls[-1][-1]; assert sql.startswith("set log_statement = 'none'") and f"crypt('{pw}', gen_salt('bf', 10))" in sql and "drop extension" not in sql and "crypt('umami', password)" in sql
 
 def test_umami_init_failure_fails_deploy_and_tears_down(fake, monkeypatch, umami_enabled, caplog):
     monkeypatch.setattr(T, "UMAMI_TIMEOUT", 0.05)
     class D:
-        def exec_run(self, iid, cmd, **k): return (0, b"1\n") if "-tAc" in cmd else (1, b"ERROR: function gen_salt does not exist")
+        def exec_run(self, iid, cmd, **k): return (0, b"1\n")
+        def exec_stdin(self, iid, cmd, data, **k): return (1, b"ERROR: function gen_salt does not exist")
     monkeypatch.setattr(parity, "_inst", lambda app: ({"id": "i1"}, D()))
-    torn = []; monkeypatch.setattr(engine, "destroy_app", lambda n, with_volumes=False: torn.append(n))
+    torn = []; monkeypatch.setattr(engine, "destroy_app", lambda n, with_volumes=False: torn.append(n) or {"ok": True, "deleted": {"volumes": ["pgdata-umy-db"], "postgres": ["umy-db"]}})
     c = _client("um2@example.in"); r = c.post("/v1/templates/umami/deploy", json={"name": "umy"})
-    assert r.status_code == 503 and "couldn't be set" in r.text and "gen_salt" in r.text and torn == ["umy"]
+    assert r.status_code == 503 and "couldn't be set" in r.text and "gen_salt" in r.text and torn == ["umy"] and "Removed: umy, umy-db, pgdata-umy-db" in r.text
     assert any(x.levelname == "WARNING" and "umy" in x.getMessage() for x in caplog.records)
 
 def test_cli_signup_and_key_hint():
@@ -79,3 +83,22 @@ def test_disabled_template_hidden_and_rejected(fake):
     assert "umami" not in [t["id"] for t in c.get("/v1/templates").json()["templates"]] and "umami" not in c.get("/llms-templates.md").text
     k = _client("dis@example.in"); r = k.post("/v1/templates/umami/deploy", json={"name": "umdis"})
     assert r.status_code == 503 and "temporarily disabled" in r.text and "spec" not in fake and not q("select 1 from pg_dbs where name='umdis-db'")
+
+def test_teardown_reports_partial_and_failed(monkeypatch):
+    monkeypatch.setattr(engine, "destroy_app", lambda n, with_volumes=False: {"ok": True, "deleted": {"volumes": [], "postgres": []}, "errors": ["postgres a-db: boom"]})
+    m = T._teardown("a"); assert m.startswith("Partial cleanup") and "postgres a-db: boom" in m and "aloof destroy a" in m
+    monkeypatch.setattr(engine, "destroy_app", lambda n, with_volumes=False: (_ for _ in ()).throw(RuntimeError("x")))
+    m = T._teardown("a"); assert "Cleanup FAILED" in m and "Removed" not in m
+
+def test_umami_exception_text_redacted(monkeypatch, caplog):
+    pw = "A" * 24
+    monkeypatch.setattr(parity, "_inst", lambda app: (_ for _ in ()).throw(RuntimeError(f"exec failed: {pw}")))
+    try: T._umami_admin("u", "u-db", pw, timeout=0.05, sleep=0.01); assert False
+    except T.InitError as e: assert pw not in str(e) and "<pw>" in str(e)
+    assert all(pw not in r.getMessage() for r in caplog.records)
+
+def test_cli_template_wait_uses_pre_request_time():
+    cli = open(os.path.join(os.path.dirname(__file__), "..", "cli", "aloof")).read()
+    seg = cli.split("if o.template:")[1].split("cfg = load_toml")[0]
+    assert seg.index("t0 = time.time()") < seg.index('call("POST"') and "wait_deploy(name, t0)" in seg and "time.time() - 1" not in seg
+    assert 'VERSION = "0.4.2"' in cli and "def wait_deploy(name, t0, timeout=600)" in cli and "stopped waiting" in cli

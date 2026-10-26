@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """aloof CLI. Config: ~/.aloof.json (falls back to ~/.paas.json) {api, key} or env ALOOF_API_URL / ALOOF_API_KEY."""
 import argparse, json, os, sys, time, urllib.request, urllib.error
-VERSION = "0.4.1"   # single source of truth: `aloof --version` and the User-Agent header
+VERSION = "0.4.2"   # single source of truth: `aloof --version` and the User-Agent header
 UA = f"aloof-cli/{VERSION} (python {sys.version_info[0]}.{sys.version_info[1]}; {sys.platform})"
 CFG = os.path.expanduser("~/.aloof.json")
 if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")
@@ -80,9 +80,11 @@ def upload(name, data):
     req = urllib.request.Request(f"{API}/v1/apps/{name}/source", method="POST", data=data, headers={"Content-Type": "application/gzip", "User-Agent": UA, "Authorization": f"Bearer {KEY}"})
     try: return json.loads(urllib.request.urlopen(req, timeout=600).read())
     except urllib.error.HTTPError as e: sys.exit(f"upload failed {e.code}: {e.read().decode()}")
-def wait_deploy(name, t0):
-    seen = set()
+def wait_deploy(name, t0, timeout=600):
+    seen = set(); end = time.time() + timeout
     while True:
+        if time.time() > end:
+            sys.exit(f"still deploying after {timeout // 60} min; stopped waiting (the deploy continues on the server). Check `aloof status {name}` and `aloof logs {name}`.")
         time.sleep(2)
         ev = call("GET", f"/v1/apps/{name}/logs?tail=0", raw=True).split("== instance")[0].splitlines()[1:]
         for e in ev:
@@ -95,12 +97,13 @@ def cmd_deploy(o):
         name = o.app_opt or o.name
         if not name: sys.exit("app name? `aloof deploy --template <id> <name>`")
         env = dict(e.split("=", 1) for e in o.env)
+        t0 = time.time()   # before the POST: template deploys can block server-side (e.g. Umami's admin password init) while the release is created
         r = call("POST", f"/v1/templates/{o.template}/deploy", {"name": name, "env": env, **({"plan": o.plan} if o.plan else {})})
         print("deploying", r["app"]["name"], "from template", r["template"])
         for k, v in (r.get("generated_secrets") or {}).items():
             print(f"generated {k}={v}  " + ("(shown once and NOT stored: save it now)" if k == "ADMIN_LOGIN" else "(shown once; also in the app env)"))
         if o.no_wait: return
-        r = wait_deploy(name, time.time() - 1); print(r.get("error") or f"live: {r['url']}")
+        r = wait_deploy(name, t0); print(r.get("error") or f"live: {r['url']}")
         if r["status"] == "failed": sys.exit(1)
         return
     cfg = load_toml(os.path.join(o.dir, o.config) if not os.path.isabs(o.config) else o.config)

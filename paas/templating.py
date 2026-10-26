@@ -152,7 +152,8 @@ def check_min_tier(account_id, t):
                               + (" + Postgres" if "postgres" in t else "") + "). Upgrade in Billing, then deploy again. Nothing was created.")
 # Umami's own migration installs pgcrypto (usually in public); use it wherever it lives and never drop it (the Oct 26 version
 # created/dropped its own copy, which failed with "gen_salt does not exist" when Umami's already existed).
-UMAMI_SQL = """create extension if not exists pgcrypto;
+UMAMI_SQL = """set log_statement = 'none'; set log_min_duration_statement = -1; set log_min_error_statement = panic;
+create extension if not exists pgcrypto;
 select set_config('search_path', (select n.nspname from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'pgcrypto') || ',public', false);
 update "user" set password = crypt('{pw}', gen_salt('bf', 10)) where username = 'admin';
 select count(*) from "user" where username = 'admin' and password = crypt('{pw}', password) and password <> crypt('umami', password);"""
@@ -172,16 +173,31 @@ def _umami_admin(app, pgn, pw, timeout=None, sleep=2.0):
             rc, out = d.exec_run(i["id"], ["psql", "-U", "aloof", "-d", dbn, "-tAc", "select count(*) from \"user\" where username='admin'"])
             out = out.decode(errors="replace") if isinstance(out, bytes) else str(out)
             if rc == 0 and out.strip() == "1":
-                rc, out = d.exec_run(i["id"], ["psql", "-v", "ON_ERROR_STOP=1", "-q", "-tA", "-U", "aloof", "-d", dbn, "-c", UMAMI_SQL.format(pw=pw)])
+                # password + SQL go over stdin (not argv: invisible to `ps`); the session disables statement/error logging first
+                rc, out = d.exec_stdin(i["id"], ["psql", "-v", "ON_ERROR_STOP=1", "-q", "-tA", "-U", "aloof", "-d", dbn, "-f", "-"], UMAMI_SQL.format(pw=pw).encode())
                 out = (out.decode(errors="replace") if isinstance(out, bytes) else str(out)).replace(pw, "<pw>")
                 if rc == 0 and out.strip().splitlines()[-1:] == ["1"]:
                     engine.event(app, "umami: default admin/umami login replaced with the generated password (verified)"); return True
                 last = f"password update failed (rc {rc}): {out.strip()[-300:]}"; log.warning("umami admin init for %s: %s", app, last)
             else: last = "waiting for Umami's migration to create the admin user"
-        except Exception as e: last = f"{type(e).__name__}: {e}"
+        except Exception as e: last = f"{type(e).__name__}: {str(e).replace(pw, '<pw>')[:300]}"
         time.sleep(sleep)
     log.warning("umami admin init for %s timed out: %s", app, last)
     raise InitError(last)
+def _teardown(name):
+    """Destroy a half-deployed template app; describe what was actually removed and what is left (never claim more than happened)."""
+    from . import engine
+    log = __import__("logging").getLogger("paas.templates")
+    try: r = engine.destroy_app(name) or {}
+    except Exception as e:
+        log.warning("template teardown of %s failed: %s", name, e)
+        return f"Cleanup FAILED ({type(e).__name__}); the app {name} and its database/volumes may still exist: run `aloof destroy {name}`."
+    gone = [name] + list(r.get("deleted", {}).get("postgres", [])) + list(r.get("deleted", {}).get("volumes", []))
+    left = [x for x in (r.get("errors") or [])]
+    if left or not r.get("ok", True):
+        log.warning("template teardown of %s partial: %s", name, left)
+        return f"Partial cleanup: removed {', '.join(gone)}; NOT removed: {'; '.join(left) or 'unknown'}. Run `aloof destroy {name}` to retry."
+    return f"Removed: {', '.join(gone)}."
 def _gen(g):
     kind, n = g.split(":"); n = int(n)
     return secrets.token_hex(n) if kind == "hex" else secrets.token_urlsafe(n)
@@ -255,9 +271,7 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
         pw = secrets.token_urlsafe(18)
         try: _umami_admin(name, created_pg, pw)
         except InitError as e:   # never leave an app serving the default login: tear everything down and fail the deploy
-            try: engine.destroy_app(name)
-            except Exception: __import__("logging").getLogger("paas.templates").warning("umami init: teardown of %s failed", name, exc_info=True)
-            raise InitError(f"Umami's admin password couldn't be set ({e}). The app, its database and volumes were removed; try again, or contact support if it persists.")
+            raise InitError(f"Umami's admin password couldn't be set ({e}). " + _teardown(name) + " Try again, or contact support if it persists.")
         generated["ADMIN_LOGIN"] = f"admin / {pw}"
     from .db import audit as _audit   # F5
     _audit(account_id, name, "template.deploy" if t["id"] != "from-repo" else "repo.deploy", json.dumps({"template": t["id"], "source": src, "plan": plan}))

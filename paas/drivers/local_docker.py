@@ -129,6 +129,27 @@ class LocalDockerDriver(Driver):
             return r.exit_code, (out or b"") if r.exit_code == 0 else (err or out or b"")
         r = ct.exec_run(cmd, demux=False, stdout=True, stderr=True)
         return r.exit_code, (r.output or b"")
+    def exec_stdin(self, iid, cmd, data: bytes, timeout=120):
+        """Run cmd with `data` on stdin (never in argv, so it isn't visible to `ps` in the container). Returns (rc, stdout+stderr)."""
+        import socket as _s, struct
+        api = self.c.api; e = api.exec_create(iid, cmd, stdin=True, stdout=True, stderr=True, tty=False)
+        sock = api.exec_start(e["Id"], socket=True); raw = getattr(sock, "_sock", sock); raw.settimeout(timeout)
+        raw.sendall(data)
+        try: raw.shutdown(_s.SHUT_WR)
+        except OSError: pass
+        buf = b""
+        while True:
+            chunk = raw.recv(65536)
+            if not chunk: break
+            buf += chunk
+        raw.close(); out = b""
+        while len(buf) >= 8:   # demux docker's stream framing: [stream, 0, 0, 0, size(4)] payload
+            n = struct.unpack(">I", buf[4:8])[0]; out += buf[8:8 + n]; buf = buf[8 + n:]
+        for _ in range(50):
+            r = api.exec_inspect(e["Id"])
+            if not r.get("Running"): return r.get("ExitCode"), out
+            time.sleep(0.1)
+        return None, out
     def exec_socket(self, iid, cmd=None):
         """Interactive TTY exec; returns (exec_id, raw socket)."""
         api = self.c.api; cmd = cmd or ["/bin/sh", "-c", "command -v bash >/dev/null && exec bash || exec sh"]
