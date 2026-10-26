@@ -88,7 +88,7 @@ def create_subscription_session(a, tier, client=None):
     price = tier_price(tier)
     if not price: raise RuntimeError(f"STRIPE_PRICE_{tier.upper()} not set")
     ok, cancel = _urls()
-    d = _tax({"mode": "subscription", "customer": ensure_customer(a, client), "client_reference_id": a["id"], "success_url": ok, "cancel_url": cancel,
+    d = _tax({"mode": "subscription", "allow_promotion_codes": True, "payment_method_collection": "always", "customer": ensure_customer(a, client), "client_reference_id": a["id"], "success_url": ok, "cancel_url": cancel,
               "line_items": [{"price": price, "quantity": 1}], "metadata": {"account_id": a["id"], "kind": "subscription", "tier": tier},
               "subscription_data": {"metadata": {"account_id": a["id"], "tier": tier}}})
     s = _call("POST", "/checkout/sessions", d, idem=f"sub-{a['id']}-{tier}-{int(time.time())}", client=client)
