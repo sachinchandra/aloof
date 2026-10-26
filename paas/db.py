@@ -139,6 +139,9 @@ alter table volumes add column if not exists template_app TEXT;
 alter table pg_dbs add column if not exists template_app TEXT;
 """)
 
+    ,(15, """
+alter table releases add column if not exists error TEXT;
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

@@ -178,7 +178,7 @@ def app_status(name: str, a=Depends(acct)):
     previews = [p for p in engine.children(name) if load_spec(q("select spec from apps where name=?", (p,), one=True)["spec"]).get("_preview_of") == name]
     return {"name": name, "status": ap["status"], "error": ap.get("error"), "url": ap["url"], "plan": ap["plan"]["id"], "provider": ap["provider"],
             "release": rel, "process_groups": groups, "cron": spec.get("cron") or [], "release_command": spec.get("release_command"),
-            "internal_host": f"{name}.internal", "domains": ap["domains"], "previews": previews, "autoscale": spec.get("autoscale")}
+            "internal_host": f"{name}.internal", "domains": ap["domains"], "previews": previews, "autoscale": spec.get("autoscale")} | (engine.release_state(name) or {})
 class CountReq(BaseModel): counts: dict[str, int]
 @R.post("/v1/apps/{name}/scale/count")
 def scale_count(name: str, b: CountReq, request: Request, a=Depends(acct)):

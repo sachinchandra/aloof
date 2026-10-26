@@ -183,11 +183,11 @@ def deploy(r: DeployReq, a=Depends(acct)):
 @app.get("/v1/apps")
 def list_apps(a=Depends(acct)): return [with_url(engine.get_app(r["name"])) for r in q("select name from apps where account_id=? and status!='destroyed' and name not like ?", (a["id"], "pg-%")) if scope_ok(r["name"], a)]
 @app.get("/v1/apps/{name}")
-def get_app(name: str, a=Depends(acct)): return with_url(own(name, a))
+def get_app(name: str, a=Depends(acct)): return with_url(own(name, a)) | (engine.release_state(name) or {})
 @app.get("/v1/apps/{name}/deploy")
 def app_deploy_progress(name: str, a=Depends(acct)):
     """Latest deploy: phase (queued|building|starting|live|failed), steps, error, a log excerpt on failure, and the platform events so far."""
-    own(name, a); return with_url(engine.deploy_progress(name) | {"name": name})
+    own(name, a); return with_url(engine.deploy_progress(name) | {"name": name}) | (engine.release_state(name) or {})
 @app.get("/v1/apps/{name}/events")
 def app_events(name: str, after: int = 0, limit: int = 200, a=Depends(acct)):
     """Platform events (deploy steps, build output, release_command output) after an event id, for polling."""
@@ -815,7 +815,7 @@ def app_selfheal_put(name: str, b: SelfHealReq, request: Request, a=Depends(acct
 def app_diagnose(name: str, a=Depends(acct)):
     """Read-only diagnosis: recent errors, failed health checks, deploys/rollbacks/restarts, instance states and exit codes,
     and rule-based likely causes with suggested fixes. Secrets and env values are redacted."""
-    own(name, a); from . import diagnose; return diagnose.diagnose(name)
+    own(name, a); from . import diagnose; return diagnose.diagnose(name) | (engine.release_state(name) or {})
 class RollbackReq(BaseModel): version: int|None=None
 @app.post("/v1/apps/{name}/rollback")
 def app_rollback(name: str, request: Request, b: RollbackReq|None=None, a=Depends(acct)):

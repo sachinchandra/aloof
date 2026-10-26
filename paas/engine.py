@@ -301,12 +301,44 @@ def _run_deploy(name, image=None, reason=None, only_if_latest=None):
                 try: _stop({"id": n.id, "provider": drv.name})
                 except Exception: pass
             _set_release(name, ver, "failed")
+            try: q("update releases set error=? where app=? and version=?", (str(e)[:2000], name, ver))
+            except Exception: pass
             alive = q("select 1 from instances where app=? and status='running'", (name,), one=True)
             if prev and alive:   # previous release still serving: keep it, report the failure
                 q("update apps set spec=?, status='running', error=? where name=?", (prev["spec"], f"v{ver} failed: {e}; still serving v{prev['version']}", name))
                 log(f"ERROR: v{ver} failed ({e}); v{prev['version']} still serving, no downtime")
             else:
                 q("update apps set status='failed', error=? where name=?", (str(e), name)); log(f"ERROR: {e}")
+def release_state(name):
+    """What was asked for vs what is actually live, side by side, so a failed deploy never looks like success:
+    requested_release (newest release: version, status, error), serving_release (the active one), health of the
+    serving release, and mismatch + a plain warning when they differ."""
+    app = q("select status, error from apps where name=?", (name,), one=True)
+    if not app: return None
+    cols = "version, status, reason, created, error, image"
+    req = q(f"select {cols} from releases where app=? order by version desc limit 1", (name,), one=True)
+    srv = q(f"select {cols} from releases where app=? and status='active' order by version desc limit 1", (name,), one=True)
+    n = (q("select count(*) n from instances where app=? and status='running'", (name,), one=True) or {}).get("n") or 0
+    st = app["status"]
+    state = "sleeping" if st == "idle" and srv else "stopped" if st == "stopped" else "healthy" if n and st == "running" else \
+            "starting" if st in ("queued", "building", "starting") and n else "down"
+    health = {"release": srv["version"] if srv else None, "state": state if srv else "none", "instances_running": n,
+              "note": (f"health checks reflect v{srv['version']}" if srv else "nothing is serving")}
+    mismatch = bool(req and (not srv or req["version"] != srv["version"]))
+    warn = None
+    if mismatch:
+        rv = f"v{req['version']}"
+        if req["status"] == "failed":
+            what = "failed to build" if not req.get("image") else "failed to start or pass health checks"
+            warn = (f"{rv} {what}; v{srv['version']} is still serving. Health checks reflect v{srv['version']}, not your deploy." if srv
+                    else f"{rv} {what} and nothing is serving.")
+        elif req["status"] == "deploying":
+            warn = (f"{rv} is still deploying; v{srv['version']} is serving until it passes health checks." if srv else f"{rv} is still deploying; nothing is serving yet.")
+        else:
+            warn = f"{rv} is {req['status']}; " + (f"v{srv['version']} is serving." if srv else "nothing is serving.")
+    trim = lambda r: r and {"version": r["version"], "status": r["status"], "error": r.get("error"), "reason": r.get("reason"), "created": r["created"]}
+    return {"requested_release": trim(req), "serving_release": trim(srv), "health": health, "mismatch": mismatch, "warning": warn,
+            "deploy_ok": bool(req and not mismatch and req["status"] == "active"), "deploy_failed": bool(req and req["status"] == "failed")}
 def deploy_progress(name):
     """The latest deploy as real backend states only: apps.status (queued -> building -> starting -> running|idle|stopped|failed),
     the release row (deploying -> active|failed) and the platform events logged since the deploy was queued."""

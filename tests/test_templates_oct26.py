@@ -101,4 +101,4 @@ def test_cli_template_wait_uses_pre_request_time():
     cli = open(os.path.join(os.path.dirname(__file__), "..", "cli", "aloof")).read()
     seg = cli.split("if o.template:")[1].split("cfg = load_toml")[0]
     assert seg.index("t0 = time.time()") < seg.index('call("POST"') and "wait_deploy(name, t0)" in seg and "time.time() - 1" not in seg
-    assert 'VERSION = "0.4.2"' in cli and "def wait_deploy(name, t0, timeout=600)" in cli and "stopped waiting" in cli
+    assert 'VERSION = "0.4.3"' in cli and "def wait_deploy(name, t0, timeout=600)" in cli and "stopped waiting" in cli

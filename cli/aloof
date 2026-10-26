@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """aloof CLI. Config: ~/.aloof.json (falls back to ~/.paas.json) {api, key} or env ALOOF_API_URL / ALOOF_API_KEY."""
 import argparse, json, os, sys, time, urllib.request, urllib.error
-VERSION = "0.4.2"   # single source of truth: `aloof --version` and the User-Agent header
+VERSION = "0.4.3"   # single source of truth: `aloof --version` and the User-Agent header
 UA = f"aloof-cli/{VERSION} (python {sys.version_info[0]}.{sys.version_info[1]}; {sys.platform})"
 CFG = os.path.expanduser("~/.aloof.json")
 if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")
@@ -91,7 +91,14 @@ def wait_deploy(name, t0, timeout=600):
             if e not in seen: seen.add(e); print("  " + e, flush=True)
         rel = (call("GET", f"/v1/apps/{name}/releases") or [{}])[0]
         if rel.get("created", 0) >= t0 - 2 and rel.get("status") in ("active", "failed"): break
-    return call("GET", f"/v1/apps/{name}")
+    r = call("GET", f"/v1/apps/{name}")
+    if r.get("mismatch") or r.get("deploy_failed"):   # an older release still serving must not read as success
+        rq, sv = r.get("requested_release") or {}, r.get("serving_release") or {}
+        print(f"requested v{rq.get('version')}: {rq.get('status')}" + (f" ({rq['error']})" if rq.get("error") else ""))
+        print(f"serving   v{sv.get('version')}: health {(r.get('health') or {}).get('state')}" if sv else "serving   nothing")
+        if r.get("warning"): print("warning:", r["warning"])
+        r["status"] = "failed"
+    return r
 def cmd_deploy(o):
     if o.template:
         name = o.app_opt or o.name
