@@ -1,0 +1,14 @@
+[Unit]
+Description=Aloof: block cloud metadata (169.254.169.254) from containers
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/aloof-metadata-block.sh
+ExecStop=/usr/local/sbin/aloof-metadata-block.sh stop
+
+[Install]
+# WantedBy docker: re-applied every time Docker (re)starts; PartOf: stopped with it
+WantedBy=docker.service multi-user.target

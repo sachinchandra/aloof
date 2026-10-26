@@ -22,5 +22,11 @@ sed -i "/^\[program:paas\]/,/^\[/ s|^environment=.*|environment=$E,HOME=\"/home/
 sed -i "/^\[program:mcp\]/,/^\[/ s|^environment=.*|environment=PAAS_ENV_FILE=\"$PWD/golive.env\",ALOOF_API_URL=\"http://localhost:8000\",MCP_PUBLIC_URL=\"$MCP_PUBLIC_URL\",PAAS_BRAND=\"$PAAS_BRAND\",HOME=\"/home/box\"|" supervisord.conf
 sed -i "/^\[program:caddy\]/,/^\[/ { s|--config [^ ]*|--config $LIVE_ABS|; s|^environment=.*|environment=XDG_DATA_HOME=\"/var/lib/aloof/caddy\",XDG_CONFIG_HOME=\"/var/lib/aloof/caddy\"| }" supervisord.conf
 sudo mkdir -p /var/lib/aloof/caddy
+# containers must not reach the cloud metadata service (persistent across reboots and Docker restarts)
+if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then
+  sudo install -m 755 metadata-block.sh /usr/local/sbin/aloof-metadata-block.sh
+  sudo install -m 644 aloof-metadata-block.service /etc/systemd/system/aloof-metadata-block.service
+  sudo systemctl daemon-reload && sudo systemctl enable aloof-metadata-block.service >/dev/null 2>&1 && sudo systemctl restart aloof-metadata-block.service
+fi
 sudo supervisorctl -c supervisord.conf reread && sudo supervisorctl -c supervisord.conf update
 sudo supervisorctl -c supervisord.conf restart paas mcp caddy
