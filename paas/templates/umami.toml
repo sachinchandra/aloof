@@ -1,10 +1,9 @@
 id = "umami"
 name = "Umami"
-description = "Privacy-friendly web analytics (Google Analytics alternative) on managed Postgres. The default admin/umami login is replaced at deploy with a generated password, shown once as ADMIN_LOGIN."
+description = "Privacy-friendly web analytics (Google Analytics alternative) on managed Postgres. The default admin/umami login is replaced during the deploy (the deploy fails if it cannot be) with a generated password, shown once as ADMIN_LOGIN."
 category = "Analytics"
 website = "https://umami.is"
 init = "umami-admin"
-disabled = "its default admin login was not reliably replaced at deploy; we are fixing this."
 [source]
 image = "ghcr.io/umami-software/umami:latest"
 [app]
