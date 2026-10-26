@@ -125,7 +125,7 @@ def token_create(b: TokReq, request: Request, a=Depends(acct)):
     if b.can_destroy and a.get("_level", 3) < 3: raise HTTPException(403, "only a full-access (paas:admin) caller can create a deploy token that can destroy")
     t = "dt_" + secrets.token_urlsafe(32); tid = "tok_" + secrets.token_hex(5); exp = _secs(b.expires_in)
     q("insert into deploy_tokens(id,account_id,app,label,token_hash,prefix,expires,created,can_destroy) values(?,?,?,?,?,?,?,?,?)",
-      (tid, a["id"], b.app, b.label[:60], crypto.sha256(t), t[:10], time.time() + exp if exp else None, time.time(), bool(b.can_destroy)))
+      (tid, a["id"], b.app, b.label[:60], crypto.sha256(t), t[:10], time.time() + exp if exp else None, time.time(), 1 if b.can_destroy else 0))
     _audit(a["id"], b.app, "token.create", f"{tid} {b.label} scope={'app:' + b.app if b.app else 'org'} can_destroy={bool(b.can_destroy)}", _ip(request))
     return {"id": tid, "token": t, "scope": f"app:{b.app}" if b.app else "org (all apps in this account)", "expires": time.time() + exp if exp else None,
             "can_destroy": bool(b.can_destroy), "access": "paas:admin (can destroy and restore)" if b.can_destroy else "paas:write (deploy, scale, config; can't destroy apps or delete/restore data)",
