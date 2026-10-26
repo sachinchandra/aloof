@@ -13,7 +13,7 @@ aloof self-heal &lt;app&gt; [on|off]    # show or set automatic rollback of bad 
 aloof templates                   # list one-click templates ; deploy one with: aloof deploy &lt;app&gt; --template &lt;id&gt;
 aloof scale count 3 | scale count web=2 worker=1 | scale vm perf-2x-4gb [--group worker]
 aloof secrets set K=V [K2=V2] [--stage] | unset K | list | deploy
-aloof tokens create [-a app | --org] [--expiry 30d] | list | revoke &lt;id&gt;
+aloof tokens create [-a app | --org] [--expiry 30d] [--allow-destroy] | list | revoke &lt;id&gt;
 aloof registry login ghcr.io -u me --password-stdin [-a app] | list | logout &lt;server&gt;
 aloof git deploy-key github.com [-a app] | git token gitlab.com [-a app] | list | remove &lt;id&gt;
 aloof github install | repos | status | link &lt;app&gt; owner/repo [--branch main] [--no-previews] | unlink &lt;app&gt;
@@ -106,7 +106,7 @@ aloof github link my-app me/my-repo --branch main</pre>
 <p>Not on GitHub? Previews work with any git host through the API: <code>aloof previews create 42 feature-branch</code>.</p>""",
 "ci": """<h1>Deploy tokens &amp; CI</h1><pre>aloof tokens create -a my-app --expiry 90d     # app-scoped (or --org for every app in the account)
 aloof tokens list ; aloof tokens revoke tok_...</pre>
-<p>A deploy token (<code>dt_...</code>) can deploy, scale, set secrets and read logs for its app, including the app's previews and worker groups. It can't manage tokens, billing, auth or admin endpoints. Expired or revoked tokens stop working immediately, and the audit log records which token did what.</p>
+<p>A deploy token (<code>dt_...</code>) can deploy, scale, set secrets and read logs for its app, including the app's previews and worker groups. It can't manage tokens, billing, auth or admin endpoints. <b>New tokens can't destroy</b>: they can't delete apps, volumes, databases or snapshots, or restore backups (403). If a pipeline really needs that, create the token with <code>aloof tokens create -a my-app --allow-destroy</code> (API: <code>"can_destroy": true</code>). Tokens created before October 26, 2026 keep destroy rights, so revoke and recreate them to drop those rights. Expired or revoked tokens stop working immediately, and the audit log records which token did what.</p>
 <h2>GitHub Actions</h2><pre>name: deploy
 on: {push: {branches: [main]}}
 jobs:

@@ -561,7 +561,7 @@ def account_by_key(key):
         if not t or (t["expires"] and t["expires"] < time.time()): return None
         q("update deploy_tokens set last_used=? where id=?", (time.time(), t["id"]))
         a = q("select * from accounts where id=?", (t["account_id"],), one=True)
-        if a: a["_token"] = t["id"]; a["_scope_app"] = t["app"]
+        if a: a["_token"] = t["id"]; a["_scope_app"] = t["app"]; a["_can_destroy"] = bool(t.get("can_destroy"))
         return a
     return None
 def create_named_key(account_id, label, replace=True):

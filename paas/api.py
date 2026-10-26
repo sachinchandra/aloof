@@ -52,10 +52,37 @@ def acct(request: Request, authorization: str = Header(None)):
         a = engine.account_by_key(key)
         if not a: raise HTTPException(401, "invalid API key")
         if a.get("_token"): scope_check(request.url.path, a)
-        return a
+        return level_check(request, a)
     a = auth.session_account(request.cookies.get(auth.COOKIE))
     if not a: raise HTTPException(401, "not authenticated: send Authorization: Bearer pk_... or log in at /login")
     if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
+    return level_check(request, a)
+# ---- access levels: read (GET) < write (everything except destroy/restore/account control) < admin (all) ----
+LEVELS = {"paas:read": 1, "paas:write": 2, "paas:admin": 3, "paas": 3}
+LEVEL_NAMES = {1: "paas:read", 2: "paas:write", 3: "paas:admin"}
+_ADMIN_RULES = [("DELETE", r"^/v1/apps/[^/]+/?$"), ("DELETE", r"^/v1/volumes/[^/]+/?$"), ("DELETE", r"^/v1/pg/[^/]+/?$"),
+                ("DELETE", r"^/v1/volumes/[^/]+/snapshots/[^/]+/?$"), ("POST", r"^/v1/(pg|volumes)/[^/]+/(restore|offsite-restore)/?$"),
+                ("*", r"^/v1/(auth|billing)(/|$)")]
+def required_level(method, path):
+    """3 = destroy an app/volume/database/snapshot, restore data, or change auth/billing; 1 = read; 2 = any other change."""
+    m = method.upper()
+    if m in ("GET", "HEAD", "OPTIONS"): return 1
+    for meth, rx in _ADMIN_RULES:
+        if (meth == "*" or meth == m) and _re2.match(rx, path): return 3
+    return 2
+def caller_level(request, a):
+    """API keys and sessions are admin; deploy tokens are write unless created with can_destroy. X-Aloof-Scope (sent by the MCP server
+    for OAuth connections) can only lower it; an unknown value counts as read."""
+    lv = (3 if a.get("_can_destroy") else 2) if a.get("_token") else 3
+    h = (request.headers.get("x-aloof-scope") or "").strip().lower()
+    if h: lv = min(lv, LEVELS.get(h, 1))
+    return lv
+def level_check(request, a):
+    lv = caller_level(request, a); need = required_level(request.method, request.url.path); a["_level"] = lv
+    if lv < need:
+        what = {1: "read-only", 2: "write (no destroy/restore)"}[lv]
+        raise HTTPException(403, f"insufficient scope: this {'deploy token' if a.get('_token') else 'connection'} is {what} ({LEVEL_NAMES[lv]}); "
+                                 f"{request.method} {request.url.path} needs {LEVEL_NAMES[need]}")
     return a
 import re as _re2
 def scope_ok(name, a):

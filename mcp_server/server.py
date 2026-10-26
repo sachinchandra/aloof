@@ -6,7 +6,7 @@ API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", "http://loc
 BRAND = os.environ.get("PAAS_BRAND", "Aloof")
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.auth.middleware.auth_context import get_access_token
-from oauth import PaasOAuthProvider, login_page, api_key_for, patch_metadata
+from oauth import PaasOAuthProvider, login_page, api_key_for, patch_metadata, SCOPES, level as scope_level, LEVEL_NAMES
 HTTP_MODE = "--http" in sys.argv
 PUBLIC = os.environ.get("MCP_PUBLIC_URL", f"http://localhost:{os.environ.get('MCP_PORT','8001')}").rstrip("/")
 def docs_url():
@@ -21,13 +21,30 @@ def docs_url():
 if HTTP_MODE: patch_metadata()
 auth_kw = dict(auth_server_provider=PaasOAuthProvider(PUBLIC), auth=AuthSettings(
     issuer_url=PUBLIC, resource_server_url=f"{PUBLIC}/mcp", service_documentation_url=docs_url(),
-    client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=["paas"], default_scopes=["paas"]),
-    revocation_options=RevocationOptions(enabled=True), required_scopes=["paas"], validate_token_resource=False)) if HTTP_MODE else {}
+    client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=SCOPES, default_scopes=["paas"]),
+    revocation_options=RevocationOptions(enabled=True), required_scopes=None, validate_token_resource=False)) if HTTP_MODE else {}
+# Access level each tool needs: 0 none (signup/waitlist), 1 paas:read, 2 paas:write (default), 3 paas:admin (destroy and restore).
+READ_TOOLS = {"inspect", "list", "list_plans", "get_status", "list_apps", "get_logs", "get_usage", "list_templates", "list_volumes", "list_domains",
+              "list_releases", "diagnose_app", "list_regions", "list_postgres", "list_offsite_backups", "app_status"}
+ADMIN_TOOLS = {"destroy_app", "restore", "restore_volume", "restore_offsite_backup"}
+def tool_level(name): return 0 if name in ("signup", "join_gpu_waitlist") else 1 if name in READ_TOOLS else 3 if name in ADMIN_TOOLS else 2
+def _caller_level():
+    """OAuth connections get the level of their granted scopes; stdio and bearer pk_ keys are full access (3)."""
+    try: t = get_access_token()
+    except Exception: t = None
+    return 3 if t is None else scope_level(t.scopes)
 class _MCP(FastMCP):
-    """FastMCP that hides legacy (pre-v2) tool names from tools/list unless the client opts in. Calls to them always work."""
+    """Hides legacy (pre-v2) tool names from tools/list unless the client opts in (calls to them always work), hides tools the
+    connection's OAuth scope doesn't allow, and refuses to run them."""
     async def list_tools(self):
-        ts = await super().list_tools()
-        return ts if _legacy_on(self) else [t for t in ts if t.name not in LEGACY]
+        ts = await super().list_tools(); lv = _caller_level()
+        return [t for t in ts if (_legacy_on(self) or t.name not in LEGACY) and tool_level(t.name) <= lv]
+    async def call_tool(self, name, arguments):
+        lv, need = _caller_level(), tool_level(name)
+        if lv < need:
+            raise ToolError(f"insufficient scope: this connection was approved for {LEVEL_NAMES.get(lv, 'no scope')}, and {name} needs {LEVEL_NAMES[need]}. "
+                            f"Reconnect and approve the {LEVEL_NAMES[need]} scope to use it.")
+        return await super().call_tool(name, arguments)
 def _legacy_on(m):
     if os.environ.get("ALOOF_MCP_TOOLS", "").lower() == "legacy": return True
     try: req = m.get_context().request_context.request
@@ -42,10 +59,13 @@ mcp = _MCP(BRAND, **auth_kw, instructions=(
   "Flow: list(kind='plans') -> (signup if no key) -> deploy_app(wait=true) -> share url. Reads are inspect (one app) and list (account); inspect(what='diagnose') explains failures."),
   host=os.environ.get("MCP_HOST","0.0.0.0"), port=int(os.environ.get("MCP_PORT","8001")))
 def _h(k):
-    if not k:
-        t = get_access_token()   # HTTP mode: OAuth access token or bearer API key
-        k = api_key_for(t.token) if t else None
-    k = k or os.environ.get("ALOOF_API_KEY") or os.environ.get("PAAS_API_KEY"); return {"Authorization": f"Bearer {k}"} if k else {}
+    t = get_access_token()   # HTTP mode: OAuth access token or bearer API key
+    lv = 3 if t is None else scope_level(t.scopes)
+    if not k: k = api_key_for(t.token) if t else None
+    k = k or os.environ.get("ALOOF_API_KEY") or os.environ.get("PAAS_API_KEY")
+    h = {"Authorization": f"Bearer {k}"} if k else {}
+    if k and lv < 3: h["X-Aloof-Scope"] = LEVEL_NAMES.get(lv, "paas:read")   # the API enforces the same limit server-side
+    return h
 from mcp.server.fastmcp.exceptions import ToolError
 def _err(code, body):
     d = body.get("detail", body) if isinstance(body, dict) else body
@@ -256,9 +276,10 @@ def add_credential(kind: str, host: str, username: str = "", secret: str = "", a
         return _r("POST", "/v1/git/credentials", api_key, json={"host": host, "kind": kind[4:], "token": secret or None, "app": app or None})
     raise ToolError("kind must be 'registry', 'git_ssh' or 'git_token'")
 @mcp.tool()
-def create_deploy_token(app: str = "", expires_in: str = "90d", api_key: str = "") -> dict:
-    """Create a CI deploy token scoped to one app (or the whole account if app is empty). Shown once."""
-    return _r("POST", "/v1/tokens", api_key, json={"app": app or None, "expires_in": expires_in})
+def create_deploy_token(app: str = "", expires_in: str = "90d", allow_destroy: bool = False, api_key: str = "") -> dict:
+    """Create a CI deploy token scoped to one app (or the whole account if app is empty). Shown once. By default it can deploy, scale and
+    change config but can't destroy apps, delete volumes/databases or restore backups; allow_destroy=true lifts that (full-access callers only)."""
+    return _r("POST", "/v1/tokens", api_key, json={"app": app or None, "expires_in": expires_in, "can_destroy": bool(allow_destroy)})
 @mcp.tool()
 def join_gpu_waitlist(email: str, gpu: str = "", note: str = "") -> dict:
     """GPUs (L4, RTX 4090, L40, A100 80GB, H100) are coming soon. Add an email to the waitlist; optional `gpu` plan id

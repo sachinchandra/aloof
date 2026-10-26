@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """aloof CLI. Config: ~/.aloof.json (falls back to ~/.paas.json) {api, key} or env ALOOF_API_URL / ALOOF_API_KEY."""
 import argparse, json, os, sys, time, urllib.request, urllib.error
-VERSION = "0.4.3"   # single source of truth: `aloof --version` and the User-Agent header
+VERSION = "0.4.4"   # single source of truth: `aloof --version` and the User-Agent header
 UA = f"aloof-cli/{VERSION} (python {sys.version_info[0]}.{sys.version_info[1]}; {sys.platform})"
 CFG = os.path.expanduser("~/.aloof.json")
 if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")
@@ -254,7 +254,7 @@ a = s.add_parser("launch", help="detect the framework, write Dockerfile + aloof.
 a = s.add_parser("config", help="aloof.toml"); cs = a.add_subparsers(dest="ccmd", required=True)
 for c in ("validate", "show"): x = cs.add_parser(c); x.add_argument("-c", "--config", default="aloof.toml")
 a = s.add_parser("tokens", help="deploy tokens for CI"); ts = a.add_subparsers(dest="tcmd", required=True)
-x = ts.add_parser("create"); x.add_argument("-a", "--app", dest="app_opt", help="scope to one app (default: whole account/org)"); x.add_argument("--expiry", default="90d"); x.add_argument("--label", default="ci"); x.add_argument("--org", action="store_true")
+x = ts.add_parser("create"); x.add_argument("-a", "--app", dest="app_opt", help="scope to one app (default: whole account/org)"); x.add_argument("--expiry", default="90d"); x.add_argument("--label", default="ci"); x.add_argument("--org", action="store_true"); x.add_argument("--allow-destroy", action="store_true", help="let this token destroy apps and restore backups (default: it can't)")
 ts.add_parser("list"); ts.add_parser("revoke").add_argument("id")
 a = s.add_parser("secrets"); ss2 = a.add_subparsers(dest="scmd2", required=True)
 for c in ("set", "unset"):
@@ -488,10 +488,10 @@ elif o.cmd == "config":
         print("valid" if v["ok"] else "invalid: " + v["error"]); sys.exit(0 if v["ok"] else 1)
 elif o.cmd == "tokens":
     if o.tcmd == "create":
-        r = call("POST", "/v1/tokens", {"app": None if o.org else app_of(o, required=False), "label": o.label, "expires_in": o.expiry})
-        print(f"token ({r['scope']}, expires {time.strftime('%Y-%m-%d', time.localtime(r['expires'])) if r['expires'] else 'never'}) - shown once:\n{r['token']}")
+        r = call("POST", "/v1/tokens", {"app": None if o.org else app_of(o, required=False), "label": o.label, "expires_in": o.expiry, "can_destroy": o.allow_destroy})
+        print(f"token ({r['scope']}, {'can destroy' if r.get('can_destroy') else 'no destroy/restore'}, expires {time.strftime('%Y-%m-%d', time.localtime(r['expires'])) if r['expires'] else 'never'}) - shown once:\n{r['token']}")
     elif o.tcmd == "list":
-        for t in call("GET", "/v1/tokens"): print(f"{t['id']:<16} {t['prefix']}...  {('app:' + t['app']) if t['app'] else 'org':<24} {t['label']:<12} " + ("EXPIRED" if t["expired"] else (time.strftime('expires %Y-%m-%d', time.localtime(t['expires'])) if t['expires'] else "no expiry")))
+        for t in call("GET", "/v1/tokens"): print(f"{t['id']:<16} {t['prefix']}...  {('app:' + t['app']) if t['app'] else 'org':<24} {t['label']:<12} {'destroy' if t.get('can_destroy') else 'no-destroy':<10} " + ("EXPIRED" if t["expired"] else (time.strftime('expires %Y-%m-%d', time.localtime(t['expires'])) if t['expires'] else "no expiry")))
     else: pj(call("DELETE", f"/v1/tokens/{o.id}"))
 elif o.cmd == "secrets":
     name = app_of(o)

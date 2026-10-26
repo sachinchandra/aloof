@@ -142,6 +142,10 @@ alter table pg_dbs add column if not exists template_app TEXT;
     ,(15, """
 alter table releases add column if not exists error TEXT;
 """)
+    ,(16, """
+alter table deploy_tokens add column if not exists can_destroy INTEGER default 0;
+update deploy_tokens set can_destroy=1;
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

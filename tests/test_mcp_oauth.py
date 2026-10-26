@@ -269,7 +269,7 @@ def test_raw_redirect_whitespace_rejected(srv):
                                     "code_challenge_method": "S256"}, follow_redirects=False)
     assert r.status_code == 400 and "location" not in r.headers
 def test_unverified_warning_is_strong(srv):
-    o = __import__("oauth"); assert "full access to your Aloof account" in o.PAGE and "Deny" in o.UNVERIFIED_BADGE and "may be fake" in o.UNVERIFIED_BADGE
+    o = __import__("oauth"); assert "{access}" in o.PAGE and "full access to your Aloof account" in o.SCOPE_TEXT[3] and "Deny" in o.UNVERIFIED_BADGE and "may be fake" in o.UNVERIFIED_BADGE
 
 
 def test_other_client_cannot_burn_code(srv):
@@ -331,3 +331,54 @@ def test_tokens_carry_account_hash(srv):
     assert r["acct"] == crypto.sha256("pk_abc")
     oauth.S.put("client", "cx", {"client_id": "cx"})
     assert oauth._db.q("select acct from kv where kind='oauth:client' and k='cx'", one=True)["acct"] is None
+
+# ---- scopes (paas:read / paas:write / paas:admin) in the MCP server; API-side checks are in test_scopes.py ----
+import anyio, httpx
+def _as(monkeypatch, server, scopes):
+    from mcp.server.auth.provider import AccessToken
+    monkeypatch.setattr(server, "get_access_token", lambda: AccessToken(token="mcp_at_t", client_id="c", scopes=scopes))
+    monkeypatch.setattr(server, "api_key_for", lambda t: "pk_good")
+async def _session(server, fn):
+    from mcp.shared.memory import create_connected_server_and_client_session as conn
+    async with conn(server.mcp._mcp_server) as s: return await fn(s)
+def test_mcp_read_token_cannot_deploy(srv, monkeypatch):
+    _, _, server = srv; _as(monkeypatch, server, ["paas:read"]); seen = []
+    monkeypatch.setattr(server.httpx, "request", lambda m, u, **k: (seen.append((m, u, k["headers"])), httpx.Response(200, json={"ok": 1}))[1])
+    async def go(s):
+        names = [t.name for t in (await s.list_tools()).tools]
+        return names, await s.call_tool("deploy_app", {"name": "x", "image": "nginx"}), await s.call_tool("inspect", {"name": "x"})
+    names, dep, ins = anyio.run(_session, server, go)
+    assert "inspect" in names and "list" in names and "deploy_app" not in names and "destroy_app" not in names
+    assert dep.isError and "insufficient scope" in dep.content[0].text and "paas:write" in dep.content[0].text
+    assert not ins.isError and seen[-1][2]["X-Aloof-Scope"] == "paas:read" and not any(m == "POST" for m, _, _ in seen)
+def test_mcp_write_token_cannot_destroy(srv, monkeypatch):
+    _, _, server = srv; _as(monkeypatch, server, ["paas:write"])
+    monkeypatch.setattr(server.httpx, "request", lambda m, u, **k: httpx.Response(200, json={"ok": 1}))
+    async def go(s):
+        names = [t.name for t in (await s.list_tools()).tools]
+        return names, await s.call_tool("destroy_app", {"name": "x"}), await s.call_tool("restore", {"kind": "snapshot", "name": "v", "backup_id": "b"}), await s.call_tool("set_env", {"name": "x", "env": {"A": "1"}})
+    names, d, r, e = anyio.run(_session, server, go)
+    assert "deploy_app" in names and "destroy_app" not in names and "restore" not in names
+    assert d.isError and r.isError and "paas:admin" in d.content[0].text and not e.isError
+def test_mcp_admin_and_legacy_paas_scope(srv, monkeypatch):
+    _, _, server = srv
+    for sc in (["paas"], ["paas:admin"]):
+        _as(monkeypatch, server, sc)
+        names = anyio.run(_session, server, lambda s: s.list_tools()); assert "destroy_app" in [t.name for t in names.tools]
+def test_consent_shows_requested_scope(srv):
+    c, oauth, _ = srv
+    reg = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "Scoped", "token_endpoint_auth_method": "none",
+                                    "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]}).json()
+    assert set(reg["scope"].split()) == {"paas", "paas:read", "paas:write", "paas:admin"}
+    for scope, text in (("paas:read", "read-only access"), ("paas:write", "can&#x27;t destroy apps"), ("paas", "full access")):
+        v, ch = pkce()
+        r = c.get("/authorize", params={"response_type": "code", "client_id": reg["client_id"], "redirect_uri": REDIRECT, "code_challenge": ch,
+                                        "code_challenge_method": "S256", "state": "st", "scope": scope}, follow_redirects=False)
+        page = c.get(r.headers["location"].replace("https://mcp.aloof.test", "")).text
+        assert text in page.replace("'", "&#x27;") and f"<code>{scope}</code>" in page, scope
+        req = re.search(r'name="req" value="([^"]+)"', page).group(1)
+        loc = c.post("/oauth/login", data={"req": req, "action": "approve", "api_key": "pk_good"}, follow_redirects=False).headers["location"]
+        code = re.search(r"code=([^&]+)", loc).group(1)
+        t = c.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": reg["client_id"], "code_verifier": v}).json()
+        assert t["scope"] == scope
+    m = c.get("/.well-known/oauth-authorization-server").json(); assert {"paas:read", "paas:write", "paas:admin"} <= set(m["scopes_supported"])

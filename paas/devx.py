@@ -112,7 +112,7 @@ def launch_detect(b: DetectReq):
     plan = launch.detect(b.files); name = b.name or "my-app"
     return plan | {"toml": launch.toml_for(name, plan, plan["framework"])}
 # ---------------- deploy tokens ----------------
-class TokReq(BaseModel): app: str|None=None; label: str="ci"; expires_in: str|int|None="90d"
+class TokReq(BaseModel): app: str|None=None; label: str="ci"; expires_in: str|int|None="90d"; can_destroy: bool=False
 def _secs(v):
     if v in (None, "", "never", 0): return None
     if isinstance(v, int): return v
@@ -122,15 +122,17 @@ def _secs(v):
 @R.post("/v1/tokens")
 def token_create(b: TokReq, request: Request, a=Depends(acct)):
     if b.app: own(b.app, a)
+    if b.can_destroy and a.get("_level", 3) < 3: raise HTTPException(403, "only a full-access (paas:admin) caller can create a deploy token that can destroy")
     t = "dt_" + secrets.token_urlsafe(32); tid = "tok_" + secrets.token_hex(5); exp = _secs(b.expires_in)
-    q("insert into deploy_tokens(id,account_id,app,label,token_hash,prefix,expires,created) values(?,?,?,?,?,?,?,?)",
-      (tid, a["id"], b.app, b.label[:60], crypto.sha256(t), t[:10], time.time() + exp if exp else None, time.time()))
-    _audit(a["id"], b.app, "token.create", f"{tid} {b.label} scope={'app:' + b.app if b.app else 'org'}", _ip(request))
+    q("insert into deploy_tokens(id,account_id,app,label,token_hash,prefix,expires,created,can_destroy) values(?,?,?,?,?,?,?,?,?)",
+      (tid, a["id"], b.app, b.label[:60], crypto.sha256(t), t[:10], time.time() + exp if exp else None, time.time(), bool(b.can_destroy)))
+    _audit(a["id"], b.app, "token.create", f"{tid} {b.label} scope={'app:' + b.app if b.app else 'org'} can_destroy={bool(b.can_destroy)}", _ip(request))
     return {"id": tid, "token": t, "scope": f"app:{b.app}" if b.app else "org (all apps in this account)", "expires": time.time() + exp if exp else None,
+            "can_destroy": bool(b.can_destroy), "access": "paas:admin (can destroy and restore)" if b.can_destroy else "paas:write (deploy, scale, config; can't destroy apps or delete/restore data)",
             "detail": "shown once; use as ALOOF_API_TOKEN (Authorization: Bearer)"}
 @R.get("/v1/tokens")
 def token_list(a=Depends(acct)):
-    return [{k: r[k] for k in ("id", "app", "label", "prefix", "expires", "created", "last_used")} | {"expired": bool(r["expires"] and r["expires"] < time.time())}
+    return [{k: r[k] for k in ("id", "app", "label", "prefix", "expires", "created", "last_used")} | {"can_destroy": bool(r.get("can_destroy")), "expired": bool(r["expires"] and r["expires"] < time.time())}
             for r in q("select * from deploy_tokens where account_id=? order by created desc", (a["id"],))]
 @R.delete("/v1/tokens/{tid}")
 def token_revoke(tid: str, request: Request, a=Depends(acct)):

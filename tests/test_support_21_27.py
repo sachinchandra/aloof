@@ -33,7 +33,7 @@ def test_docs_mcp_oauth_values_match_code():
     assert "full access" in h and "scoped token" not in h
 def test_authorize_page_branded_and_honest():
     sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
-    page = oauth.PAGE.format(client="X", badge=oauth.VERIFIED_BADGE, target="https://claude.ai", css=oauth.CSS, mark=oauth.MARK, www="https://www.aloof.si",
+    page = oauth.PAGE.format(client="X", access=oauth.SCOPE_TEXT[3].format(client="X", scope="paas"), badge=oauth.VERIFIED_BADGE, target="https://claude.ai", css=oauth.CSS, mark=oauth.MARK, www="https://www.aloof.si",
                              ttl=10, email="", key_open="", req="r", err="")
     assert "full access to your Aloof account" in page and "#ff7a1a" in page and "<svg" in page
     assert "/dashboard%23keys" in page and "email link" in page and "API key" in page
@@ -65,7 +65,7 @@ def test_connected_apps_last_token_and_ttl():
     assert "Last token" in d and "Not recorded" in d and "Try again" in d and "Disconnecting…" in d and "No connected apps" in d and "e.key=='Tab'" in d
 def test_authorize_page_formats_with_submit_state():
     sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
-    p = oauth.PAGE.format(client="X", badge="", target="t", css=oauth.CSS, mark="", www="w", ttl=10, email="", key_open="", req="r", err="")
+    p = oauth.PAGE.format(client="X", access="", badge="", target="t", css=oauth.CSS, mark="", www="w", ttl=10, email="", key_open="", req="r", err="")
     assert "Approving…" in p and "min-height:40px" in p
 def test_signup_tabs_aria():
     h = c.get("/login").text; assert 'aria-selected=true' in h and "setAttribute('aria-selected'" in h and "class=maglink" in h

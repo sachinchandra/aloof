@@ -61,6 +61,14 @@ log = logging.getLogger("mcp.oauth")
 # ---------- Client ID Metadata Documents ----------
 CIMD_MAX_BYTES, CIMD_TIMEOUT, CIMD_TTL, CIMD_TTL_MIN, CIMD_TTL_MAX, CIMD_NEG_TTL, CIMD_CACHE_MAX = 5120, 5.0, 300, 60, 86400, 60, 1000
 _cimd_cache = {}   # url -> (expires, OAuthClientInformationFull | None)
+# ---- scopes: paas:read (look only) < paas:write (everything except destroy/restore) < paas:admin (all). "paas" = admin (pre-scope clients). ----
+SCOPES = ["paas", "paas:read", "paas:write", "paas:admin"]; ALL_SCOPES = " ".join(SCOPES)
+LEVELS = {"paas:read": 1, "paas:write": 2, "paas:admin": 3, "paas": 3}; LEVEL_NAMES = {1: "paas:read", 2: "paas:write", 3: "paas:admin"}
+def level(scopes): return max((LEVELS.get(x, 0) for x in (scopes or [])), default=0)
+SCOPE_TEXT = {
+    1: "<b>Approving gives {client} read-only access to your Aloof account</b> (scope <code>paas:read</code>). It can see your apps, status, logs, diagnostics, releases, domains, volumes, databases and usage. It can't deploy, change, delete or spend anything.",
+    2: "<b>Approving lets {client} deploy and change things in your Aloof account</b> (scope <code>paas:write</code>). It can deploy, scale, change environment variables and secrets, manage domains, volumes and databases, and spend your credit. It can't destroy apps, delete volumes or databases, or restore backups.",
+    3: "<b>Approving gives {client} full access to your Aloof account</b> (scope <code>{scope}</code>). It can deploy and delete apps, change environment variables and secrets, manage volumes, databases and domains, restore backups, and spend your credit."}
 class CIMDError(ValueError): pass
 def is_cimd_client_id(cid): return isinstance(cid, str) and cid.startswith("https://")
 def _public(ip):
@@ -145,7 +153,7 @@ def validate_cimd(url, doc):
     host = urlsplit(url).hostname; name = str(doc.get("client_name") or host)[:100]
     return LoopbackClient.model_validate({"client_id": url, "client_name": f"{name} ({host})" if host not in name else name,
         "redirect_uris": ru, "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"],
-        "response_types": ["code"], "scope": "paas", **({"client_uri": doc["client_uri"]} if isinstance(doc.get("client_uri"), str) and doc["client_uri"].startswith("https://") else {})})
+        "response_types": ["code"], "scope": ALL_SCOPES, **({"client_uri": doc["client_uri"]} if isinstance(doc.get("client_uri"), str) and doc["client_uri"].startswith("https://") else {})})
 def _loopback(u): return u.scheme == "http" and u.hostname in LOOPBACK_HOSTS
 class LoopbackClient(OAuthClientInformationFull):
     """RFC 8252 s7.3: for http loopback redirect URIs the port is chosen at runtime, so it is ignored when matching."""
@@ -372,7 +380,7 @@ class PaasOAuthProvider(OAuthAuthorizationServerProvider):
         if is_cimd_client_id(client_id):
             import anyio; return await anyio.to_thread.run_sync(resolve_cimd_client, client_id)
         d = S.get("client", client_id)
-        return LoopbackClient.model_validate({k: v for k, v in d.items() if not k.startswith("aloof_")}) if d else None
+        return LoopbackClient.model_validate({k: v for k, v in d.items() if not k.startswith("aloof_")} | {"scope": ALL_SCOPES}) if d else None   # clients registered before scopes may ask for any
     async def register_client(self, client_info):
         uris = [str(u) for u in (client_info.redirect_uris or [])]
         if not uris or len(uris) > 10: raise RegistrationError("invalid_redirect_uri", "register between 1 and 10 redirect_uris")
@@ -382,7 +390,7 @@ class PaasOAuthProvider(OAuthAuthorizationServerProvider):
         # Unverified public client: never issue a secret, whatever was requested (RFC 7591 lets the server override metadata).
         client_info.client_secret = None; client_info.client_secret_expires_at = None; client_info.token_endpoint_auth_method = "none"
         client_info.client_name = _clean_name(client_info.client_name)
-        client_info.scope = "paas"
+        client_info.scope = ALL_SCOPES
         d = client_info.model_dump(mode="json") | {"aloof_dcr": True, "aloof_used": False}
         S.put("client", client_info.client_id, d)
     async def authorize(self, client, params: AuthorizationParams) -> str:
@@ -446,7 +454,7 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name=
 <meta name="robots" content="noindex"><title>Connect {client} to Aloof</title><style>{css}</style></head><body><main class="w">
 <a class="brand" href="{www}">{mark}<span>aloof</span></a><div class="card">
 <h1>Connect {client} to Aloof</h1>{badge}
-<div class="access"><b>Approving gives {client} full access to your Aloof account.</b> It can deploy and delete apps, change environment variables and secrets, manage volumes, databases and domains, and spend your credit. You can revoke it later by deleting its key under API keys. <a href="{www}/docs/mcp#revoke" target="_blank" rel="noopener">How</a></div>
+<div class="access">{access} You can revoke it later by deleting its key under API keys. <a href="{www}/docs/mcp#revoke" target="_blank" rel="noopener">How</a></div>
 <p class="muted">After you approve, you'll be sent back to <code>{target}</code></p>
 {err}<form method="post" onsubmit="var b=event.submitter;if(b)setTimeout(function(){{b.disabled=true;b.textContent=b.value=='approve'?'Approving…':'Denying…'}},0)"><input type="hidden" name="req" value="{req}">
 <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" value="{email}">
@@ -479,7 +487,10 @@ async def login_page(request: Request):
     target = redirect_target(params.redirect_uri); verified = is_verified_redirect(params.redirect_uri)
     badge = VERIFIED_BADGE if verified else UNVERIFIED_BADGE.format(host=html.escape(target))
     name = _clean_name(p.get("client_name")) or p["client_id"]
-    render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(name), badge=badge, target=html.escape(target), css=CSS, mark=MARK, www=html.escape(WWW), ttl=PAGE_TTL_MIN,
+    scopes = params.scopes or ["paas"]; lv = level(scopes) or 3
+    shown = next((x for x in scopes if LEVELS.get(x) == lv), LEVEL_NAMES[lv])
+    access = SCOPE_TEXT[lv].format(client=html.escape(name), scope=html.escape(shown))
+    render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(name), access=access, badge=badge, target=html.escape(target), css=CSS, mark=MARK, www=html.escape(WWW), ttl=PAGE_TTL_MIN,
         email=html.escape((form.get("email") or "").strip()[:254]) if form else "", key_open=" open" if form and form.get("api_key") else "",
         req=html.escape(rid), err=f'<p class="err" role="alert">{html.escape(err)}</p>' if err else ""), headers=CONSENT_HEADERS)
     if request.method == "GET": return render()
