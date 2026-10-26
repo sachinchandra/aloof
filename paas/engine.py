@@ -453,7 +453,7 @@ def destroy_app(name, with_volumes=False):
     out = {"ok": True, "app": name, "deleted": {"volumes": [], "postgres": []}, "kept": {"volumes": []}, "errors": []}
     from . import parity
     for p in pgs:
-        try: parity.pg_destroy(p); out["deleted"]["postgres"].append(p)
+        try: parity.pg_destroy(p); out["deleted"]["postgres"].append(p); out["deleted"]["volumes"].append(f"pgdata-{p}")
         except Exception as e: out["errors"].append(f"postgres {p}: {e}")
     for v in tpl_vols + (other_vols if with_volumes else []):
         try: q("update volumes set app=null, mount_path=null where name=?", (v,)); delete_volume(v); out["deleted"]["volumes"].append(v)

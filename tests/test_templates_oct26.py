@@ -16,7 +16,7 @@ def test_destroy_removes_template_resources_keeps_user_volumes(fake, monkeypatch
     destroyed = []
     monkeypatch.setattr(parity, "pg_destroy", lambda n, keep_backups=False: (destroyed.append(n), q("delete from pg_dbs where name=?", (n,))))
     r = c.delete("/v1/apps/flowc").json()
-    assert r["deleted"] == {"volumes": ["flowc-data"], "postgres": ["flowc-db"]} and r["kept"]["volumes"] == ["flowc-mine"] and destroyed == ["flowc-db"]
+    assert sorted(r["deleted"]["volumes"]) == ["flowc-data", "pgdata-flowc-db"] and r["deleted"]["postgres"] == ["flowc-db"] and r["kept"]["volumes"] == ["flowc-mine"] and destroyed == ["flowc-db"]
     assert not q("select 1 from volumes where name='flowc-data'") and q("select app from volumes where name='flowc-mine'", one=True)["app"] is None
     used = q("select coalesce(sum(size_gb),0) s from volumes where account_id=?", (aid,), one=True)["s"]; assert used == 1   # only the kept one counts
     o = engine.template_orphans(); assert not [x for x in o["volumes"] + o["postgres"] if x.get("template_app") == "flowc"]
@@ -47,23 +47,25 @@ def test_vaultwarden_secure_defaults(fake):
     env = fake["spec"]["env"]; assert env["SIGNUPS_ALLOWED"] == "false" and env["INVITATIONS_ALLOWED"] == "true"
     assert len(r["generated_secrets"]["ADMIN_TOKEN"]) >= 48 and "HSTS" in TestClient(api.app).get("/templates/vaultwarden").text
 
-def test_umami_admin_password_generated_and_applied(fake, monkeypatch, umami_enabled):
-    started = []
-    monkeypatch.setattr(T.__dict__["__builtins__"]["__import__"]("threading"), "Thread", lambda target, args, daemon: type("X", (), {"start": lambda s: started.append(args)})())
-    c = _client("um@example.in"); r = c.post("/v1/templates/umami/deploy", json={"name": "umx"}).json()
-    login = r["generated_secrets"]["ADMIN_LOGIN"]; assert login.startswith("admin / ") and len(login) > 20 and "umami" not in login.split(" / ")[1]
-    assert started and started[0][0] == "umx" and started[0][2] == login.split(" / ")[1]
-    assert login.split(" / ")[1] not in json.dumps(fake["spec"])                       # not stored in the app env
+def test_umami_admin_password_set_synchronously(fake, monkeypatch, umami_enabled):
     calls = []
     class D:
-        def exec_run(self, iid, cmd, **k): calls.append(cmd); return 0, b"1\n"
+        def exec_run(self, iid, cmd, **k):
+            calls.append(cmd); return (0, b"1\n")
     monkeypatch.setattr(parity, "_inst", lambda app: ({"id": "i1"}, D()))
-    assert T._umami_admin("umx", "umx-db", "S3cretPw_", timeout=5, sleep=0)
-    assert "crypt('S3cretPw_'" in calls[-1][-1] and "username = 'admin'" in calls[-1][-1]
-    scaled = []
-    monkeypatch.setattr(parity, "_inst", lambda app: (_ for _ in ()).throw(ValueError("not up")))
-    monkeypatch.setattr(engine, "scale", lambda n, i, reason="": scaled.append((n, i)))
-    assert not T._umami_admin("umx", "umx-db", "pw", timeout=0.05, sleep=0.01) and scaled == [("umx", 0)]
+    c = _client("um@example.in"); r = c.post("/v1/templates/umami/deploy", json={"name": "umx"}); assert r.status_code == 200, r.text
+    pw = r.json()["generated_secrets"]["ADMIN_LOGIN"].split(" / ")[1]; assert len(pw) >= 24 and pw not in json.dumps(fake["spec"])
+    sql = calls[-1][-1]; assert f"crypt('{pw}', gen_salt('bf', 10))" in sql and "drop extension" not in sql and "crypt('umami', password)" in sql
+
+def test_umami_init_failure_fails_deploy_and_tears_down(fake, monkeypatch, umami_enabled, caplog):
+    monkeypatch.setattr(T, "UMAMI_TIMEOUT", 0.05)
+    class D:
+        def exec_run(self, iid, cmd, **k): return (0, b"1\n") if "-tAc" in cmd else (1, b"ERROR: function gen_salt does not exist")
+    monkeypatch.setattr(parity, "_inst", lambda app: ({"id": "i1"}, D()))
+    torn = []; monkeypatch.setattr(engine, "destroy_app", lambda n, with_volumes=False: torn.append(n))
+    c = _client("um2@example.in"); r = c.post("/v1/templates/umami/deploy", json={"name": "umy"})
+    assert r.status_code == 503 and "couldn't be set" in r.text and "gen_salt" in r.text and torn == ["umy"]
+    assert any(x.levelname == "WARNING" and "umy" in x.getMessage() for x in caplog.records)
 
 def test_cli_signup_and_key_hint():
     cli = open(os.path.join(os.path.dirname(__file__), "..", "cli", "aloof")).read()

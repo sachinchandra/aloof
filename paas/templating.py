@@ -150,28 +150,38 @@ def check_min_tier(account_id, t):
         raise TemplateError(f"{t["name"]} requires the {need.title()} plan or above (it needs more memory and storage than Free allows: "
                               f"{t['app'].get('plan')}, {sum(v.get('size_gb', 1) for v in t.get('volumes', []))} GB volume"
                               + (" + Postgres" if "postgres" in t else "") + "). Upgrade in Billing, then deploy again. Nothing was created.")
-UMAMI_SQL = """create schema if not exists aloof_init; create extension if not exists pgcrypto schema aloof_init;
-update "user" set password = aloof_init.crypt('{pw}', aloof_init.gen_salt('bf', 10)) where username = 'admin';
-drop extension if exists pgcrypto; drop schema if exists aloof_init;"""
-def _umami_admin(app, pgn, pw, timeout=900, sleep=1.0):
-    """Replace Umami's seeded admin/umami login with the generated password as soon as its migration creates the user (before
-    the web server starts serving). Runs in a thread; on timeout the app is scaled to 0 so the default login is never exposed."""
+# Umami's own migration installs pgcrypto (usually in public); use it wherever it lives and never drop it (the Oct 26 version
+# created/dropped its own copy, which failed with "gen_salt does not exist" when Umami's already existed).
+UMAMI_SQL = """create extension if not exists pgcrypto;
+select set_config('search_path', (select n.nspname from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'pgcrypto') || ',public', false);
+update "user" set password = crypt('{pw}', gen_salt('bf', 10)) where username = 'admin';
+select count(*) from "user" where username = 'admin' and password = crypt('{pw}', password) and password <> crypt('umami', password);"""
+UMAMI_TIMEOUT = 300
+class InitError(RuntimeError): pass
+def _umami_admin(app, pgn, pw, timeout=None, sleep=2.0):
+    """Synchronously (inside the deploy request) replace Umami's seeded admin/umami login with `pw`: wait until Umami's migration
+    has created the admin user, set a bcrypt hash via pgcrypto, and verify the stored hash matches `pw` and no longer matches
+    'umami'. Raises InitError on failure (the caller tears the app down) and logs at warning level."""
     from . import engine, parity
-    dbn = parity._dbname(pgn); end = time.time() + timeout; log = __import__("logging").getLogger("paas.templates")
+    log = __import__("logging").getLogger("paas.templates")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", pw): raise InitError("bad generated password")
+    dbn = parity._dbname(pgn); end = time.time() + (UMAMI_TIMEOUT if timeout is None else timeout); last = "postgres not running yet"
     while time.time() < end:
         try:
             i, d = parity._inst(parity.pg_app(pgn))
             rc, out = d.exec_run(i["id"], ["psql", "-U", "aloof", "-d", dbn, "-tAc", "select count(*) from \"user\" where username='admin'"])
-            if rc == 0 and out.strip().startswith(b"1" if isinstance(out, bytes) else "1"):
-                rc, out = d.exec_run(i["id"], ["psql", "-v", "ON_ERROR_STOP=1", "-U", "aloof", "-d", dbn, "-c", UMAMI_SQL.format(pw=pw)])
-                if rc == 0: engine.event(app, "umami: default admin password replaced with the generated one"); return True
-                log.warning("umami admin init for %s failed (rc %s)", app, rc)
-        except Exception as e: log.debug("umami init %s waiting: %s", app, e)
+            out = out.decode(errors="replace") if isinstance(out, bytes) else str(out)
+            if rc == 0 and out.strip() == "1":
+                rc, out = d.exec_run(i["id"], ["psql", "-v", "ON_ERROR_STOP=1", "-q", "-tA", "-U", "aloof", "-d", dbn, "-c", UMAMI_SQL.format(pw=pw)])
+                out = (out.decode(errors="replace") if isinstance(out, bytes) else str(out)).replace(pw, "<pw>")
+                if rc == 0 and out.strip().splitlines()[-1:] == ["1"]:
+                    engine.event(app, "umami: default admin/umami login replaced with the generated password (verified)"); return True
+                last = f"password update failed (rc {rc}): {out.strip()[-300:]}"; log.warning("umami admin init for %s: %s", app, last)
+            else: last = "waiting for Umami's migration to create the admin user"
+        except Exception as e: last = f"{type(e).__name__}: {e}"
         time.sleep(sleep)
-    engine.event(app, "ERROR: couldn't replace Umami's default admin password; app scaled to 0 for safety. Log in as admin/umami from a private network and change it, or redeploy.")
-    try: engine.scale(app, 0, reason="umami init failed")
-    except Exception: log.exception("umami init: scale to 0 failed for %s", app)
-    return False
+    log.warning("umami admin init for %s timed out: %s", app, last)
+    raise InitError(last)
 def _gen(g):
     kind, n = g.split(":"); n = int(n)
     return secrets.token_hex(n) if kind == "hex" else secrets.token_urlsafe(n)
@@ -242,8 +252,13 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
             except Exception: pass
         raise
     if t.get("init") == "umami-admin" and created_pg:
-        pw = secrets.token_urlsafe(18); generated["ADMIN_LOGIN"] = f"admin / {pw}"
-        __import__("threading").Thread(target=_umami_admin, args=(name, created_pg, pw), daemon=True).start()
+        pw = secrets.token_urlsafe(18)
+        try: _umami_admin(name, created_pg, pw)
+        except InitError as e:   # never leave an app serving the default login: tear everything down and fail the deploy
+            try: engine.destroy_app(name)
+            except Exception: __import__("logging").getLogger("paas.templates").warning("umami init: teardown of %s failed", name, exc_info=True)
+            raise InitError(f"Umami's admin password couldn't be set ({e}). The app, its database and volumes were removed; try again, or contact support if it persists.")
+        generated["ADMIN_LOGIN"] = f"admin / {pw}"
     from .db import audit as _audit   # F5
     _audit(account_id, name, "template.deploy" if t["id"] != "from-repo" else "repo.deploy", json.dumps({"template": t["id"], "source": src, "plan": plan}))
     return {"app": r, "template": t["id"], "generated_secrets": generated, "volumes": vols, "postgres": pg and pg["name"],
@@ -271,6 +286,7 @@ def _run(a, t, b):
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
     except HTTPException: raise
+    except InitError as e: raise HTTPException(503, str(e))
     except Exception:   # rollback already ran inside deploy(); return a clean JSON error, never a bare 500 page
         import logging; logging.getLogger("paas.templates").exception("template deploy %s failed", t.get("id"))
         raise HTTPException(503, "deploy could not be started; nothing was created. Try again, or contact support if it persists")
