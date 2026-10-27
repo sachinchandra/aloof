@@ -87,6 +87,7 @@ def start():
     from . import selfheal
     threading.Thread(target=_loop, args=(selfheal.tick, 5), daemon=True).start()
     threading.Thread(target=_loop, args=(remote.node_tick, 30), daemon=True).start()
+    threading.Thread(target=_loop, args=(engine.reap_destroyed, 120), daemon=True).start()
     from . import domains as _doms
     threading.Thread(target=_loop, args=(_doms.tick, int(os.environ.get("PAAS_DOMAIN_TICK_S", "60"))), daemon=True).start()
     threading.Thread(target=_loop, args=(billing.meter_tick, int(os.environ.get("PAAS_METER_INTERVAL", "60"))), daemon=True).start()

@@ -200,6 +200,17 @@ class LocalDockerDriver(Driver):
         lim = (st["cpu_stats"].get("online_cpus") or 1)
         quota = self.c.containers.get(iid).attrs["HostConfig"].get("NanoCpus") or 1e9
         return (cd / sd * lim * 100.0) / (quota/1e9) if sd > 0 else 0.0   # % of the plan's vCPU allocation
+    def remove_app_containers(self, app):
+        n = 0
+        for c in self.c.containers.list(all=True, filters={"label": f"paas.app={app}"}):
+            if (c.labels or {}).get("paas.app") != app: continue
+            try: c.remove(force=True); n += 1
+            except docker.errors.NotFound: pass
+            except docker.errors.APIError as e:
+                if "already in progress" not in str(e): raise
+        return n
+    def app_labels(self):
+        return [(c.labels or {}).get("paas.app") for c in self.c.containers.list(all=True, filters={"label": "paas.app"}) if (c.labels or {}).get("paas.app")]
     def stop_instance(self, iid):
         try: self.c.containers.get(iid).remove(force=True)
         except docker.errors.NotFound: pass

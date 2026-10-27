@@ -471,10 +471,33 @@ def destroy(name):
     q("update apps set status='destroyed' where name=?", (name,))   # first, so an in-flight deploy aborts instead of resurrecting it
     q("update volumes set app=null, mount_path=null where app=?", (name,)); q("delete from domains where app=?", (name,))
     with _lock(name):
-        for o in q("select * from instances where app=? and status='running'", (name,)): _stop(o)
+        # every instance not already stopped: 'starting'/'unready' rows (deploy interrupted mid-readiness, e.g. by a
+        # restart) used to be skipped here, leaving their containers running after the app was destroyed
+        for o in q("select * from instances where app=? and status!='stopped'", (name,)): _stop(o)
+        _sweep_containers(name)
     q("update apps set status='destroyed' where name=?", (name,)); event(name, "destroyed")
     try: from . import selfheal; selfheal.forget(name)
     except Exception: pass
+def _sweep_containers(name):
+    """Remove any container still labelled for this app (one the DB never recorded: created by the driver but the
+    process died before the instances row was written). Exact label match, so other apps are never touched."""
+    for d in get_drivers().values():
+        f = getattr(d, "remove_app_containers", None)
+        if f:
+            try:
+                n = f(name)
+                if n: event(name, f"removed {n} leftover container(s)")
+            except Exception as e: event(name, f"container sweep: {e}")
+def reap_destroyed():
+    """Periodic safety net: remove containers whose app is destroyed. Only status='destroyed' apps; never unknown ones."""
+    for d in get_drivers().values():
+        f = getattr(d, "app_labels", None)
+        if not f: continue
+        for app in set(f()):
+            r = q("select status from apps where name=?", (app,), one=True)
+            if r and r["status"] == "destroyed":
+                for o in q("select * from instances where app=? and status!='stopped'", (app,)): _stop(o)
+                _sweep_containers(app)
 def destroy_app(name, with_volumes=False):
     """User-facing delete: destroy the app, then remove what its template created (volumes, Postgres). Volumes the user
     attached separately are detached and kept unless with_volumes. Returns what was deleted and kept."""
