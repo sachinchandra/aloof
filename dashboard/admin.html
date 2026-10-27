@@ -23,9 +23,10 @@ dialog.cf{background:var(--panel);color:var(--fg);border:1px solid var(--line);b
 dialog.cf h3{margin:0 0 8px}dialog.cf .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}dialog.cf input{width:100%;margin-top:6px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;gap:12px;align-items:center;z-index:50;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
 details.tacc summary{cursor:pointer;font-family:var(--mono);text-transform:uppercase;font-size:15px;letter-spacing:.02em;color:var(--fg2);margin:34px 0 12px}
+@media(max-width:480px){.top .tl{display:none}}
 #gate{max-width:440px;margin:12vh auto}.exp{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.exp select{width:auto;height:34px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-size:13px}
 </style></head><body>
-<header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><button class="btn ghost sm" id=themebtn onclick="toggleTheme();themeLbl()" aria-label="Switch theme">◐ Theme</button><a href="/dashboard">Dashboard</a></div></header>
+<header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><button class="btn ghost sm" id=themebtn onclick="toggleTheme();themeLbl()" aria-label="Switch theme">◐<span class=tl> Theme</span></button><a href="/dashboard">Dashboard</a></div></header>
 <main class="wrap adm" id=main>
 <p id=live class=sr-only aria-live=polite aria-atomic=true></p>
 <div id=app class=skel aria-busy=true>
@@ -34,7 +35,7 @@ details.tacc summary{cursor:pointer;font-family:var(--mono);text-transform:upper
 <div id=err></div><div id=banner></div><div id=alerts></div>
 <h2>Users &amp; revenue</h2><div class=k id=k1><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div></div>
 <h2>Needs attention: errors &amp; failed deploys</h2><div id=stuck></div><div class=two><div class=scroll><table class=tbl id=fd></table></div><div class=scroll><table class=tbl id=ae></table></div></div>
-<div class=two style="margin-top:14px"><div class=card><h3>GPU unlock</h3><p id=gpu class=muted></p><div class=prog><b id=gpub></b></div><p class=muted id=gpun style="font-size:13px"></p></div>
+<div class=two style="margin-top:14px"><div class=card><h3>GPU unlock</h3><p id=gpu class=muted></p><div class=prog><b id=gpub style="width:0"></b></div><p class=muted id=gpun style="font-size:13px"></p></div>
 <div class=card><h3>Signups per day <span class=muted style="font-weight:400">(30 days)</span></h3><div class=chart id=ch1></div><div class=axis><span>30 days ago</span><span>today</span></div></div></div>
 <h2>Deployments</h2><div class=k id=k2><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div></div>
 <div class=two style="margin-top:14px"><div class=card><h3>Deploys per day <span class=muted style="font-weight:400">(30 days)</span></h3><div class="chart c2" id=ch2></div><div class=axis><span>30 days ago</span><span>today</span></div></div>
