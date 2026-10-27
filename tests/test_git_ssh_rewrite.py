@@ -40,3 +40,8 @@ def test_hint_public(env, tmp_path):
     env["fail"] = True
     with pytest.raises(RuntimeError) as e: creds.clone("a1", {"git": "https://github.com/o/r"}, str(tmp_path / "d"), lambda m: None, account_id=1)
     assert "aloof git deploy-key github.com -a a1" in str(e.value) and "git@github.com:" in str(e.value)
+
+def test_hint_deploy_key_rejected(env, tmp_path):
+    env["creds"] = {"ssh": {"secret_enc": "x"}}; env["fail"] = True
+    with pytest.raises(RuntimeError) as e: creds.clone("a1", {"git": "https://github.com/o/r"}, str(tmp_path / "d"), lambda m: None, account_id=1)
+    assert "aloof git list" in str(e.value)
