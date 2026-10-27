@@ -1,0 +1,20 @@
+<!doctype html><html lang=en><head><meta charset="utf-8"><meta name=viewport content="width=device-width,initial-scale=1"><meta name=robots content="noindex,nofollow"><title>Two-factor sign-in · Aloof owner</title>
+<link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=stylesheet href="/static/aloof.css?v=15">
+<script>(function(){var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t})()</script>
+<style>.box{max-width:480px;margin:10vh auto;padding:0 16px}.box h1{font-size:24px;margin:0 0 8px}.box input{width:100%;font-size:20px;letter-spacing:.2em;margin:8px 0}.key{font-family:var(--mono);font-size:16px;word-break:break-all;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.codes{font-family:var(--mono);columns:2;margin:10px 0}</style></head>
+<body><main class=box id=m><h1>Two-factor sign-in</h1><p class=muted>Loading…</p></main>
+<script>
+const $=id=>document.getElementById(id),H={'X-Aloof-CSRF':'1','Content-Type':'application/json'},E=s=>String(s??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+async function post(p,b){const r=await fetch(p,{method:'POST',headers:H,body:JSON.stringify(b||{})});return [r.ok,await r.json().catch(()=>({}))]}
+function form(btn,fn){return `<form id=f><label for=c>6-digit code from your authenticator app</label><input id=c inputmode=numeric autocomplete=one-time-code required><p id=e class=bad role=alert></p><button class="btn pri">${btn}</button></form>`}
+async function main(){const s=await (await fetch('/v1/admin/2fa',{headers:H})).json(),m=$('m');
+  if(s.enrolled&&s.session_verified){location='/admin';return}
+  if(s.enrolled){m.innerHTML='<h1>Two-factor sign-in</h1><p class=muted>Enter the code from your authenticator app, or one of your recovery codes.</p>'+form('Continue');
+    $('f').onsubmit=async e=>{e.preventDefault();const [ok,j]=await post('/v1/admin/2fa/verify',{code:$('c').value});ok?location='/admin':$('e').textContent=j.detail||'That code didn\'t work'};return}
+  m.innerHTML=`<h1>Turn on two-factor sign-in</h1><p class=muted>Protects the owner dashboard with a code from an authenticator app (1Password, Google Authenticator, Authy…).</p><button class="btn pri" id=go>Start</button>`;
+  $('go').onclick=async()=>{const [ok,j]=await post('/v1/admin/2fa/start');if(!ok){m.insertAdjacentHTML('beforeend',`<p class=bad>${E(j.detail)}</p>`);return}
+    m.innerHTML=`<h1>Add Aloof to your authenticator</h1><p>1. In the app, add an account and choose <b>enter a setup key</b> (time-based).</p><div class=key>${E(j.secret.match(/.{1,4}/g).join(' '))}</div><p class=muted style="font-size:13px">On a phone you can <a href="${E(j.uri)}">open it in the app</a> instead.</p><p>2. Type the 6-digit code it shows.</p>`+form('Turn on');
+    $('f').onsubmit=async e=>{e.preventDefault();const [ok,r]=await post('/v1/admin/2fa/confirm',{code:$('c').value});if(!ok){$('e').textContent=r.detail||'That code didn\'t match';return}
+      m.innerHTML=`<h1>Two-factor sign-in is on</h1><p>Save these recovery codes somewhere safe. Each works once if you lose your phone. They won't be shown again.</p><div class=codes>${r.recovery_codes.map(E).join('<br>')}</div><a class="btn pri" href="/admin">Go to the dashboard</a>`}}}
+main()
+</script></body></html>

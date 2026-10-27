@@ -82,7 +82,7 @@ def new_session(account_id):
     return tok
 def session_account(tok):
     if not tok: return None
-    r = q("select a.* from sessions s join accounts a on a.id=s.account_id where s.token_hash=? and s.expires>?", (sha256(tok), time.time()), one=True)
+    r = q("select a.*, s.impersonated_by, s.mfa_verified from sessions s join accounts a on a.id=s.account_id where s.token_hash=? and s.expires>?", (sha256(tok), time.time()), one=True)
     return r
 def end_session(tok): q("delete from sessions where token_hash=?", (sha256(tok or ""),))
 def set_password(account_id, password):

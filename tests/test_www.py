@@ -69,7 +69,7 @@ def test_admin_access_control_and_metrics():
     r = c.get("/v1/admin/export.csv?table=users", headers={"Authorization": f"Bearer {api.ADMIN}"}); assert r.status_code == 200 and r.text.startswith("id,email")
     assert c.get("/v1/admin/export.csv?table=summary", headers={"Authorization": f"Bearer {api.ADMIN}"}).text.startswith("metric,value")
     os.environ["PAAS_ADMIN_REQUIRE_2FA"] = "1"
-    try: assert o.get("/admin").status_code == 404
+    try: assert o.get("/admin").status_code == 200   # flag on but the owner has not enrolled: never locked out (enrolled case: test_admin_stages)
     finally: os.environ.pop("PAAS_ADMIN_REQUIRE_2FA")
     aid = q("select id from accounts where email like 'z%@x.com' order by id desc limit 1", one=True)["id"]
     assert o.post(f"/v1/admin/accounts/{aid}/test", json={"is_test": True}, headers={"X-Aloof-CSRF": "1"}).status_code == 200

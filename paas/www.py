@@ -208,13 +208,17 @@ def _session(request):
     from .crypto import sha256
     tok = request.cookies.get(auth.COOKIE)
     if not tok: return None
-    return q("select a.*, s.mfa_verified from sessions s join accounts a on a.id=s.account_id where s.token_hash=? and s.expires>?", (sha256(tok), time.time()), one=True)
+    return q("select a.*, s.mfa_verified, s.impersonated_by from sessions s join accounts a on a.id=s.account_id where s.token_hash=? and s.expires>?", (sha256(tok), time.time()), one=True)
 def admin_session(request):
     """Owner check: logged-in session for the configured owner email with is_admin=1. 2FA-ready: PAAS_ADMIN_REQUIRE_2FA=1 also needs sessions.mfa_verified."""
     a = _session(request)
-    if not a or not a.get("is_admin") or (a.get("email") or "").lower() != ADMIN_EMAIL: return None
-    if os.environ.get("PAAS_ADMIN_REQUIRE_2FA") == "1" and not a.get("mfa_verified"): return None
+    if not is_owner(a): return None
+    if needs_2fa(a): return None
     return a
+def is_owner(a): return bool(a and a.get("is_admin") and not a.get("impersonated_by") and (a.get("email") or "").lower() == ADMIN_EMAIL)
+def needs_2fa(a):
+    """PAAS_ADMIN_REQUIRE_2FA=1 asks for a verified session, but only once the owner has enrolled: the flag can never lock the owner out."""
+    return os.environ.get("PAAS_ADMIN_REQUIRE_2FA") == "1" and bool(a.get("totp_enabled")) and not a.get("mfa_verified")
 def require_admin(request: Request, authorization: str = Header(None), x_admin_token: str = Header(None)):
     """Admin token as Bearer (API/automation), or a logged-in owner session (is_admin + owner email, 2FA-ready)."""
     import hmac
@@ -267,6 +271,82 @@ def certs():
     import concurrent.futures as cf
     with cf.ThreadPoolExecutor(8) as ex: return list(ex.map(cert_expiry, hosts))
 def _tier_fee(t): return float((TIERS.get(t or "free") or {}).get("fee_usd") or 0)
+PLAN_FRESH = 35 * 86400   # a wallet-paid plan counts toward MRR while its last plan charge is this recent
+def revenue(real, now=None, m0=None):
+    """One place for money. Cash in this month = card top-ups + subscription invoices (Stripe, USD) and Razorpay payments (INR, kept
+    separate: no exchange rate is invented). A top-up also produces a Stripe invoice: it's counted once, from the top-up. Subscription
+    checkout sessions carry no amount; their money arrives as invoices. Plan fees paid from the wallet are already in the top-ups,
+    so they're shown as 'from balance' and never added to cash. MRR counts each paid-tier account once: card subscription first,
+    otherwise a wallet plan charge in the last 35 days. Admin refunds this month are subtracted from cash."""
+    from . import billing
+    now = now or time.time()
+    if m0 is None: m0 = time.mktime(time.strptime(billing.month_key(now) + "-01", "%Y-%m-%d"))
+    ss = [r for r in q("select id,account_id,kind,amount_cents,invoice_id,status,created,updated from stripe_sessions where status='paid'") if r["account_id"] in real]
+    paid_at = lambda r: r["updated"] or r["created"] or 0
+    topup_inv = {r["invoice_id"] for r in ss if r["kind"] == "topup" and r["invoice_id"]}
+    topups = sum(r["amount_cents"] or 0 for r in ss if r["kind"] == "topup" and paid_at(r) >= m0)
+    sub_inv = sum(r["amount_cents"] or 0 for r in ss if r["kind"] == "invoice" and r["id"] not in topup_inv and paid_at(r) >= m0)
+    rzp = sum(r["amount_paise"] or 0 for r in q("select account_id, amount_paise, updated, created from payments where status='paid'") if r["account_id"] in real and (r["updated"] or r["created"] or 0) >= m0)
+    led = [r for r in q("select account_id, ts, amount_cents, kind from ledger where kind='plan' and amount_cents<0 and ts>=?", (min(m0, now - PLAN_FRESH),)) if r["account_id"] in real]
+    from_bal = -sum(r["amount_cents"] for r in led if r["ts"] >= m0)
+    refunds = sum(r["amount_cents"] or 0 for r in q("select account_id, amount_cents from admin_refunds where created>=?", (m0,)) if r["account_id"] in real)
+    wallet_plan = {r["account_id"] for r in led if r["ts"] >= now - PLAN_FRESH}
+    card = balance = 0; n_card = n_bal = 0; unfunded = []
+    for a in q("select id, tier, stripe_subscription from accounts where tier is not null and tier != 'free'"):
+        if a["id"] not in real: continue
+        fee = _tier_fee(a["tier"])
+        if not fee: continue
+        if a["stripe_subscription"]: card += fee; n_card += 1
+        elif a["id"] in wallet_plan: balance += fee; n_bal += 1
+        else: unfunded.append(a["id"])
+    cash = (topups + sub_inv - refunds) / 100
+    return {"mrr_usd": round(card + balance, 2), "mrr_card_usd": round(card, 2), "mrr_balance_usd": round(balance, 2), "subscriptions": n_card, "balance_plans": n_bal,
+            "paid_tier_unfunded": len(unfunded), "revenue_this_month_usd": round(cash, 2), "topups_usd": round(topups / 100, 2), "subscription_invoices_usd": round(sub_inv / 100, 2),
+            "refunds_usd": round(refunds / 100, 2), "razorpay_inr": round(rzp / 100, 2), "plan_from_balance_usd": round(from_bal / 100, 2)}
+IST = 19800
+def _day0(now): return (now + IST) // 86400 * 86400 - IST   # midnight, India time
+def _episodes(rows, lo, hi):
+    """Incidents = runs of failed status checks per component; counted where the run starts."""
+    out, prev = 0, {}
+    for r in rows:
+        if not r["ok"] and prev.get(r["component"], 1) and lo <= r["ts"] < hi: out += 1
+        prev[r["component"]] = r["ok"]
+    return out
+def snapshot(now=None):
+    """Once a day keep MRR and active apps, so the strip can compare with 7 days ago without reconstructing history."""
+    now = now or time.time(); d = time.strftime("%Y-%m-%d", time.gmtime(now + IST))
+    if q("select 1 from admin_snapshots where day=?", (d,), one=True): return False
+    test = _ids_test(); real = {r["id"] for r in q("select id from accounts")} - test
+    q("insert into admin_snapshots(day,data,created) values(?,?,?) on conflict(day) do nothing", (d, json.dumps({"mrr_usd": revenue(real, now)["mrr_usd"]}), now)); return True
+def pulse(real, now=None):
+    """Top strip: today (since midnight IST) against the previous 7 full days. Flows compare with the 7-day daily average;
+    stocks (active apps, MRR) compare with the value 7 days ago. Everything is real accounts only."""
+    now = now or time.time(); t0 = _day0(now); w0 = t0 - 7 * 86400; ago = now - 7 * 86400
+    acc = [a for a in q("select id, created from accounts") if a["id"] in real]
+    names = {r["name"]: r["account_id"] for r in q("select name, account_id from apps") if r["account_id"] in real}
+    first = {}
+    for r in q("select app, min(created) t from releases group by app"):
+        ac = names.get(r["app"])
+        if ac and r["t"] and (ac not in first or r["t"] < first[ac]): first[ac] = r["t"]
+    act = lambda a: a["id"] in first and first[a["id"]] - (a["created"] or 0) <= 86400
+    sig_t = [a for a in acc if (a["created"] or 0) >= t0]; sig_w = [a for a in acc if w0 <= (a["created"] or 0) < t0]
+    def live_at(T):
+        return len({r["app"] for r in q("select app, started, stopped from instances where started<=? and (stopped is null or stopped>?)", (T, T)) if r["app"] in names})
+    led = [r for r in q("select account_id, ts, amount_cents from ledger where kind='usage' and ts>=?", (w0,)) if r["account_id"] in real]
+    use = lambda lo, hi: round(-sum(r["amount_cents"] for r in led if lo <= r["ts"] < hi) / 100, 2)
+    rel = [r for r in q("select app, created from releases where status='failed' and created>=?", (w0,)) if r["app"] in names]
+    fails = lambda lo, hi: sum(1 for r in rel if lo <= r["created"] < hi)
+    st = q("select component, ts, ok from status_checks where ts>=? order by ts", (w0 - 3600,))
+    snap = q("select data from admin_snapshots where day=?", (time.strftime("%Y-%m-%d", time.gmtime(ago + IST)),), one=True)
+    avg = lambda x: round(x / 7, 2)
+    return {"since": t0, "window_from": w0,
+        "signups": {"today": len(sig_t), "avg7": avg(len(sig_w)), "week": len(sig_w)},
+        "activated": {"today": sum(1 for a in sig_t if act(a)), "of_today": len(sig_t), "week": sum(1 for a in sig_w if act(a)), "of_week": len(sig_w)},
+        "active_apps": {"now": live_at(now), "ago7": live_at(ago)},
+        "mrr": {"now": revenue(real, now)["mrr_usd"], "ago7": json.loads(snap["data"])["mrr_usd"] if snap else None},
+        "usage_usd": {"today": use(t0, now + 1), "avg7": avg(use(w0, t0)), "week": use(w0, t0)},
+        "failed_deploys": {"today": fails(t0, now + 1), "avg7": avg(fails(w0, t0)), "week": fails(w0, t0)},
+        "incidents": {"today": _episodes(st, t0, now + 1), "avg7": avg(_episodes(st, w0, t0)), "week": _episodes(st, w0, t0)}}
 def metrics():
     from . import api, billing, offsite
     test = _ids_test(); now = time.time(); mk = billing.month_key(now)
@@ -279,9 +359,7 @@ def metrics():
       union select id from accounts where stripe_subscription is not null and stripe_subscription != ''
       union select account_id as id from payments where status='paid') t""")
     n_paid = len({r["id"] for r in paid} & real); goal = _plans.GPU_UNLOCK_PAID_CUSTOMERS
-    subs = [a for a in accts if a["stripe_subscription"] and (a["tier"] or "free") != "free"]
-    mrr = sum(_tier_fee(a["tier"]) for a in subs)
-    rev = sum((r["amount_cents"] or 0) for r in q("select account_id, amount_cents from stripe_sessions where status='paid' and created>=?", (m0,)) if r["account_id"] in real) / 100
+    money = revenue(real, now, m0)
     all_apps = [a for a in q("select name,account_id,spec,status,created,error,updated from apps") if a["account_id"] in real]
     apps = [a for a in all_apps if a["status"] != "destroyed"]
     acct_tier = {a["id"]: a["tier"] or "free" for a in accts}
@@ -316,7 +394,8 @@ def metrics():
         "users": {"total": len(accts), "by_tier": tiers, "signups_per_day": _series([a["created"] for a in accts if a["created"]]),
                   "new_7d": sum(1 for a in accts if (a["created"] or 0) > now - 7 * 86400)},
         "paid_customers": n_paid, "gpu_unlock": {"goal": goal, "have": n_paid, "pct": min(100, round(100 * n_paid / goal)) if goal else 100, "enabled": _plans.GPU_ENABLED},
-        "revenue": {"mrr_usd": round(mrr, 2), "subscriptions": len(subs), "revenue_this_month_usd": round(rev, 2), "month": mk,
+        "pulse": pulse(real, now),
+        "revenue": {**money, "month": mk,
                     "credit_balance_usd": round(sum((a["credit_cents"] or 0) for a in accts) / 100, 2), "usage_this_month_usd": round(sum((r["c"] or 0) for r in usage if r["account_id"] in real) / 100, 2)},
         "deployments": {"apps_total": len(apps), "apps_active": active, "running_instances": running, "apps_by_plan": by_plan, "apps_by_tier": by_tier,
                         "deploys_per_day": _series([r["created"] for r in rels]), "deploys_30d": len(rels), "failed_30d": sum(1 for r in rels if r["status"] == "failed")},
@@ -358,6 +437,10 @@ def admin_page(request: Request):
     if not _session(request):
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login?next=/admin", 303)
+    a = _session(request)
+    if is_owner(a) and needs_2fa(a):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/admin/2fa", 303)
     if not admin_session(request): raise HTTPException(404, "Not Found")
     return open(os.path.join(ROOT, "dashboard", "admin.html")).read()
 def start():

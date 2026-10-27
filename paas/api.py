@@ -44,6 +44,7 @@ async def _security_headers(request: Request, call_next):
     else: r.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
     return r
 SECURE_COOKIES = PUBLIC_API_URL.startswith("https://") and os.environ.get("PAAS_INSECURE_COOKIES") != "1"
+SUSPENDED_MSG = "this account is suspended; email support@aloof.si"
 def acct(request: Request, authorization: str = Header(None)):
     """Bearer API key (CLI/MCP/automation) or session cookie (dashboard). Cookie-authenticated writes need the
     X-Aloof-CSRF header, which cross-site forms cannot set (SameSite=Lax is the first line of defence)."""
@@ -51,10 +52,15 @@ def acct(request: Request, authorization: str = Header(None)):
     if key:
         a = engine.account_by_key(key)
         if not a: raise HTTPException(401, "invalid API key")
+        if a.get("suspended"): raise HTTPException(403, SUSPENDED_MSG)
         if a.get("_token"): scope_check(request.url.path, a)
         return level_check(request, a)
     a = auth.session_account(request.cookies.get(auth.COOKIE))
     if not a: raise HTTPException(401, "not authenticated: send Authorization: Bearer pk_... or log in at /login")
+    if a.get("impersonated_by"):   # admin's read-only view of this account: reads only, never writes
+        if request.method not in ("GET", "HEAD", "OPTIONS"): raise HTTPException(403, "read-only admin view: changes are disabled")
+        a["_level"] = 1; return a
+    if a.get("suspended"): raise HTTPException(403, SUSPENDED_MSG)
     if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
     return level_check(request, a)
 # ---- access levels: read (GET) < write (everything except destroy/restore/account control) < admin (all) ----
@@ -824,8 +830,11 @@ def api_docs():
 <script>SwaggerUIBundle({{url:"/api/openapi.json",dom_id:"#swagger-ui",deepLinking:true,persistAuthorization:false}})</script></body></html>"""
 @app.get("/dashboard", response_class=HTMLResponse)
 def dash(request: Request):
-    if not auth.session_account(request.cookies.get(auth.COOKIE)): return RedirectResponse("/login?next=/dashboard", 303)
-    return HTMLResponse(open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND).replace("<!--ANALYTICS-->", site.analytics_tag()), headers={"X-Robots-Tag": "noindex, nofollow"})
+    a = auth.session_account(request.cookies.get(auth.COOKIE))
+    if not a: return RedirectResponse("/login?next=/dashboard", 303)
+    h = open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND).replace("<!--ANALYTICS-->", "" if a.get("impersonated_by") else site.analytics_tag())
+    if a.get("impersonated_by"): from .admin_ops import imp_banner; h = h.replace("<body>", "<body>" + imp_banner(a), 1)
+    return HTMLResponse(h, headers={"X-Robots-Tag": "noindex, nofollow"})
 
 
 # ---------------- Fly parity: releases/rollback, managed Postgres, snapshots, exec/console, log drains/history, audit ----------------
@@ -942,7 +951,8 @@ def _ws_account(ws: WebSocket):
     origin = (ws.headers.get("origin") or "").lower(); host = origin.split("://", 1)[-1].split(":")[0]
     ok_hosts = SYSTEM_HOSTS | {"localhost", "127.0.0.1"} | {h.split("://", 1)[-1].split("/")[0] for h in (PUBLIC_API_URL, PUBLIC_PROXY, os.environ.get("PAAS_SITE_URL", ""))}
     if host not in ok_hosts: return None
-    return auth.session_account(ws.cookies.get(auth.COOKIE))
+    a = auth.session_account(ws.cookies.get(auth.COOKIE))
+    return None if a and (a.get("impersonated_by") or a.get("suspended")) else a   # no consoles/streams in the admin's read-only view
 @app.websocket("/v1/apps/{name}/console")
 async def app_console(ws: WebSocket, name: str, instance: str|None=None):
     """Interactive shell in a running instance. Binary frames carry terminal bytes both ways; a text frame {"resize":[rows,cols]} resizes.
@@ -1061,6 +1071,7 @@ app.include_router(devx.R)
 app.include_router(www.R)
 from . import templating as _tpl; app.include_router(_tpl.R)
 from . import waitlist as _wl; app.include_router(_wl.R)
+from . import admin_ops as _aops; app.include_router(_aops.R)
 try: _wl.migrate_kv()
 except Exception as _e: logging.getLogger('paas').error('waitlist kv migration failed: %s', _e)
 # ---------------- edge proxy (port 8080): <app>.BASE_DOMAIN or /_app/<app>/ ----------------

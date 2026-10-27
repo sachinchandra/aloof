@@ -90,6 +90,8 @@ def start():
     threading.Thread(target=_loop, args=(engine.reap_destroyed, 120), daemon=True).start()
     from . import waitlist as _wl
     threading.Thread(target=_loop, args=(_wl.retry_unsent, 300), daemon=True).start()
+    from . import www as _www
+    threading.Thread(target=_loop, args=(_www.snapshot, 1800), daemon=True).start()
     from . import domains as _doms
     threading.Thread(target=_loop, args=(_doms.tick, int(os.environ.get("PAAS_DOMAIN_TICK_S", "60"))), daemon=True).start()
     threading.Thread(target=_loop, args=(billing.meter_tick, int(os.environ.get("PAAS_METER_INTERVAL", "60"))), daemon=True).start()

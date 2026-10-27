@@ -149,6 +149,16 @@ update deploy_tokens set can_destroy=1;
     ,(17, """
 alter table deploy_tokens add column if not exists oauth_client TEXT;
 """)
+    # v18: owner dashboard: account suspension, read-only impersonation sessions, admin refunds, daily snapshots, TOTP 2FA
+    ,(18, """
+alter table accounts add column if not exists suspended INTEGER default 0;
+alter table accounts add column if not exists totp_secret_enc TEXT;
+alter table accounts add column if not exists totp_enabled INTEGER default 0;
+alter table accounts add column if not exists totp_recovery TEXT;
+alter table sessions add column if not exists impersonated_by bigint;
+create table if not exists admin_refunds(id TEXT primary key, session_id TEXT, account_id bigint, amount_cents bigint, reason TEXT, created REAL);
+create table if not exists admin_snapshots(day TEXT primary key, data TEXT, created REAL);
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
