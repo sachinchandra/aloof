@@ -56,10 +56,13 @@ def login(email, password):
         check_password("x", "scrypt$16384$8$1$00$00"); raise PermissionError("invalid email or password")   # equalize timing
     return a
 _magic_attr = {}   # token hash -> first-touch attribution for a magic-link signup (in-memory, best effort, bounded)
-def start_magic(email, base_url, attribution=None):
-    """Always reports success (no account enumeration). Creates the account on first verified login."""
+def start_magic(email, base_url, attribution=None, pending=None):
+    """Always reports success (no account enumeration). Creates the account on first verified login.
+    pending: a parked social identity (X without email) to attach once this link proves the address."""
     email = _check_email(email); tok = "ml_" + secrets.token_urlsafe(32)
     q("insert into magic_links(token_hash,email,expires,used) values(?,?,?,0)", (sha256(tok), email, time.time() + MAGIC_TTL))
+    if pending:
+        from .db import kv_put; kv_put("ml_pending", sha256(tok), pending, ttl=MAGIC_TTL)
     if attribution:
         if len(_magic_attr) > 5000: _magic_attr.clear()
         _magic_attr[sha256(tok)] = attribution

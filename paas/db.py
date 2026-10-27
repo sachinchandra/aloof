@@ -159,6 +159,12 @@ alter table sessions add column if not exists impersonated_by bigint;
 create table if not exists admin_refunds(id TEXT primary key, session_id TEXT, account_id bigint, amount_cents bigint, reason TEXT, created REAL);
 create table if not exists admin_snapshots(day TEXT primary key, data TEXT, created REAL);
 """)
+    ,(19, """
+create table if not exists provider_identities(id AUTOPK, account_id bigint not null, provider TEXT not null,
+  subject TEXT not null, email TEXT, email_verified INTEGER default 0, name TEXT, created REAL, last_login REAL);
+create unique index if not exists provider_identities_ps on provider_identities(provider, subject);
+create unique index if not exists provider_identities_ap on provider_identities(account_id, provider);
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

@@ -581,6 +581,8 @@ def auth_magic(m: MagicReq, request: Request):
     return {"ok": True, "detail": "If the address is valid, a sign-in link is on its way (valid 15 minutes)."}
 @app.get("/auth/magic")
 def auth_magic_finish(token: str):
+    from .db import kv_get as _kg, kv_del as _kd
+    pend = _kg("ml_pending", auth.sha256(token or ""))
     try: a = auth.finish_magic(token)
     except PermissionError:
         from . import www
@@ -588,10 +590,91 @@ def auth_magic_finish(token: str):
                          "Links last 15 minutes and work once. If you already clicked it, you may be signed in.",
                          "<p><a class='btn pri' href='/login'>Get a new link</a> <a class='btn ghost' href='/dashboard'>Open dashboard</a></p>", narrow=True)
         return HTMLResponse(www.render("/auth/magic", "Sign-in link expired", "Request a new sign-in link.", body), 400)
-    if a.get("_created"): analytics.capture(a["id"], "signup_completed", {"method": "magic_link"} | (a.get("_attribution") or {}))
+    via = "magic_link"
+    if pend:   # X sign-up without email: the link proved the address; attach the parked X identity
+        _kd("ml_pending", auth.sha256(token or ""))
+        try:
+            if oauth_login.finish_pending(pend, a["id"]): via = "x"
+        except oauth_login.AuthError: pass
+    if a.get("_created"): analytics.capture(a["id"], "signup_completed", {"method": via} | (a.get("_attribution") or {}))
     else: analytics.identify(a["id"])
     r = RedirectResponse("/dashboard", 303); r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
+# ---- social login: Google / GitHub / X (see paas/oauth_login.py, docs/social-login.md) ----
+from . import oauth_login
+import urllib.parse as _up
+def _auth_err(code, p, nxt):
+    r = RedirectResponse("/login?" + _up.urlencode({"auth_error": code, "provider": p, "next": nxt}), 303)
+    r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); return r
+def _cookie_kw(age): return {"max_age": age, "httponly": True, "samesite": "lax", "secure": SECURE_COOKIES, "path": "/auth/"}
+@app.get("/v1/auth/providers")
+def auth_providers(): return {"providers": oauth_login.providers(), "magic_link": True}
+@app.get("/auth/{p}/start")
+def social_start(p: str, request: Request, next: str | None = None):
+    nxt = auth.safe_next(next, "/dashboard")
+    if p not in oauth_login.PROVIDERS: return _auth_err("provider_disabled", p[:20], nxt)
+    base = oauth_login.base_url(); bh = _up.urlsplit(base).netloc
+    if SECURE_COOKIES and bh and request.url.netloc != bh:   # one canonical host, so the state cookie and the session land where the callback is
+        return RedirectResponse(f"{base}/auth/{p}/start?" + _up.urlencode({"next": nxt}), 303)
+    try: _rate_check(("oauth-ip:" + client_ip(request),))
+    except HTTPException: return _auth_err("rate_limited", p, nxt)
+    cur = auth.session_account(request.cookies.get(auth.COOKIE))
+    try: url, st = oauth_login.start(p, nxt, link_account=cur["id"] if cur else None)
+    except oauth_login.AuthError as e: return _auth_err(e.code, p, nxt)
+    r = RedirectResponse(url, 303); r.set_cookie(oauth_login.STATE_COOKIE, st, **_cookie_kw(oauth_login.STATE_TTL)); return r
+@app.get("/auth/{p}/callback")
+def social_callback(p: str, request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    nxt = auth.safe_next(oauth_login.peek_next(state), "/dashboard")
+    if p not in oauth_login.PROVIDERS or not oauth_login.enabled(p): return _auth_err("provider_disabled", p[:20], nxt)
+    try:
+        s = oauth_login.take_state(p, state, request.cookies.get(oauth_login.STATE_COOKIE))
+        if error: raise oauth_login.AuthError("cancelled" if error == "access_denied" else "provider_error")
+        if not code: raise oauth_login.AuthError("provider_error")
+        if s.get("link"):   # connect flow: the same signed-in account must finish it
+            cur = auth.session_account(request.cookies.get(auth.COOKIE))
+            if not cur or cur["id"] != s["link"]: raise oauth_login.AuthError("state_invalid")
+        prof = oauth_login.profile(p, oauth_login._exchange(p, code, s["ver"]), s["nonce"])
+        a, created, pid = oauth_login.resolve(p, prof, s.get("link"))
+    except oauth_login.AuthError as e:
+        logging.getLogger("aloof.auth").info("social login %s failed: %s (%s)", p, e.code, e)
+        return _auth_err(e.code, p, nxt)
+    except Exception as e:
+        logging.getLogger("aloof.auth").warning("social login %s error: %s", p, type(e).__name__)
+        return _auth_err("provider_error", p, nxt)
+    if pid:
+        r = RedirectResponse("/auth/x/email?" + _up.urlencode({"next": nxt}), 303)
+        r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); r.set_cookie("aloof_oauth_pending", pid, **_cookie_kw(oauth_login.PENDING_TTL)); return r
+    if created: analytics.capture(a["id"], "signup_completed", {"method": p})
+    else: analytics.identify(a["id"])
+    _audit(a["id"], None, "auth.login", p, _ip(request))
+    r = RedirectResponse(nxt, 303); r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/")
+    if not s.get("link"): r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
+    return r
+@app.get("/auth/x/email", response_class=HTMLResponse)
+def x_email_form(request: Request, next: str | None = None):
+    nxt = auth.safe_next(next, "/dashboard")
+    if not oauth_login.pending(request.cookies.get("aloof_oauth_pending")): return _auth_err("state_invalid", "x", nxt)
+    from . import site
+    return www.at("/auth/x/email", "default", site.x_email, BRAND)
+class XEmailReq(BaseModel): email: str
+@app.post("/auth/x/email")
+def x_email_submit(b: XEmailReq, request: Request):
+    """JSON {email} + X-Aloof-CSRF: 1 (sent by site.x_email). Needs the parked X identity (pending cookie from the callback)."""
+    if request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
+    pid = request.cookies.get("aloof_oauth_pending")
+    if not oauth_login.pending(pid): raise HTTPException(400, "Your X sign-in expired. Start again with Sign in with X.")
+    em = (b.email or "").strip().lower()
+    _rate_check(("ip:" + client_ip(request), "email:" + em))
+    try: auth.start_magic(em, oauth_login.base_url() if SECURE_COOKIES else str(request.base_url), pending=pid)
+    except ValueError: raise HTTPException(400, "That doesn't look like an email address.")
+    except auth.MailError: raise HTTPException(503, "Email is temporarily unavailable; try again shortly.")
+    return {"ok": True, "detail": f"Check {em} for a link to finish signing in (valid 15 minutes). Open it in this browser."}
+@app.get("/v1/auth/identities")
+def identities_list(a=Depends(acct)): return {"identities": oauth_login.list_identities(a["id"]), "providers": oauth_login.providers()}
+@app.delete("/v1/auth/identities/{p}")
+def identities_unlink(p: str, request: Request, a=Depends(acct)):
+    if not oauth_login.unlink(a["id"], p): raise HTTPException(404, "that provider isn't connected")
+    return {"ok": True, "note": "you can still sign in with an email link" + (" or your password" if a.get("password_hash") else "")}
 @app.post("/v1/auth/logout")
 def auth_logout(request: Request):
     auth.end_session(request.cookies.get(auth.COOKIE)); r = JSONResponse({"ok": True}); r.delete_cookie(auth.COOKIE, path="/"); return r
