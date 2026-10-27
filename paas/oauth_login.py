@@ -31,7 +31,9 @@ class AuthError(Exception):
     def __init__(self, code, detail=""): super().__init__(detail or code); self.code = code
 def creds(p):
     c = PROVIDERS[p]["env"]; return E(c + "_CLIENT_ID"), E(c + "_CLIENT_SECRET")
-def enabled(p): i, s = creds(p); return bool(i and s)
+def enabled(p):
+    """Both credentials set, and not switched off with AUTH_<PROVIDER>_ENABLED=0 (keeps the keys, hides the button)."""
+    i, s = creds(p); return bool(i and s) and (E(f"AUTH_{p.upper()}_ENABLED") or "1").strip() != "0"
 def providers(): return [{"id": p, "enabled": enabled(p), "label": v["label"]} for p, v in PROVIDERS.items()]
 def base_url(): return (E("PAAS_OAUTH_BASE_URL") or E("PAAS_SITE_URL") or E("PAAS_PUBLIC_API_URL") or "http://localhost:8000").rstrip("/")
 def redirect_uri(p): return f"{base_url()}/auth/{p}/callback"

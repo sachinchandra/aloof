@@ -72,6 +72,10 @@ If X returns `confirmed_email`, that address is treated as verified. If it retur
 address), the user lands on `/auth/x/email`, enters an address and clicks the magic link. Only then is the account
 created or the X identity attached.
 
+## Turning a provider off/on without removing keys
+`AUTH_GOOGLE_ENABLED=0` (or `AUTH_GITHUB_ENABLED`, `AUTH_X_ENABLED`) in golive.env hides the button and disables the flow.
+On prod: `cd /workspace/paas && sh deploy/auth-provider.sh google on` (or `off`) edits the flag and redeploys.
+
 ## Behaviour summary
 - Account linking happens only by a provider-**verified** email that matches an Aloof account whose own email is verified.
   If the Aloof account is unverified, or the provider email is unverified but an account exists, the result is
