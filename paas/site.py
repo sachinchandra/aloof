@@ -555,10 +555,64 @@ curl -fsSL '{api}/v1/nodes/bootstrap.sh?node=n-…&token=jt_…' | sudo bash</pr
     return page(f"{TITLES[pg]} · {brand} docs", f"<div class='wrap docs'><aside aria-label='Docs navigation'>{navh}</aside><article class=docmain style='min-width:0;max-width:780px'>{c}</article></div>", brand,
                 desc=("Aloof documentation: quickstart, CLI, aloof.toml config, deploys from Docker images or git, managed Postgres, volumes, domains, billing and the MCP server for AI assistants." if pg == "quickstart"
                       else f"{TITLES[pg]} on Aloof: how it works, commands and limits. Part of the Aloof docs for EU backend hosting with scale to zero and MCP deploys."))
+
+# ---- Sign in with GitHub / Google / X. Buttons come from GET /v1/auth/providers (enabled ones only, none if the call fails);
+# each one is a plain link to Backend's GET /auth/{id}/start?next=... Brand marks follow each provider's guidelines; the rest is Ember.
+SSO_MARKS = {
+ "github": '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>',
+ "google": '<svg viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>',
+ "x": '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>'}
+SSO_CSS = """<style>
+.sso{display:grid;gap:10px;margin:18px 0 4px}.sso[hidden]{display:none}
+.sso a{display:flex;align-items:center;justify-content:center;gap:10px;min-height:48px;width:100%;border-radius:10px;font:600 15px/1.2 var(--sans,system-ui),sans-serif;text-decoration:none;border:1px solid transparent;box-sizing:border-box;padding:0 16px}
+.sso a svg{width:20px;height:20px;margin:0;flex:none}
+.sso a:focus-visible{outline:3px solid var(--ember,#ff8a1f);outline-offset:3px}
+.sso .p-github{background:#24292f;color:#fff;border-color:#57606a}.sso .p-github:hover{background:#32383f}
+.sso .p-google{background:#131314;color:#e3e3e3;border-color:#8e918f;font-family:Roboto,var(--sans,system-ui),sans-serif;font-weight:500}.sso .p-google:hover{background:#1f1f20}
+.sso .p-x{background:#000;color:#fff;border-color:#2f3336}.sso .p-x:hover{background:#16181c}
+[data-theme=light] .sso .p-google{background:#fff;color:#1f1f1f;border-color:#747775}[data-theme=light] .sso .p-google:hover{background:#f8f9fa}
+.ordiv{display:flex;align-items:center;gap:12px;color:var(--fg3,#998b7e);font-size:13px;margin:14px 0 4px}.ordiv[hidden]{display:none}.ordiv:before,.ordiv:after{content:"";flex:1;height:1px;background:var(--line,#2a2420)}
+.autherr{border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.08);border-radius:10px;padding:10px 12px;font-size:14px;margin:14px 0 0}
+</style>"""
+AUTH_ERRORS = {
+ "cancelled": "Sign-in with {p} was cancelled. Pick another option, or try again.",
+ "email_unverified": "Your {p} email address isn't verified yet. Verify it with {p}, or use your email below.",
+ "email_linked_other": "This email already has an Aloof account that uses a different sign-in method. Sign in that way first, then connect {p} in Settings.",
+ "state_invalid": "That sign-in link expired or was opened in another browser. Please try again.",
+ "provider_error": "{p} didn't respond properly. Please try again in a moment, or use your email below.",
+ "rate_limited": "Too many sign-in attempts. Wait a minute and try again.",
+ "provider_disabled": "Sign-in with {p} isn't available right now. Use your email below.",
+}
+def sso_js():
+    import json as _j
+    return """<script>(function(){var MK=%s,ER=%s,ORDER=['github','google','x'],NAMES={github:'GitHub',google:'Google',x:'X'};
+function safeNext(){var n=new URLSearchParams(location.search).get('next');try{if(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&!/[\\\\\\x00-\\x20\\x7f]/.test(n)){var u=new URL(n,location.origin);if(u.origin===location.origin&&u.pathname.charAt(1)!='/')return u.pathname+u.search+u.hash}}catch(e){}return ''}
+var qs=new URLSearchParams(location.search),code=qs.get('auth_error'),pv=qs.get('provider');
+if(code){var box=document.getElementById('autherr'),t=ER[code]||'Sign-in didn\\'t work. Please try again, or use your email below.';box.textContent=t.split('{p}').join(NAMES[pv]||'that provider');box.hidden=false;
+ if(code=='email_linked_other'&&window.mode)mode('login');}
+function render(list){var el=document.getElementById('sso'),n=safeNext(),h='';
+ list.filter(function(p){return p&&p.enabled&&MK[p.id]}).sort(function(a,b){return ORDER.indexOf(a.id)-ORDER.indexOf(b.id)}).forEach(function(p){
+  var lb='Continue with '+(NAMES[p.id]||p.label);h+='<a class="p-'+p.id+'" href="/auth/'+p.id+'/start'+(n?'?next='+encodeURIComponent(n):'')+'" data-p="'+p.id+'">'+MK[p.id]+'<span>'+lb+'</span></a>'});
+ el.innerHTML=h;el.hidden=!h;document.getElementById('ordiv').hidden=!h;
+ el.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){if(window.aloofTrack)aloofTrack(window.M=='register'?'signup_started':'login_started',{method:a.dataset.p})})})}
+window.aloofSso=render;
+fetch('/v1/auth/providers',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():{providers:[]}}).then(function(j){render(j.providers||[])}).catch(function(){render([])})})()</script>""" % (_j.dumps(SSO_MARKS), _j.dumps(AUTH_ERRORS))
+def x_email(brand):
+    """Backend's no_email step for X: ask for an email, Backend sends a verify link. Mount at GET /auth/x/email (Backend)."""
+    return page(f"Add your email · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
+<h1>One more step</h1><p class=muted style="margin:0">X didn't share an email address with us. Add one so we can reach you about your account and bills. We'll send a link to confirm it.</p>
+<form id=xf style="margin-top:16px"><div id=msg role=status aria-live=polite class=muted style="min-height:20px;font-size:14px"></div>
+<label for=email>Email</label><input id=email name=email type=email autocomplete=email required placeholder="you@company.com">
+<p style="margin-top:18px"><button class="btn pri" style="width:100%;justify-content:center;min-height:48px" id=lb>Send confirmation link</button></p></form>
+<p class=muted style="text-align:center;font-size:14px"><a href="/login">Use a different sign-in method</a></p></div></div>
+<script>xf.onsubmit=async function(e){{e.preventDefault();if(lb.disabled)return;lb.disabled=true;msg.className='muted';msg.textContent='Sending…';var r,j={{}};
+try{{r=await fetch(location.pathname+location.search,{{method:'POST',headers:{{'Content-Type':'application/json','X-Aloof-CSRF':'1'}},body:JSON.stringify({{email:email.value}})}});try{{j=await r.json()}}catch(_){{}}}}catch(_){{}}
+lb.disabled=false;if(r&&r.ok){{msg.className='ok';msg.textContent=j.detail||('Check '+email.value+' for a link to finish signing in.')}}else{{msg.className='bad';msg.textContent=(j&&j.detail)||'That didn\\'t work. Please try again.'}}}}</script>""", brand)
 def login(brand):
     return page(f"Log in · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
 <h1 id=title>Welcome back</h1><p class=muted id=subt style="margin:0">Log in to deploy and manage your apps.</p>
 <div class=tabs role=tablist aria-label="Log in or create an account"><button type=button role=tab id=tl class=on aria-selected=true onclick="mode('login')">Log in</button><button type=button role=tab id=tr aria-selected=false onclick="mode('register')">Create account</button></div>
+<p id=autherr class=autherr role=alert hidden></p><div class=sso id=sso role=group aria-label="Sign in with another account" hidden></div><div class=ordiv id=ordiv hidden>or</div>
 <form onsubmit="event.preventDefault();go(M)"><div id=msg role=status aria-live=polite class=muted style="min-height:20px;font-size:14px"></div>
 <label for=email>Email</label><input id=email type=email autocomplete=email required placeholder="you@company.com">
 <label for=pw id=pwl>Password</label><input id=pw type=password autocomplete=current-password placeholder="Your password" aria-describedby=pwh><small id=pwh class="muted helper" style="display:none">At least 10 characters.</small>
@@ -576,7 +630,7 @@ async function go(kind){{if(lb.disabled)return;if(kind=='register'&&window.aloof
  if(j.api_key) sessionStorage.newKey=j.api_key; var n=new URLSearchParams(location.search).get('next'),d='/dashboard';try{{if(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&!/[\\\\\\x00-\\x20\\x7f]/.test(n)){{var u=new URL(n,location.origin);if(u.origin===location.origin&&u.pathname.charAt(1)!='/')d=u.pathname+u.search+u.hash}}}}catch(e){{}}location=d}}
 async function magic(){{if(!email.value||!email.checkValidity()){{msg.className='bad';msg.textContent='Enter your email address first, then tap the sign-in link option again.';email.focus();return}}if(M=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'magic_link'}});msg.className='muted';msg.textContent='Sending…';
  const x=await post('/v1/auth/magic',{{email:email.value,attribution:window.aloofAttribution?aloofAttribution():null}}),j=x.j; msg.className=x.ok?'ok':'bad'; msg.textContent=x.ok?(j.detail||'Check your inbox for a sign-in link.'):errText(j,x.r)}}
-</script>""", brand)
+</script>""" + SSO_CSS + sso_js(), brand)
 LEGAL = {
 "security": ("Security", """<p>This page lists what the platform does today. We don't claim certifications we don't hold.</p>
 <h3>Transport</h3><ul><li>All public endpoints (site, API, MCP, apps) are served over HTTPS; certificates are issued automatically and only for known hosts.</li><li>Nodes connect to the control plane over WireGuard and expose no inbound ports.</li></ul>
