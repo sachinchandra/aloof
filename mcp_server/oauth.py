@@ -447,7 +447,7 @@ CSS = """:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;backgroun
 .card{background:#16120f;border:1px solid #2a221c;border-radius:16px;padding:28px}h1{font-size:24px;line-height:1.25;margin:0 0 14px}
 .badge{border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:14px}.ok{background:#0f2418;border:1px solid #1f5135;color:#bdf3d0}
 .amber{background:#2a1c0a;border:1px solid #8a5a12;color:#ffe7c2}.amber b.t{color:#ffb547}.warn{background:#2a1210;border:1px solid #7a2a20;color:#ffd7cf}.warn b.t{color:#ff8b73}.access{background:#1c1713;border:1px solid #382d24;border-radius:10px;padding:12px 14px;font-size:14px;color:#bcafa3;margin:0 0 16px}
-.access b{color:#f6f1ec}code{font:13px SFMono-Regular,Menlo,Consolas,monospace;background:#0c0a08;border:1px solid #2a221c;border-radius:6px;padding:2px 6px;word-break:break-all}
+.access b{color:#f6f1ec}.access code{white-space:nowrap;word-break:normal}code{font:13px SFMono-Regular,Menlo,Consolas,monospace;background:#0c0a08;border:1px solid #2a221c;border-radius:6px;padding:2px 6px;word-break:break-all}
 label{display:block;font-size:14px;font-weight:600;color:#bcafa3;margin:16px 0 6px}input{width:100%;font-size:16px;padding:12px 14px;border-radius:10px;border:1px solid #382d24;background:#0c0a08;color:#f6f1ec}
 input:focus{outline:2px solid #ff7a1a;outline-offset:1px;border-color:#ff7a1a}.row{display:flex;gap:10px;margin-top:22px}
 .btn{flex:1;min-height:46px;font-size:16px;font-weight:700;border-radius:10px;cursor:pointer;border:1px solid #382d24;background:transparent;color:#f6f1ec}
