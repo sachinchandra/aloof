@@ -382,3 +382,6 @@ def test_consent_shows_requested_scope(srv):
         t = c.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": reg["client_id"], "code_verifier": v}).json()
         assert t["scope"] == scope
     m = c.get("/.well-known/oauth-authorization-server").json(); assert {"paas:read", "paas:write", "paas:admin"} <= set(m["scopes_supported"])
+    for p in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"):
+        r = c.get(p)
+        if r.status_code == 200: assert r.json()["scopes_supported"] == ["paas", "paas:read", "paas:write", "paas:admin"], p

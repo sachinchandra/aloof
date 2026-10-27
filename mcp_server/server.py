@@ -19,6 +19,13 @@ def docs_url():
     if not pub or (urlsplit(pub).hostname or "") in ("localhost", "127.0.0.1", "::1"): return None
     return f"{pub}/llms.txt"
 if HTTP_MODE: patch_metadata()
+# RFC 9728 metadata: FastMCP only fills scopes_supported from required_scopes (None here: scope is chosen per client, not
+# required), so advertise our scopes explicitly. FastMCP imports this function at app-build time, so patching the module works.
+import mcp.server.auth.routes as _routes
+_orig_prm = _routes.create_protected_resource_routes
+def _prm(resource_url, authorization_servers, scopes_supported=None, **k):
+    return _orig_prm(resource_url, authorization_servers, scopes_supported or list(SCOPES), **k)
+_routes.create_protected_resource_routes = _prm
 auth_kw = dict(auth_server_provider=PaasOAuthProvider(PUBLIC), auth=AuthSettings(
     issuer_url=PUBLIC, resource_server_url=f"{PUBLIC}/mcp", service_documentation_url=docs_url(),
     client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=SCOPES, default_scopes=["paas"]),
