@@ -130,9 +130,17 @@ def token_create(b: TokReq, request: Request, a=Depends(acct)):
     return {"id": tid, "token": t, "scope": f"app:{b.app}" if b.app else "org (all apps in this account)", "expires": time.time() + exp if exp else None,
             "can_destroy": bool(b.can_destroy), "access": "paas:admin (can destroy and restore)" if b.can_destroy else "paas:write (deploy, scale, config; can't destroy apps or delete/restore data)",
             "detail": "shown once; use as ALOOF_API_TOKEN (Authorization: Bearer)"}
+# When new deploy tokens became no-destroy by default (migration v16 deploy, 2026-10-26 17:39 UTC). Tokens created before
+# then were migrated to can_destroy=1 so existing pipelines kept working; flag them so users can recreate them.
+NO_DESTROY_DEFAULT_SINCE = 1793036340
+LEGACY_DESTROY_NOTE = "created before Oct 26 2026, so it kept destroy rights; revoke it and create a new token (no destroy by default) unless this pipeline needs to delete apps or data"
+def _legacy_note(r):
+    old = bool(r.get("can_destroy")) and (r.get("created") or 0) < NO_DESTROY_DEFAULT_SINCE
+    return {"legacy_destroy": old} | ({"note": LEGACY_DESTROY_NOTE} if old else {})
 @R.get("/v1/tokens")
 def token_list(a=Depends(acct)):
     return [{k: r[k] for k in ("id", "app", "label", "prefix", "expires", "created", "last_used")} | {"can_destroy": bool(r.get("can_destroy")), "expired": bool(r["expires"] and r["expires"] < time.time())}
+            | _legacy_note(r)
             for r in q("select * from deploy_tokens where account_id=? order by created desc", (a["id"],))]
 @R.delete("/v1/tokens/{tid}")
 def token_revoke(tid: str, request: Request, a=Depends(acct)):

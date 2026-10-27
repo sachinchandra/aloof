@@ -41,3 +41,21 @@ def test_v16_keeps_existing_tokens_destroy_capable():
     from paas import db
     sql = dict(db.MIGRATIONS)[16] if hasattr(db, "MIGRATIONS") else ""
     assert "can_destroy INTEGER default 0" in sql and "update deploy_tokens set can_destroy=1" in sql
+def test_token_list_flags_pre_oct26_destroy_tokens(fake, user):
+    """doc-bug 41: list shows can_destroy, and flags tokens that kept destroy rights from before the no-destroy default."""
+    from paas.db import q
+    from paas import devx
+    deploy(user, "sc-l", "good:v1")
+    new = user.post("/v1/tokens", json={"app": "sc-l", "label": "new"}).json()
+    allowed = user.post("/v1/tokens", json={"app": "sc-l", "label": "allowed", "can_destroy": True}).json()
+    old = user.post("/v1/tokens", json={"app": "sc-l", "label": "old"}).json()
+    q("update deploy_tokens set can_destroy=1, created=? where id=?", (devx.NO_DESTROY_DEFAULT_SINCE - 86400, old["id"]))
+    rows = {x["id"]: x for x in user.get("/v1/tokens").json()}
+    assert rows[new["id"]]["can_destroy"] is False and rows[new["id"]]["legacy_destroy"] is False and "note" not in rows[new["id"]]
+    assert rows[allowed["id"]]["can_destroy"] is True and rows[allowed["id"]]["legacy_destroy"] is False
+    assert rows[old["id"]]["can_destroy"] is True and rows[old["id"]]["legacy_destroy"] is True and "revoke it and create a new token" in rows[old["id"]]["note"]
+def test_cli_and_dashboard_show_destroy():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cli = open(os.path.join(root, "cli", "aloof")).read(); dash = open(os.path.join(root, "dashboard", "index.html")).read()
+    assert "DESTROY" in cli and "legacy_destroy" in cli and "created before Oct 26 2026 can still destroy" in cli
+    assert "legacy_destroy" in dash and "can destroy" in dash and "no destroy" in dash and "nk_destroy" in dash and "id=keys_legacy" in dash

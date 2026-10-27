@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """aloof CLI. Config: ~/.aloof.json (falls back to ~/.paas.json) {api, key} or env ALOOF_API_URL / ALOOF_API_KEY."""
 import argparse, json, os, sys, time, urllib.request, urllib.error
-VERSION = "0.4.4"   # single source of truth: `aloof --version` and the User-Agent header
+VERSION = "0.4.5"   # single source of truth: `aloof --version` and the User-Agent header
 UA = f"aloof-cli/{VERSION} (python {sys.version_info[0]}.{sys.version_info[1]}; {sys.platform})"
 CFG = os.path.expanduser("~/.aloof.json")
 if not os.path.exists(CFG) and os.path.exists(os.path.expanduser("~/.paas.json")): CFG = os.path.expanduser("~/.paas.json")
@@ -491,7 +491,10 @@ elif o.cmd == "tokens":
         r = call("POST", "/v1/tokens", {"app": None if o.org else app_of(o, required=False), "label": o.label, "expires_in": o.expiry, "can_destroy": o.allow_destroy})
         print(f"token ({r['scope']}, {'can destroy' if r.get('can_destroy') else 'no destroy/restore'}, expires {time.strftime('%Y-%m-%d', time.localtime(r['expires'])) if r['expires'] else 'never'}) - shown once:\n{r['token']}")
     elif o.tcmd == "list":
-        for t in call("GET", "/v1/tokens"): print(f"{t['id']:<16} {t['prefix']}...  {('app:' + t['app']) if t['app'] else 'org':<24} {t['label']:<12} {'destroy' if t.get('can_destroy') else 'no-destroy':<10} " + ("EXPIRED" if t["expired"] else (time.strftime('expires %Y-%m-%d', time.localtime(t['expires'])) if t['expires'] else "no expiry")))
+        ts = call("GET", "/v1/tokens"); old = [t for t in ts if t.get("legacy_destroy")]
+        if ts: print(f"{'ID':<16} {'PREFIX':<13} {'SCOPE':<24} {'LABEL':<12} {'DESTROY':<10} EXPIRES")
+        for t in ts: print(f"{t['id']:<16} {t['prefix']}...  {('app:' + t['app']) if t['app'] else 'org':<24} {t['label']:<12} {('yes*' if t.get('legacy_destroy') else 'yes') if t.get('can_destroy') else 'no':<10} " + ("EXPIRED" if t["expired"] else (time.strftime('%Y-%m-%d', time.localtime(t['expires'])) if t['expires'] else "never")))
+        if old: print(f"\n* {len(old)} token(s) created before Oct 26 2026 can still destroy apps and data. Unless a pipeline needs that, recreate them:\n  aloof tokens create -a <app>   (no destroy by default), update your CI secret, then aloof tokens revoke <id>")
     else: pj(call("DELETE", f"/v1/tokens/{o.id}"))
 elif o.cmd == "secrets":
     name = app_of(o)
