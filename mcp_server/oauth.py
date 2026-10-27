@@ -67,7 +67,7 @@ LEVELS = {"paas:read": 1, "paas:write": 2, "paas:admin": 3, "paas": 3}; LEVEL_NA
 def level(scopes): return max((LEVELS.get(x, 0) for x in (scopes or [])), default=0)
 SCOPE_TEXT = {
     1: "<b>Approving gives {client} read-only access to your Aloof account</b> (scope <code>paas:read</code>). It can see your apps, status, logs, diagnostics, releases, domains, volumes, databases and usage. It can't deploy, change, delete or spend anything.",
-    2: "<b>Approving lets {client} deploy and change things in your Aloof account</b> (scope <code>paas:write</code>). It can deploy, scale, change environment variables and secrets, manage domains, volumes and databases, and spend your credit. It can't destroy apps, delete volumes or databases, or restore backups.",
+    2: "<b>Approving lets {client} deploy and change things in your Aloof account</b> (scope <code>paas:write</code>). It can deploy, roll back, scale, run commands in your apps, change environment variables and secrets, manage domains, volumes and databases, and spend your credit on what it runs. It can't destroy apps, delete volumes, databases or snapshots, restore backups, or change your billing or API keys.",
     3: "<b>Approving gives {client} full access to your Aloof account</b> (scope <code>{scope}</code>). It can deploy and delete apps, change environment variables and secrets, manage volumes, databases and domains, restore backups, and spend your credit."}
 class CIMDError(ValueError): pass
 def is_cimd_client_id(cid): return isinstance(cid, str) and cid.startswith("https://")
@@ -459,7 +459,7 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name=
 <meta name="robots" content="noindex"><title>Connect {client} to Aloof</title><style>{css}</style></head><body><main class="w">
 <a class="brand" href="{www}">{mark}<span>aloof</span></a><div class="card">
 <h1>Connect {client} to Aloof</h1>{badge}
-<div class="access">{access} You can revoke it later by deleting its key under API keys. <a href="{www}/docs/mcp#revoke" target="_blank" rel="noopener">How</a></div>
+<div class="access">{access}You can revoke it later by deleting its key under API keys. <a href="{www}/docs/mcp#revoke" target="_blank" rel="noopener">How</a></div>
 <p class="muted">After you approve, you'll be sent back to <code>{target}</code></p>
 {err}<form method="post" onsubmit="var b=event.submitter;if(b)setTimeout(function(){{b.disabled=true;b.textContent=b.value=='approve'?'Approving…':'Denying…'}},0)"><input type="hidden" name="req" value="{req}">{choice}
 <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" value="{email}">
@@ -479,6 +479,16 @@ NO_SCOPE_WARN = ('<div role="alert" class="badge amber"><b class="t">&#9888; Thi
 LEVEL_OPTS = {1: ("paas:read", "Read only", "See apps, status, logs and usage. Can't change anything."),
               2: ("paas:write", "Read and write", "Deploy, scale and change config. Can't delete apps or data, or restore backups."),
               3: ("paas:admin", "Full access", "Everything, including deleting apps and data and restoring backups.")}
+def access_html(max_level, selected, client, shown):
+    """One summary per offered level; only the selected one shows. Radios switch it live (JS, with a CSS :has fallback)."""
+    out = []
+    for lv in range(1, max_level + 1):
+        sc = shown if lv == max_level else LEVEL_NAMES[lv]
+        out.append(f'<span class="acc" data-level="{lv}"{"" if lv == selected else " hidden"}>'
+                   + SCOPE_TEXT[lv].format(client=html.escape(client), scope=html.escape(sc)) + ' </span>')
+    js = ('<script>document.addEventListener("change",function(e){if(e.target.name!="level")return;'
+          'document.querySelectorAll(".acc").forEach(function(s){s.hidden=s.dataset.level!=e.target.value})})</script>') if max_level > 1 else ""
+    return "".join(out) + js
 def choice_html(max_level, selected):
     """Radio buttons for access levels up to what the client asked for (you can only narrow a request, never widen it)."""
     if max_level < 2: return ""
@@ -506,12 +516,13 @@ async def login_page(request: Request):
     scopes = params.scopes or ["paas"]; lv = level(scopes) or 3
     unspecified = not params.scopes or "paas" in params.scopes   # no scope, or the pre-scopes catch-all
     shown = next((x for x in scopes if LEVELS.get(x) == lv), LEVEL_NAMES[lv])
-    access = SCOPE_TEXT[lv].format(client=html.escape(name), scope=html.escape(shown))
+    access = ""
     if unspecified: badge += NO_SCOPE_WARN.format(client=html.escape(name))
     try: picked = int(form.get("level") or lv) if form else lv
     except ValueError: picked = lv
     picked = min(max(picked, 1), lv)
     choice = choice_html(lv, picked)
+    access = access_html(lv, picked, name, shown)
     render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(name), access=access, badge=badge, target=html.escape(target), css=CSS, mark=MARK, www=html.escape(WWW), ttl=PAGE_TTL_MIN, choice=choice,
         email=html.escape((form.get("email") or "").strip()[:254]) if form else "", key_open=" open" if form and form.get("api_key") else "",
         req=html.escape(rid), err=f'<p class="err" role="alert">{html.escape(err)}</p>' if err else ""), headers=CONSENT_HEADERS)
