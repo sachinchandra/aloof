@@ -97,7 +97,7 @@ aloof registry login registry.example.com -u ci -a my-app  # per-app override</p
 aloof deploy my-app --git git@github.com:me/private.git --ref main
 aloof git token gitlab.com -a my-app             # read-only token (GitHub: x-access-token, GitLab: oauth2, Bitbucket: x-token-auth)
 aloof deploy my-app --git https://gitlab.com/me/private.git</pre>
-<p>This works with any git host over SSH or HTTPS. Tokens are passed as an HTTP header through the environment, never on a command line or in <code>.git/config</code>. Submodules are fetched with the same credentials. On GitHub you can use the <a href="/docs/github">GitHub App</a> instead, which needs no long-lived keys.</p>""",
+<p>This works with any git host over SSH or HTTPS. Tokens are passed as an HTTP header through the environment, never on a command line or in <code>.git/config</code>. Submodules are fetched with the same credentials. On GitHub you can use the <a href="/docs/github">GitHub App</a> instead, which needs no long-lived keys. Deploy keys only work over SSH (<code>git@host:owner/repo.git</code>). If you add a deploy key but deploy an <code>https://</code> URL on GitHub, GitLab or Bitbucket, Aloof fetches the matching <code>git@</code> URL with your key automatically (unless an HTTPS token is also set). On other hosts, use the <code>git@</code> URL.</p>""",
 "github": f"""<h1>GitHub App: push-to-deploy &amp; previews</h1><pre>aloof github install                  # opens GitHub; pick the repos
 aloof github repos
 aloof github link my-app me/my-repo --branch main</pre>

@@ -82,6 +82,13 @@ def pull(app, image, log):
     raise RuntimeError(f"pull {image} failed: {err}{hint}")
 # ---------------- git ----------------
 GIT_USERS = {"github.com": "x-access-token", "gitlab.com": "oauth2", "bitbucket.org": "x-token-auth"}
+SSH_REWRITE_HOSTS = ("github.com", "gitlab.com", "bitbucket.org")
+def ssh_url(url):
+    """https://github.com/owner/repo(.git) -> git@github.com:owner/repo.git for hosts whose SSH URL form is known; else None."""
+    u = urllib.parse.urlsplit(url); host = (u.hostname or "").lower(); path = u.path.strip("/")
+    if u.scheme != "https" or host not in SSH_REWRITE_HOSTS or u.port or u.query or u.fragment: return None
+    if not re.fullmatch(r"[\w.-]+(/[\w.-]+)+", path): return None
+    return f"git@{host}:{path.removesuffix('.git')}.git"
 def git_host(url):
     m = re.match(r"^[\w.-]+@([\w.-]+):", url)
     if m: return m.group(1).lower()
@@ -144,7 +151,11 @@ def clone(app, source, dest, log, account_id=None):
     """Shallow-fetch source.git at source.ref (branch, tag or commit; default HEAD) into dest. Returns the commit sha."""
     url = source["git"]; ref = source.get("ref") or "HEAD"; account_id = account_id or _app_account(app)
     if not re.match(r"^[\w./@^~+-]+$", ref) or ref.startswith("-"): raise ValueError("bad git ref")
-    mode = _check_url(url); host = git_host(url)
+    mode = _check_url(url); host = git_host(url); rewritten = None
+    if mode == "https" and not source.get("github_installation") and not _git_cred(account_id, app, host, "token") \
+            and _git_cred(account_id, app, host, "ssh") and ssh_url(url):
+        rewritten = url; url = ssh_url(url); mode = "ssh"   # deploy key added but https URL kept: use the key
+        log(f"using the deploy key for {host}: fetching {url} instead of {rewritten}")
     tmp = tempfile.mkdtemp(prefix="aloof-git-"); os.chmod(tmp, 0o700)
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": tmp, "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1"}
     pre = ["git", "-c", "protocol.file.allow=never", "-c", "core.hooksPath=/dev/null"]; how = "public"
@@ -176,7 +187,13 @@ def clone(app, source, dest, log, account_id=None):
         shutil.rmtree(os.path.join(dest, ".git"), ignore_errors=True)
         log(f"cloned {url}@{ref} -> {sha[:12]} ({how})"); return sha
     except RuntimeError as e:
-        hint = "" if how != "public" else f" (private repo? add access: aloof git deploy-key {host} --app {app}  or  aloof git token {host} --app {app})"
+        if how != "public": hint = ""
+        elif mode == "https" and _git_cred(account_id, app, host, "ssh"):
+            hint = (f" (you added a deploy key for {host}, but deploy keys only work over SSH: use the git@ URL, e.g. "
+                    f"git@{host}:owner/repo.git, or add an HTTPS token: aloof git token {host} -a {app})")
+        else:
+            hint = (f" (private repo? add a deploy key: aloof git deploy-key {host} -a {app}, add it to the repo, and deploy the "
+                    f"git@{host}:owner/repo.git URL; or add an HTTPS token: aloof git token {host} -a {app})")
         raise RuntimeError(f"git fetch failed: {e}{hint}")
     finally: shutil.rmtree(tmp, ignore_errors=True)
 # ---------------- uploads (aloof deploy from a local dir) ----------------
