@@ -492,6 +492,8 @@ def destroy(name):
         for o in q("select * from instances where app=? and status!='stopped'", (name,)): _stop(o)
         _sweep_containers(name)
     q("update apps set status='destroyed' where name=?", (name,)); event(name, "destroyed")
+    try: remove_app_networks(name)
+    except Exception as e: event(name, f"network cleanup: {e}")
     try: from . import selfheal; selfheal.forget(name)
     except Exception: pass
 def _sweep_containers(name):
@@ -514,6 +516,49 @@ def reap_destroyed():
             if r and r["status"] == "destroyed":
                 for o in q("select * from instances where app=? and status!='stopped'", (app,)): _stop(o)
                 _sweep_containers(app)
+    try: prune_networks()
+    except Exception as e: event("system", f"network prune: {e}")
+NET_PRUNE_AGE = 600
+def _net_owner_live(n):
+    """True if an aloof-* network still belongs to something live: aloof-acct-<id> -> any non-destroyed app of that account;
+    aloof-pg-<db> -> that database exists and its app isn't destroyed; anything else -> a non-destroyed app listing it in spec.networks."""
+    if n.startswith("aloof-acct-"):
+        aid = n[len("aloof-acct-"):]
+        return bool(aid.isdigit() and q("select 1 from apps where account_id=? and status!='destroyed' limit 1", (int(aid),), one=True))
+    if n.startswith("aloof-pg-"):
+        db = q("select app from pg_dbs where name=?", (n[len("aloof-pg-"):],), one=True)
+        if db and q("select 1 from apps where name=? and status!='destroyed'", (db["app"],), one=True): return True
+    for r in q("select spec from apps where status!='destroyed' and spec like ?", (f"%{n}%",)):
+        try:
+            if n in (load_spec(r["spec"]).get("networks") or []): return True
+        except Exception: return True   # unreadable spec: be safe
+    return False
+def remove_app_networks(name, spec=None):
+    """After destroy: drop this app's networks that are now empty and no longer used by any live app/db (the shared
+    aloof-acct-<id> network stays while the account has other live apps)."""
+    if spec is None:
+        r = q("select spec from apps where name=?", (name,), one=True)
+        spec = load_spec(r["spec"]) if r else {}
+    gone = []
+    for d in get_drivers().values():
+        f = getattr(d, "remove_network_if_empty", None)
+        if not f: continue
+        for n in spec.get("networks") or []:
+            if n.startswith("aloof-") and not _net_owner_live(n) and f(n): gone.append(n)
+    if gone: event(name, f"removed network(s) {gone}")
+    return gone
+def prune_networks(now=None):
+    """Reaper: remove aloof-* networks we created that have no containers, aren't owned by a live app/db, and are older than
+    NET_PRUNE_AGE. Never touches a network with containers or a live owner."""
+    now = now or time.time(); gone = []
+    for d in get_drivers().values():
+        ls, rm = getattr(d, "aloof_networks", None), getattr(d, "remove_network_if_empty", None)
+        if not (ls and rm): continue
+        for n, ts in ls():
+            if ts is None or now - ts < NET_PRUNE_AGE or _net_owner_live(n): continue
+            if rm(n): gone.append(n)
+    if gone: event("system", f"pruned {len(gone)} empty network(s): {gone[:20]}")
+    return gone
 def destroy_app(name, with_volumes=False):
     """User-facing delete: destroy the app, then remove what its template created (volumes, Postgres). Volumes the user
     attached separately are detached and kept unless with_volumes. Returns what was deleted and kept."""

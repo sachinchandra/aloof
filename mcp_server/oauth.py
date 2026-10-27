@@ -273,6 +273,10 @@ def delete_client(client_id):
         ks = [k for k, v in _rows(kind) if _owner(v) == client_id]
         for k in ks: _db.kv_del("oauth:" + kind, k)
         n[kind] = len(ks)
+    try:   # deploy tokens minted through this connection (tagged via X-Aloof-Client) go with it
+        n["deploy_tokens"] = len(_db.q("select id from deploy_tokens where oauth_client=?", (client_id,)))
+        _db.q("delete from deploy_tokens where oauth_client=?", (client_id,))
+    except Exception: n["deploy_tokens"] = 0
     n["client"] = 1 if _db.kv_get("oauth:client", client_id) is not None else 0
     _db.kv_del("oauth:client", client_id); return n
 def sweep_unused_clients(now=None, force=False):

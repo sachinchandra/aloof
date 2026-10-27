@@ -1,6 +1,12 @@
 import docker, subprocess, shutil, os, re, time
 from .base import Driver, Instance
 from ..plans import PLANS
+def _docker_ts(v):
+    """Docker's RFC3339 with nanoseconds ('2026-10-27T03:43:35.123456789Z' / '+00:00') -> epoch, or None."""
+    import re as _re, datetime as _dt
+    m = _re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.\d+)?(Z|[+-]\d\d:\d\d)?$", v or "")
+    if not m: return None
+    return _dt.datetime.fromisoformat(m.group(1) + ("+00:00" if m.group(2) in (None, "Z") else m.group(2))).timestamp()
 class LocalDockerDriver(Driver):
     name = "local-docker"; regions = ["local"]
     def __init__(self): self._c = None; self.err = None; self._connect()
@@ -119,6 +125,25 @@ class LocalDockerDriver(Driver):
     def remove_network(self, n):
         try: self.c.networks.get(n).remove()
         except Exception: pass
+    def remove_network_if_empty(self, n):
+        """Remove one of our networks only when no container (running or stopped) is attached. Returns True if removed."""
+        try:
+            net = self.c.networks.get(n); net.reload()
+            if not (net.attrs.get("Labels") or {}).get("paas.net") or net.attrs.get("Containers"): return False
+            if any(n in ((c.attrs.get("NetworkSettings") or {}).get("Networks") or {}) for c in self.c.containers.list(all=True)): return False
+            net.remove(); return True
+        except docker.errors.NotFound: return False
+        except docker.errors.APIError: return False   # in use (docker refuses) or racing a new container
+    def aloof_networks(self):
+        """[(name, created_epoch)] for networks we created (label paas.net, name aloof-*)."""
+        import datetime
+        out = []
+        for net in self.c.networks.list(filters={"label": "paas.net"}):
+            n = net.name
+            if not n.startswith("aloof-"): continue
+            ts = _docker_ts(net.attrs.get("Created"))
+            out.append((n, ts))
+        return out
     def remove_image(self, ref):
         if ref.startswith("paas/"): self.c.images.remove(ref, noprune=False)
     # ---- exec / console ----

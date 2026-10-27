@@ -93,8 +93,12 @@ def pg_destroy(name, keep_backups=False):
     if q("select 1 from volumes where name=?", (vol,), one=True): engine.delete_volume(vol)
     if not keep_backups:
         for r in q("select * from archives where kind='pg' and owner=?", (name,)): delete_archive(r)
-    try: _local().remove_network(pg_net(name))
-    except Exception: pass
+    q("delete from pg_dbs where name=?", (name,))   # first, so the network no longer counts as owned
+    for d in engine.get_drivers().values():   # the pg container is gone now; drop its network if nothing else is on it
+        f = getattr(d, "remove_network_if_empty", None)
+        if f:
+            try: f(pg_net(name))
+            except Exception: pass
     q("delete from pg_dbs where name=?", (name,))
 def pg_backup(name, note="manual"):
     db = q("select * from pg_dbs where name=?", (name,), one=True); i, d = _inst(db["app"])
