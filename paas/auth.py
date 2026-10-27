@@ -12,6 +12,7 @@ OUTBOX = os.environ.get("PAAS_OUTBOX") or os.path.join(os.path.dirname(__file__)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 log = logging.getLogger("paas.mail")
 class MailError(RuntimeError): pass
+class MailBounce(MailError): pass   # the provider rejected this recipient (not an outage on our side)
 def _production(): return (E("PAAS_PUBLIC_API_URL") or "").startswith("https://") and E("PAAS_DEV_OUTBOX") != "1"
 def send_mail(to, subject, body, html=None, headers=None):
     """SMTP when SMTP_HOST is set. Without it: dev appends to the outbox; production refuses (the outbox would hold live
@@ -25,6 +26,9 @@ def send_mail(to, subject, body, html=None, headers=None):
                 if E("SMTP_STARTTLS", "1") == "1": s.starttls(context=ssl.create_default_context())
                 if E("SMTP_USER"): s.login(E("SMTP_USER"), E("SMTP_PASSWORD", ""))
                 s.send_message(msg)
+        except (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError) as e:
+            log.warning("smtp rejected recipient to=%s subject=%r: %s", to, subject, type(e).__name__)
+            raise MailBounce("recipient rejected") from e
         except (smtplib.SMTPException, OSError) as e:
             log.error("smtp send failed to=%s subject=%r host=%s: %s: %s", to, subject, E("SMTP_HOST"), type(e).__name__, e)
             raise MailError("email delivery failed") from e
@@ -66,6 +70,8 @@ def start_magic(email, base_url, attribution=None, pending=None):
     if attribution:
         if len(_magic_attr) > 5000: _magic_attr.clear()
         _magic_attr[sha256(tok)] = attribution
+    if engine.is_test_email(email) or (q("select is_test from accounts where email=?", (email,), one=True) or {}).get("is_test"):
+        return True  # reserved test domains / test accounts never get mail (same generic answer)
     from . import emailkit; subj, txt, htm = emailkit.magic_link(f"{base_url.rstrip('/')}/auth/magic?token={tok}", MAGIC_TTL // 60)
     send_mail(email, subj, txt, html=htm)
     return True

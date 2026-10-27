@@ -69,6 +69,6 @@ def test_dashboard_signin_methods_card():
     assert "id=s-ids" in d and "aria-busy=true" in d          # loading state
     assert "No accounts connected yet" in d                    # empty
     assert "Couldn\\'t load your sign-in methods" in d          # error
-    assert "/start?next=%2Fdashboard%23account" in d and "p.enabled?" in d
+    assert "/start?intent=connect&next=%2Fdashboard%23account" in d and "p.enabled?" in d
     assert "ask(''" in d.split("async function identUnlink")[1][:400]   # confirm before DELETE
     assert "#EA4335" in d and "ID_ORDER=['github','google','x']" in d

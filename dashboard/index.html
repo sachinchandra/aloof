@@ -342,7 +342,7 @@ async function idents(){const card=$('s-ids'),box=$('ids_box');if(!box)return;bo
  box.innerHTML=(nc?'':'<p class=muted style="margin:0 0 12px;font-size:14px">No accounts connected yet. You sign in with your email. Connect one below to sign in with one click.</p>')+'<ul class=idl>'+show.map(p=>{const i=have[p.id],who=i?[i.name&&i.name!==i.email?i.name:'',i.email||''].filter(Boolean).join(' · '):'';
   return `<li class=idr><span class="idm p-${esc(p.id)}">${ID_MK[p.id]}</span><span class=idt><b>${esc(p.label)}</b><span class="muted" style="display:block">${i?(esc(who)||'Connected'):'Not connected'}</span></span>`
   +(i?`<span class="idst on">Connected ${day(i.connected)}</span><button class="btn danger sm" data-p="${esc(p.id)}" data-n="${esc(p.label)}" aria-label="Disconnect ${esc(p.label)}" onclick="identUnlink(this,this.dataset.p,this.dataset.n)">Disconnect</button>`
-     :(p.enabled?`<a class="btn ghost sm" href="/auth/${esc(p.id)}/start?next=%2Fdashboard%23account" aria-label="Connect ${esc(p.label)}">Connect</a>`:''))+'</li>'}).join('')+'</ul>'
+     :(p.enabled?`<a class="btn ghost sm" href="/auth/${esc(p.id)}/start?intent=connect&next=%2Fdashboard%23account" aria-label="Connect ${esc(p.label)}">Connect</a>`:''))+'</li>'}).join('')+'</ul>'
   +'<p class="muted idnote">Email sign-in links always work, so disconnecting can\'t lock you out.</p>'}
 async function identUnlink(btn,p,n){const pw=$('sec_methods')&&/^Password/.test($('sec_methods').textContent);
  if(!await ask('',{title:'Disconnect '+n+'?',ok:'Disconnect',danger:1,html:'<p>You won\'t be able to sign in with '+esc(n)+' until you connect it again.</p><p class=muted>You can still sign in with an email link'+(pw?' or your password':'')+'.</p>'}))return;

@@ -572,6 +572,8 @@ def auth_magic(m: MagicReq, request: Request):
     _rate_check(("ip:" + _ipk(request), "email:" + (m.email or "").strip().lower()))
     try: auth.start_magic(m.email, PUBLIC_API_URL if SECURE_COOKIES else str(request.base_url), attribution=analytics.attribution(m))
     except ValueError as e: raise HTTPException(400, str(e))
+    except auth.MailBounce as e:   # provider bounce/reject: same generic answer, so it can't be used to probe addresses
+        logging.getLogger("aloof.auth").warning("magic link send failed: %s", type(e).__name__)
     except auth.MailError: raise HTTPException(503, "email sign-in is temporarily unavailable; log in with your password or try again later")
     return {"ok": True, "detail": "If the address is valid, a sign-in link is on its way (valid 15 minutes)."}
 @app.get("/auth/magic")
@@ -605,7 +607,7 @@ def _cookie_kw(age): return {"max_age": age, "httponly": True, "samesite": "lax"
 @app.get("/v1/auth/providers")
 def auth_providers(): return {"providers": oauth_login.providers(), "magic_link": True}
 @app.get("/auth/{p}/start")
-def social_start(p: str, request: Request, next: str | None = None):
+def social_start(p: str, request: Request, next: str | None = None, intent: str | None = None):
     nxt = auth.safe_next(next, "/dashboard")
     if p not in oauth_login.PROVIDERS: return _auth_err("provider_disabled", p[:20], nxt)
     base = oauth_login.base_url(); bh = _up.urlsplit(base).netloc
@@ -614,7 +616,10 @@ def social_start(p: str, request: Request, next: str | None = None):
     try: _rate_check(("oauth-ip:" + _ipk(request),))
     except HTTPException: return _auth_err("rate_limited", p, nxt)
     cur = auth.session_account(request.cookies.get(auth.COOKIE))
-    try: url, st = oauth_login.start(p, nxt, link_account=cur["id"] if cur else None)
+    # Connect only when explicitly asked from the dashboard (intent=connect) by a signed-in user; from the login/signup page it is
+    # always a plain sign-in that replaces whatever session the browser had, so the account you land in is the provider's.
+    if intent == "connect" and not cur: return _auth_err("state_invalid", p, nxt)
+    try: url, st = oauth_login.start(p, nxt, link_account=cur["id"] if (cur and intent == "connect") else None)
     except oauth_login.AuthError as e: return _auth_err(e.code, p, nxt)
     r = RedirectResponse(url, 303); r.set_cookie(oauth_login.STATE_COOKIE, st, **_cookie_kw(oauth_login.STATE_TTL)); return r
 @app.get("/auth/{p}/callback")
@@ -641,7 +646,7 @@ def social_callback(p: str, request: Request, code: str | None = None, state: st
         r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); r.set_cookie("aloof_oauth_pending", pid, **_cookie_kw(oauth_login.PENDING_TTL)); return r
     if created: analytics.capture(a["id"], "signup_completed", {"method": p})
     else: analytics.identify(a["id"])
-    _audit(a["id"], None, "auth.login", p, _ip(request))
+    _audit(a["id"], None, "auth.identity_connect" if s.get("link") else "auth.login", p, _ip(request))
     r = RedirectResponse(nxt, 303); r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/")
     if not s.get("link"): r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r

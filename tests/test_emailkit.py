@@ -33,7 +33,7 @@ def test_magic_link_content():
     for s in (txt, htm): assert "15 minutes" in s and "works once" in s and "didn't ask" in s
 def test_magic_link_sent_through_outbox(monkeypatch):
     sent = []; monkeypatch.setattr(auth, "send_mail", lambda to, subj, body, html=None, headers=None: sent.append((to, subj, body, html)))
-    auth.start_magic("someone@example.com", "http://api.aloof.test")
+    auth.start_magic("someone@aloof-mail.dev", "http://api.aloof.test")
     to, subj, body, html = sent[0]
     assert subj == "Your Aloof sign-in link" and "/auth/magic?token=ml_" in body and html and "/auth/magic?token=ml_" in html
 def test_lowbal_mail_tuple():
