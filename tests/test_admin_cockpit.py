@@ -68,3 +68,26 @@ def test_stage1_page_states_and_safety():
     assert "confirm(" not in h and "alert(" not in h and "showModal()" in h and "Undo" in h
     assert 'aria-live=polite' in h and "Switch to light theme" in h and "stuck in “deploying” for over 15 minutes" in h
     assert "onclick=\"wlDel(${r.id},'${E(r.email)}')" not in h   # email no longer interpolated into JS
+
+def test_stage2_waitlist_retry_sweep_and_owner_send(monkeypatch):
+    from paas import waitlist as W, auth
+    sent = []; monkeypatch.setattr(auth, "send_mail", lambda to, *a, **k: sent.append(to) or "smtp")
+    now = time.time(); n = time.time_ns(); ids = {}
+    for tag, src, age in (("lost", "landing", 3600), ("fresh", "landing", 60), ("old", "landing", 5 * 86400), ("legacy", "legacy", 3600)):
+        e = f"wl{tag}{n}@realco.io"
+        q("insert into waitlist(kind,email,item,source,created,updated,is_test) values(?,?,?,?,?,?,0)", ("gpu", e, f"gpu-h100-{n}", src, now - age, now - age))
+        ids[tag] = q("select id from waitlist where email=?", (e,), one=True)["id"]
+    try:
+        W.retry_unsent(now)
+        st = {t: q("select mail_user from waitlist where id=?", (i,), one=True)["mail_user"] for t, i in ids.items()}
+        assert st["lost"].startswith("sent") and st["fresh"] is None and st["old"] is None and st["legacy"] is None
+        assert [x for x in sent if "wl" in x] == [f"wllost{n}@realco.io"]
+        o = owner(); other = _reg(f"z{time.time_ns()}@x.com"); u = f"/v1/admin/waitlist/{ids['legacy']}/send"
+        assert c.post(u, json={"confirm": "x"}).status_code == 401 and other.post(u, json={"confirm": "x"}, headers=CS).status_code == 401
+        assert o.post(u, json={"confirm": "wrong@x.com"}, headers=CS).status_code == 400
+        assert o.post(u, json={"confirm": f"wllegacy{n}@realco.io"}, headers=CS).json()["mail_user"].startswith("sent")
+        assert o.post(u, json={"confirm": f"wllegacy{n}@realco.io"}, headers=CS).status_code == 409
+        assert q("select 1 from audit where action='admin.waitlist_send' and detail like ?", (f"%wllegacy{n}%",), one=True)
+    finally:
+        for i in ids.values(): q("delete from waitlist where id=?", (i,))
+    h = html(); assert "never sent" in h and "wlSend(" in h and "{type:e}" in h

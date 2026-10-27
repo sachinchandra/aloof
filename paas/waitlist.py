@@ -173,6 +173,28 @@ def admin_flag(entry_id: int, b: TestFlag, _=Depends(require_admin)):
     if not q("select 1 from waitlist where id=?", (entry_id,), one=True): raise HTTPException(404, "no such entry")
     q("update waitlist set is_test=? where id=?", (int(b.is_test), entry_id)); return {"ok": True}
 
+class SendReq(BaseModel): confirm: str
+@R.post("/v1/admin/waitlist/{entry_id}/send")
+def admin_send(entry_id: int, b: SendReq, ctx=Depends(require_admin)):
+    """Owner-triggered (typed confirmation = the entry's email): send the confirmation + admin note for an entry that never got one."""
+    r = q("select * from waitlist where id=?", (entry_id,), one=True)
+    if not r: raise HTTPException(404, "no such entry")
+    if (b.confirm or "").strip().lower() != r["email"].lower(): raise HTTPException(400, "type the entry's email address to confirm")
+    if (r["mail_user"] or "").startswith("sent"): raise HTTPException(409, "the confirmation was already sent")
+    send_emails(entry_id)
+    from .db import audit; audit((ctx.get("account") or {}).get("id"), None, "admin.waitlist_send", f"id={entry_id} kind={r['kind']} email={r['email']}")
+    return {"ok": True, "mail_user": q("select mail_user from waitlist where id=?", (entry_id,), one=True)["mail_user"]}
+
+RETRY_AFTER, RETRY_WINDOW = 10 * 60, 2 * 86400
+def retry_unsent(now=None):
+    """Root cause of rows stuck at 'pending': send_emails runs as a FastAPI background task, so a restart between the response and
+    the task loses it and nothing ever retries. This sweep sends for rows that are 10 min to 2 days old with no outcome recorded.
+    Rows migrated from the old kv store (source='legacy') are never auto-sent: they signed up before confirmations existed."""
+    now = now or time.time(); n = 0
+    for r in q("select id from waitlist where mail_user is null and coalesce(source,'')!='legacy' and created<? and created>?", (now - RETRY_AFTER, now - RETRY_WINDOW)):
+        _record(r["id"], "mail_user", "sending: retry"); send_emails(r["id"]); n += 1
+    return n
+
 def migrate_kv():
     """One-time move of the old kv-stored entries (gpu_waitlist, region_waitlist, design_partner) into the waitlist table."""
     for kind, kk in (("gpu", "gpu_waitlist"), ("region", "region_waitlist"), ("design_partner", "design_partner")):
