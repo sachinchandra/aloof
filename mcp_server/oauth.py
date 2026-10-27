@@ -217,29 +217,12 @@ _reg_hits, _reg_lock, _sweep_at = {}, threading.Lock(), [0.0]
 def _clean_name(n):
     n = re.sub(r"[\x00-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069]", "", str(n or "")).strip()
     return n[:80] or None
-def client_ip(request):
-    """Caddy appends the real peer to X-Forwarded-For (and drops client-supplied values from untrusted peers); only trust it from loopback."""
-    peer = request.client.host if request.client else ""
-    xff = request.headers.get("x-forwarded-for", "")
-    if xff and _trusted_proxy(peer): return xff.split(",")[-1].strip()
-    return peer or "unknown"
-def _trusted_proxy(peer):
-    """The local Caddy reaches us over loopback or the edge's own public address (port 8001 is firewalled from outside)."""
-    if peer in ("localhost", "testclient"): return peer == "localhost"
-    try: a = ipaddress.ip_address(peer)
-    except ValueError: return False
-    if a.is_loopback: return True
-    for e in _csv("PAAS_MCP_TRUSTED_PROXIES", "") + _csv("PAAS_EDGE_IPS", ""):
-        try:
-            if a in ipaddress.ip_network(e if "/" in e else (f"{e}/64" if ":" in e else f"{e}/32"), strict=False): return True
-        except ValueError: continue
-    return False
-def _rate_key(ip):
-    try:
-        a = ipaddress.ip_address(ip)
-        m = getattr(a, "ipv4_mapped", None)
-        return str(m) if m else str(ipaddress.ip_network(f"{a}/64", strict=False)) if a.version == 6 else str(a)
-    except ValueError: return ip
+try: from paas.netaddr import client_ip as _cip, rate_key as _rate_key, trusted_proxy as _tp
+except ImportError:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); from paas.netaddr import client_ip as _cip, rate_key as _rate_key, trusted_proxy as _tp
+_MCP_PROXY_ENV = ("PAAS_MCP_TRUSTED_PROXIES", "PAAS_EDGE_IPS")
+def _trusted_proxy(peer): return _tp(peer, _MCP_PROXY_ENV)
+def client_ip(request): return _cip(request, _MCP_PROXY_ENV)
 _fallback_warned = [False]
 def reg_rate_ok(ip, now=None):
     """Per-IP (/64 for IPv6) /register limit: one counter row per (address, hour window) in the shared DB, bumped with a single

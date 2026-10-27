@@ -550,15 +550,9 @@ def auth_register(c: RegisterReq):
     return _login_response(a, {"ok": True, "email": a["email"], "api_key": a["api_key"]})
 # Soft login rate limit (in-memory, per process): LOGIN_LIMIT attempts per LOGIN_WINDOW s per client IP and per email -> 429 + Retry-After.
 LOGIN_LIMIT = int(os.environ.get("PAAS_LOGIN_LIMIT", "10")); LOGIN_WINDOW = 60.0
-TRUSTED_PROXIES = {x.strip() for x in os.environ.get("PAAS_TRUSTED_PROXIES", "127.0.0.1,::1").split(",") if x.strip()}
+from .netaddr import client_ip, rate_key
 _login_hits = {}
-def client_ip(request: Request):
-    """Peer address; X-Forwarded-For is honoured only when the peer is our own proxy (Caddy appends the real client last)."""
-    peer = request.client.host if request.client else ""
-    if peer in TRUSTED_PROXIES:
-        xff = [x.strip() for x in request.headers.get("x-forwarded-for", "").split(",") if x.strip()]
-        if xff: return xff[-1]
-    return peer
+def _ipk(request): return rate_key(client_ip(request))   # IPv6 bucketed per /64 so rotating addresses inside one allocation share a limit
 def _rate_check(keys, now=None):
     now = now or time.time(); retry = 0
     if len(_login_hits) > 50000: _login_hits.clear()   # memory bound; worst case resets the window
@@ -569,12 +563,13 @@ def _rate_check(keys, now=None):
     for k in keys: _login_hits[k].append(now)
 @app.post("/v1/auth/login")
 def auth_login(c: Creds, request: Request):
-    _rate_check(("ip:" + client_ip(request), "email:" + (c.email or "").strip().lower()))
+    _rate_check(("ip:" + _ipk(request), "email:" + (c.email or "").strip().lower()))
     try: a = auth.login(c.email, c.password)
     except PermissionError as e: raise HTTPException(401, str(e))
     analytics.identify(a["id"]); return _login_response(a)
 @app.post("/v1/auth/magic")
 def auth_magic(m: MagicReq, request: Request):
+    _rate_check(("ip:" + _ipk(request), "email:" + (m.email or "").strip().lower()))
     try: auth.start_magic(m.email, PUBLIC_API_URL if SECURE_COOKIES else str(request.base_url), attribution=analytics.attribution(m))
     except ValueError as e: raise HTTPException(400, str(e))
     except auth.MailError: raise HTTPException(503, "email sign-in is temporarily unavailable; log in with your password or try again later")
@@ -616,7 +611,7 @@ def social_start(p: str, request: Request, next: str | None = None):
     base = oauth_login.base_url(); bh = _up.urlsplit(base).netloc
     if SECURE_COOKIES and bh and request.url.netloc != bh:   # one canonical host, so the state cookie and the session land where the callback is
         return RedirectResponse(f"{base}/auth/{p}/start?" + _up.urlencode({"next": nxt}), 303)
-    try: _rate_check(("oauth-ip:" + client_ip(request),))
+    try: _rate_check(("oauth-ip:" + _ipk(request),))
     except HTTPException: return _auth_err("rate_limited", p, nxt)
     cur = auth.session_account(request.cookies.get(auth.COOKIE))
     try: url, st = oauth_login.start(p, nxt, link_account=cur["id"] if cur else None)
@@ -664,7 +659,7 @@ def x_email_submit(b: XEmailReq, request: Request):
     pid = request.cookies.get("aloof_oauth_pending")
     if not oauth_login.pending(pid): raise HTTPException(400, "Your X sign-in expired. Start again with Sign in with X.")
     em = (b.email or "").strip().lower()
-    _rate_check(("ip:" + client_ip(request), "email:" + em))
+    _rate_check(("ip:" + _ipk(request), "email:" + em))
     try: auth.start_magic(em, oauth_login.base_url() if SECURE_COOKIES else str(request.base_url), pending=pid)
     except ValueError: raise HTTPException(400, "That doesn't look like an email address.")
     except auth.MailError: raise HTTPException(503, "Email is temporarily unavailable; try again shortly.")
@@ -923,7 +918,7 @@ def dash(request: Request):
 # ---------------- Fly parity: releases/rollback, managed Postgres, snapshots, exec/console, log drains/history, audit ----------------
 from . import parity, selfheal
 from .db import audit as _audit
-def _ip(request): return request.client.host if request.client else None
+def _ip(request): return client_ip(request) if request.client else None
 @app.get("/v1/apps/{name}/releases")
 def app_releases(name: str, a=Depends(acct)): own(name, a); return engine.releases(name)
 class SelfHealReq(BaseModel): enabled: bool
@@ -1173,7 +1168,7 @@ def resolve_app(host, path):
     return None, path
 def _sh_record(name, status, t0, request=None, path="/"):
     try:
-        ip = (request.headers.get("x-forwarded-for", "").split(",")[-1].strip() or (request.client.host if request.client else None)) if request else None
+        ip = client_ip(request) if request else None
         selfheal.record(name, status, (time.monotonic() - t0) * 1000, ip, path)   # time to response headers
     except Exception: pass
 @proxy.api_route("/{path:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS","HEAD"])
