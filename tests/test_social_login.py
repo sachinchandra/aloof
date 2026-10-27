@@ -44,3 +44,31 @@ def test_brand_marks_and_ember_focus():
 def test_x_email_page():
     h = site.x_email("Aloof")
     assert "One more step" in h and 'type=email' in h and "X-Aloof-CSRF" in h and 'href="/login"' in h or "href=/login" in h
+
+def test_already_linked_and_email_linked_other_copy():
+    assert "already_linked" in site.AUTH_ERRORS and "different Aloof account" in site.AUTH_ERRORS["already_linked"]
+    m = site.AUTH_ERRORS["email_linked_other"]
+    assert "email sign-in link" in m and "confirms" in m   # fits the unverified-account case too
+    assert "no_email" not in site.AUTH_ERRORS
+
+def test_x_email_handles_statuses_and_restart_keeps_next():
+    h = site.x_email("Aloof")
+    assert "fetch('/auth/x/email'" in h and "location.search" in h
+    for c in ("403:", "400:", "429:", "503:"): assert c in h
+    assert "Start X sign-in again" in h and "'/auth/x/start'+q" in h and "'/login'+q" in h
+    assert "\x00" not in h
+
+def test_x_email_mounted_and_requires_pending():
+    from fastapi.testclient import TestClient
+    from paas.api import app
+    r = TestClient(app).get("/auth/x/email?next=/dashboard", follow_redirects=False)
+    assert r.status_code == 303 and "auth_error=state_invalid" in r.headers["location"]
+
+def test_dashboard_signin_methods_card():
+    d = open(os.path.join(os.path.dirname(__file__), "..", "dashboard", "index.html")).read()
+    assert "id=s-ids" in d and "aria-busy=true" in d          # loading state
+    assert "No accounts connected yet" in d                    # empty
+    assert "Couldn\\'t load your sign-in methods" in d          # error
+    assert "/start?next=%2Fdashboard%23account" in d and "p.enabled?" in d
+    assert "ask(''" in d.split("async function identUnlink")[1][:400]   # confirm before DELETE
+    assert "#EA4335" in d and "ID_ORDER=['github','google','x']" in d

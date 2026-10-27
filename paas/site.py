@@ -577,7 +577,8 @@ SSO_CSS = """<style>
 AUTH_ERRORS = {
  "cancelled": "Sign-in with {p} was cancelled. Pick another option, or try again.",
  "email_unverified": "Your {p} email address isn't verified yet. Verify it with {p}, or use your email below.",
- "email_linked_other": "This email already has an Aloof account that uses a different sign-in method. Sign in that way first, then connect {p} in Settings.",
+ "email_linked_other": "This email already belongs to an Aloof account. Sign in to that account first (an email sign-in link works and also confirms the address), then connect {p} in Settings.",
+ "already_linked": "This {p} account is connected to a different Aloof account, or your account is already connected to another {p} account. Sign in with the account it's connected to, or disconnect {p} in Settings and try again.",
  "state_invalid": "That sign-in link expired or was opened in another browser. Please try again.",
  "provider_error": "{p} didn't respond properly. Please try again in a moment, or use your email below.",
  "rate_limited": "Too many sign-in attempts. Wait a minute and try again.",
@@ -598,16 +599,27 @@ function render(list){var el=document.getElementById('sso'),n=safeNext(),h='';
 window.aloofSso=render;
 fetch('/v1/auth/providers',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():{providers:[]}}).then(function(j){render(j.providers||[])}).catch(function(){render([])})})()</script>""" % (_j.dumps(SSO_MARKS), _j.dumps(AUTH_ERRORS))
 def x_email(brand):
-    """Backend's no_email step for X: ask for an email, Backend sends a verify link. Mount at GET /auth/x/email (Backend)."""
+    """X returned no email: ask for one; Backend (GET/POST /auth/x/email) sends a link to confirm it. Pending state is in an HttpOnly cookie."""
     return page(f"Add your email · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
 <h1>One more step</h1><p class=muted style="margin:0">X didn't share an email address with us. Add one so we can reach you about your account and bills. We'll send a link to confirm it.</p>
 <form id=xf style="margin-top:16px"><div id=msg role=status aria-live=polite class=muted style="min-height:20px;font-size:14px"></div>
 <label for=email>Email</label><input id=email name=email type=email autocomplete=email required placeholder="you@company.com">
 <p style="margin-top:18px"><button class="btn pri" style="width:100%;justify-content:center;min-height:48px" id=lb>Send confirmation link</button></p></form>
-<p class=muted style="text-align:center;font-size:14px"><a href="/login">Use a different sign-in method</a></p></div></div>
-<script>xf.onsubmit=async function(e){{e.preventDefault();if(lb.disabled)return;lb.disabled=true;msg.className='muted';msg.textContent='Sending…';var r,j={{}};
-try{{r=await fetch(location.pathname+location.search,{{method:'POST',headers:{{'Content-Type':'application/json','X-Aloof-CSRF':'1'}},body:JSON.stringify({{email:email.value}})}});try{{j=await r.json()}}catch(_){{}}}}catch(_){{}}
-lb.disabled=false;if(r&&r.ok){{msg.className='ok';msg.textContent=j.detail||('Check '+email.value+' for a link to finish signing in.')}}else{{msg.className='bad';msg.textContent=(j&&j.detail)||'That didn\\'t work. Please try again.'}}}}</script>""", brand)
+<p id=restart class=autherr hidden style="text-align:center"><a id=restartl href="/auth/x/start">Start X sign-in again</a></p>
+<p class=muted style="text-align:center;font-size:14px"><a id=other href="/login">Use a different sign-in method</a></p></div></div>""" + X_EMAIL_JS, brand)
+X_EMAIL_JS = """<script>(function(){var n=new URLSearchParams(location.search).get('next')||'',q='';
+try{if(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&!/[\\\\\\x00-\\x20\\x7f]/.test(n)&&new URL(n,location.origin).origin===location.origin)q='?next='+encodeURIComponent(n)}catch(e){}
+restartl.href='/auth/x/start'+q;other.href='/login'+q;
+var T={403:"Your browser blocked part of the request. Reload this page and try again.",400:"Your X sign-in expired. Start it again below.",
+429:"Too many attempts. Wait a minute, then try again.",503:"We can't send email right now. Please try again in a few minutes."};
+xf.onsubmit=async function(e){e.preventDefault();if(lb.disabled)return;lb.disabled=true;restart.hidden=true;msg.className='muted';msg.textContent='Sending…';var r,j={};
+try{r=await fetch('/auth/x/email',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Aloof-CSRF':'1'},body:JSON.stringify({email:email.value.trim()})});try{j=await r.json()}catch(_){}}catch(_){}
+lb.disabled=false;
+if(r&&r.ok&&j.ok){msg.className='ok';msg.textContent=j.detail||('Check '+email.value+' for a link to finish signing in.');lb.textContent='Send again';return}
+msg.className='bad';var d=typeof j.detail=='string'?j.detail:'';
+if(!r){msg.textContent="Couldn't reach Aloof. Check your connection and try again.";return}
+if(r.status==400){var bad=/email address/i.test(d);msg.textContent=d||T[400];restart.hidden=false;if(!bad)lb.disabled=true;else email.focus();return}
+msg.textContent=d||T[r.status]||"That didn't work. Please try again."}})()</script>"""
 def login(brand):
     return page(f"Log in · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
 <h1 id=title>Welcome back</h1><p class=muted id=subt style="margin:0">Log in to deploy and manage your apps.</p>
