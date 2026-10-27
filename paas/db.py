@@ -146,6 +146,9 @@ alter table releases add column if not exists error TEXT;
 alter table deploy_tokens add column if not exists can_destroy INTEGER default 0;
 update deploy_tokens set can_destroy=1;
 """)
+    ,(17, """
+alter table deploy_tokens add column if not exists oauth_client TEXT;
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

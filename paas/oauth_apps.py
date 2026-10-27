@@ -71,4 +71,8 @@ def revoke(account_id, client_id):
     n = {"access": 0, "refresh": 0, "code": 0}
     for kind, k, v in list(_tokens(account_id, client_id, ("access", "refresh", "code"))):
         kv_del("oauth:" + kind, k); n[kind] += 1
+    # deploy tokens the connection minted (create_deploy_token over MCP) go with it
+    from .db import q
+    rows = q("select id from deploy_tokens where account_id=? and oauth_client=?", (account_id, client_id))
+    q("delete from deploy_tokens where account_id=? and oauth_client=?", (account_id, client_id)); n["deploy_tokens"] = len(rows)
     return n

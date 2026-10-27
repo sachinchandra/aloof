@@ -1,5 +1,5 @@
 [Unit]
-Description=Aloof: block cloud metadata (169.254.169.254) from containers
+Description=Aloof: block cloud metadata (169.254.169.254) for containers and the host
 # Independent of how dockerd is run (supervisord here): re-applies the DOCKER-USER rule every 10 s
 After=network-online.target
 

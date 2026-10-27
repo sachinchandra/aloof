@@ -14,6 +14,10 @@ def validate(spec):
         raise ValueError("GPU plans are coming soon (phase 2). Join the waitlist: POST /v1/waitlist {\"email\": \"...\"}")
     src = spec.get("source") or {}
     if not (src.get("image") or src.get("git") or src.get("path") or src.get("upload")): raise ValueError("source.image, source.git or an uploaded build context required")
+    if src.get("image"):
+        from .creds import check_image
+        if not isinstance(src["image"], str) or re.search(r"\s", src["image"]): raise ValueError("source.image is not a valid image reference")
+        check_image(src["image"])
     pr = spec.get("processes")
     if pr:
         if not isinstance(pr, dict) or not all(re.match(r"^[a-z][a-z0-9]{0,15}$", k) for k in pr): raise ValueError("processes: {group: command}, group names lowercase a-z0-9")
@@ -26,6 +30,7 @@ def validate(spec):
     spec.setdefault("plan","cpu-small"); spec.setdefault("port",8080); spec.setdefault("env",{}); spec.setdefault("instances",1)
     spec["instances"] = max(0, min(int(spec["instances"]), 10))
     spec.setdefault("volumes", []); spec.setdefault("health", {"path": None, "interval": 10, "failures": 3})
+    if isinstance(spec.get("health"), dict): check_health_path(spec["health"].get("path"))
     a = spec.get("autoscale")
     if a:
         a = {"min": 1, "max": 3, "target_concurrency": 10, "cpu_percent": None, "idle_seconds": 60} | {k:v for k,v in a.items() if v is not None}
@@ -59,14 +64,25 @@ def pick_provider(spec):
     if local_ok and plan["kind"] == "cpu" and _plans.pool_allowed(spec["plan"], "local-docker"): return "local-docker"
     if local_ok and plan["kind"] == "gpu" and d["local-docker"].supports_gpu and _plans.pool_allowed(spec["plan"], "local-docker"): return "local-docker"
     raise NoCapacity(f"no {'GPU ' if plan['kind'] == 'gpu' else ''}capacity for {spec['plan']} in region {region} (" + "; ".join(tried or [f"local-docker: refused, under {_plans.MIN_MARGIN:.0%} margin floor"]) + ")")
-import socket, urllib.request, urllib.error
+import socket, urllib.request, urllib.error, urllib.parse
+_HP_BAD = re.compile(r"[@\\\s\x00-\x1f\x7f]")
+def check_health_path(path):
+    """Health check paths are a plain absolute path (+ optional query): no userinfo (@), scheme/host, //, backslash, whitespace or control chars."""
+    if path in (None, ""): return None
+    if not isinstance(path, str) or len(path) > 512 or not path.startswith("/") or path.startswith("//") or "://" in path or _HP_BAD.search(path):
+        raise ValueError("health path must be an absolute path like /healthz (no @, scheme, host, // prefix, backslashes or spaces)")
+    return path
+def health_url(host, port, path):
+    """http://host:port + a checked path, assembled with urlunsplit so the path can never change the host."""
+    p = check_health_path(path) or "/"; pth, _, qs = p.partition("?")
+    return urllib.parse.urlunsplit(("http", f"{host}:{port}", pth, qs, ""))
 def wait_ready(host, port, path=None, timeout=None, tcp=False):
     end = time.time() + (timeout or float(__import__("os").environ.get("PAAS_READY_TIMEOUT", "30")))
     while time.time() < end:
         if tcp:
             try: socket.create_connection((host, port), timeout=2).close(); return True
             except OSError: time.sleep(0.3); continue
-        try: urllib.request.urlopen(f"http://{host}:{port}{path or '/'}", timeout=2); return True
+        try: urllib.request.urlopen(health_url(host, port, path), timeout=2); return True
         except urllib.error.HTTPError as e:
             if path is None or e.code < 500: return True
         except Exception: pass

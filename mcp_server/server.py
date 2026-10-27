@@ -72,6 +72,7 @@ def _h(k):
     k = k or os.environ.get("ALOOF_API_KEY") or os.environ.get("PAAS_API_KEY")
     h = {"Authorization": f"Bearer {k}"} if k else {}
     if k and lv < 3: h["X-Aloof-Scope"] = LEVEL_NAMES.get(lv, "paas:read")   # the API enforces the same limit server-side
+    if k and t is not None and t.client_id and t.client_id != "api-key": h["X-Aloof-Client"] = t.client_id   # ties minted deploy tokens to this connection
     return h
 from mcp.server.fastmcp.exceptions import ToolError
 def _err(code, body):

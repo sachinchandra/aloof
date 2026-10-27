@@ -262,7 +262,10 @@ def no_autoscale(name: str, a=Depends(acct)): own(name, a); return with_url(engi
 class Health(BaseModel): path: str|None="/"; failures: int=3
 @app.put("/v1/apps/{name}/health")
 def health_cfg(name: str, h: Health, a=Depends(acct)):
-    own(name, a); return with_url(engine.update_spec(name, lambda s: s.__setitem__("health", h.model_dump())))
+    own(name, a)
+    try: engine.check_health_path(h.path)
+    except ValueError as e: raise HTTPException(422, str(e))
+    return with_url(engine.update_spec(name, lambda s: s.__setitem__("health", h.model_dump())))
 # ---- volumes ----
 class VolReq(BaseModel): name: str; size_gb: int=1; region: str|None=None
 @app.post("/v1/volumes")
@@ -635,7 +638,7 @@ def connected_app_revoke(client_id: str, request: Request, a=Depends(acct)):
     from . import oauth_apps; n = oauth_apps.revoke(a["id"], client_id)
     if not sum(n.values()): raise HTTPException(404, "no connected app with that client_id")
     _audit(a["id"], None, "oauth.revoke", client_id[:200], _ip(request))
-    return {"ok": True, "tokens_revoked": n["access"] + n["refresh"], "codes_revoked": n["code"]}
+    return {"ok": True, "tokens_revoked": n["access"] + n["refresh"], "codes_revoked": n["code"], "deploy_tokens_revoked": n.get("deploy_tokens", 0)}
 @app.delete("/v1/auth/keys/{kid}")
 def auth_key_revoke(kid: str, request: Request, a=Depends(acct)):
     if kid == "primary": raise HTTPException(400, "the default key can be rotated, not revoked")
@@ -948,6 +951,11 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
     a = _ws_account(ws); ap = engine.get_app(name); await ws.accept()
     if not a or not ap or ap["account_id"] != a["id"] or ap["status"] == "destroyed":
         await ws.close(code=4401, reason="not signed in, or no such app on this account"); return
+    # same checks as REST exec (POST /v1/apps/{name}/exec): app-scoped deploy tokens only reach their app, and the caller needs write
+    if a.get("_token") and not scope_ok(name, a):
+        await ws.close(code=4403, reason=f"this deploy token is scoped to app {a['_scope_app']}"); return
+    if caller_level(ws, a) < 2:
+        await ws.close(code=4403, reason="insufficient scope: the console needs paas:write"); return
     if ap["status"] in ("suspended", "capped"):
         await ws.close(code=4409, reason="app is " + ("suspended (balance at $0): top up to resume" if ap["status"] == "suspended" else "paused at the Free plan's monthly cap")); return
     sel = lambda: q("select * from instances where app=? and status='running'" + (" and id=?" if instance else "") + " order by started", (name, *([instance] if instance else [])), one=True)

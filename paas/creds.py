@@ -15,12 +15,54 @@ def _norm_server(s):
     s = (s or DOCKER_HUB).strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
     if s in ("index.docker.io", "registry-1.docker.io", "index.docker.io/v1", "docker.io"): return DOCKER_HUB
     return s.split("/", 1)[0]
+def _platform_registries():
+    out = set()
+    for v in (os.environ.get("PAAS_REGISTRY", "127.0.0.1:5000"), os.environ.get("PAAS_REGISTRY_NODE")):
+        v = (v or "").strip().lower()
+        if v: out.add(_norm_server(v))
+    return out
+def _bad_ip(ip):
+    if getattr(ip, "ipv4_mapped", None): ip = ip.ipv4_mapped
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified or ip in ipaddress.ip_network("100.64.0.0/10")
+def check_registry_host(server, resolve_required=False):
+    """Registry/image hosts must be public: rejects loopback, private, link-local (incl. 169.254.169.254 metadata), CGNAT, reserved,
+    multicast and unspecified addresses, as literals (any notation: decimal, hex, octal, IPv6, IPv4-mapped) or after DNS resolution.
+    The platform's own registries (PAAS_REGISTRY / PAAS_REGISTRY_NODE) are allowed; their images are ownership-checked elsewhere."""
+    server = _norm_server(server)
+    if server == DOCKER_HUB or os.environ.get("PAAS_ALLOW_PRIVATE_REGISTRY") == "1" or server in _platform_registries(): return server
+    host = server
+    if host.startswith("["): host = host[1:].split("]", 1)[0]
+    elif host.count(":") == 1: host = host.rsplit(":", 1)[0]
+    host = host.rstrip(".")
+    msg = f"registry host {server} is not allowed: images must come from a public registry (private, loopback, link-local and metadata addresses are blocked)"
+    if not host or host == "localhost" or host.endswith(".localhost") or host.endswith(".internal") or host == "metadata": raise ValueError(msg)
+    lit = None
+    try: lit = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            if re.fullmatch(r"[0-9a-fx.]+", host): lit = ipaddress.ip_address(socket.inet_aton(host))   # 2852039166, 0xa9fea9fe, 0251.0376...
+        except OSError: pass
+    if lit is not None:
+        if _bad_ip(lit): raise ValueError(msg)
+        return server
+    try: infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError):
+        if resolve_required: raise ValueError(f"registry host {server} does not resolve")
+        return server
+    for *_, sa in infos:
+        if _bad_ip(ipaddress.ip_address(sa[0].split("%", 1)[0])): raise ValueError(msg)
+    return server
+def check_image(image):
+    first = image.split("/", 1)[0] if "/" in image else ""
+    if first and re.fullmatch(r"(0x[0-9a-f]+|\d{6,})", first.lower()):
+        raise ValueError(f"image {image}: '{first}' looks like a numeric IP address; Docker would treat it as a Docker Hub namespace. Use a registry hostname (e.g. ghcr.io/owner/app)")
+    check_registry_host(registry_of(image)); return image
 def _kind_for(server):
     if re.match(r"^\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com$", server): return "ecr"
     if server == "gcr.io" or server.endswith(".gcr.io") or server.endswith("-docker.pkg.dev"): return "gcr"
     return {"ghcr.io": "ghcr", DOCKER_HUB: "dockerhub"}.get(server, "basic")
 def registry_set(account_id, server, username, password, app=None):
-    server = _norm_server(server)
+    server = check_registry_host(server, resolve_required=True)
     if not username or not password: raise ValueError("username and password/token required")
     kind = _kind_for(server)
     if kind == "gcr" and username == "_json_key":
@@ -69,6 +111,7 @@ def docker_config(app, account_id=None):
 def pull(app, image, log):
     """Always pull with the app owner's credentials, so a private image cached on the host by one account is never usable by another.
     Falls back to the local copy only on transient errors when this same app pulled that image before."""
+    check_image(image)   # re-checked at pull time (DNS may have changed since validate)
     with docker_config(app) as (env, has):
         p = subprocess.run(["docker", "pull", "-q", image], capture_output=True, text=True, env=env, timeout=1800)
     seen = f"{app}|{image}"

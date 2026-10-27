@@ -51,7 +51,7 @@ def test_revoke_codes_only_client_returns_200():
     a = engine.create_account("codes-only@real.dev"); h = {"Authorization": f"Bearer {a['api_key']}"}
     kv_put("oauth:code", "co1", json.dumps({"code": {"client_id": "cid-codes"}, "api_key": "enc:" + crypto.enc(a["api_key"])}), 300)
     r = c.delete("/v1/auth/connected-apps/cid-codes", headers=h)
-    assert r.status_code == 200 and r.json() == {"ok": True, "tokens_revoked": 0, "codes_revoked": 1}
+    assert r.status_code == 200 and r.json() == {"ok": True, "tokens_revoked": 0, "codes_revoked": 1, "deploy_tokens_revoked": 0}
 def test_default_plan_by_tier_and_errors():
     from paas.db import q
     a = engine_acct("plan-free@real.dev"); h = {"Authorization": f"Bearer {a['api_key']}"}

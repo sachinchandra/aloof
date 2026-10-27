@@ -63,7 +63,7 @@ def _health_pass():
         if ep and ep[1] != i["port"]:   # host port remapped after a daemon restart: reconcile routing
             q("update instances set host=?, port=? where id=?", (ep[0], ep[1], i["id"])); i["port"] = ep[1]; event(i["app"], f"instance {i['id']} endpoint reconciled -> {ep[1]}")
         if ok and h.get("path"):
-            try: urllib.request.urlopen(f"http://{i['host']}:{i['port']}{h['path']}", timeout=3)
+            try: urllib.request.urlopen(engine.health_url(i['host'], i['port'], h['path']), timeout=3)
             except urllib.error.HTTPError as e: ok = e.code < 500; why = f"HTTP {e.code}"
             except Exception as e: ok = False; why = f"{type(e).__name__}"
         if ok: _fails.pop(i["id"], None); lb.health_ok(i["id"]); continue
