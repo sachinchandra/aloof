@@ -26,7 +26,7 @@ details.tacc summary{cursor:pointer;font-family:var(--mono);text-transform:upper
 @media(max-width:480px){.top .tl{display:none}}
 #gate{max-width:440px;margin:12vh auto}.exp{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.exp select{width:auto;height:34px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-size:13px}
 .pulse{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:0 0 8px}.pulse .stat b{font-size:24px}.pulse .d{font-size:12px;color:var(--fg3);margin-top:4px;display:block}.pulse .up{color:var(--ok,#4ade80)}.pulse .dn{color:var(--bad,#f87171)}
-dialog.acd{width:min(920px,96vw);max-height:90vh;overflow:auto}.acd .acts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.acd h3{font-size:13px;font-family:var(--mono);text-transform:uppercase;color:var(--fg2);margin:20px 0 8px}
+dialog.acd{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(920px,calc(100% - 24px));max-height:90vh;overflow:auto}dialog.acd::backdrop{background:rgba(0,0,0,.6)}.acd .acts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.acd h3{font-size:13px;font-family:var(--mono);text-transform:uppercase;color:var(--fg2);margin:20px 0 8px}
 .acd dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:14px;margin:0}.acd dt{color:var(--fg3)}.linkish{background:none;border:0;padding:0;color:inherit;font:inherit;text-decoration:underline dotted;cursor:pointer;text-align:left}
 .fld{display:block;margin-top:10px;font-size:13px}.fld input{display:block;width:100%;margin-top:4px}
 </style></head><body>
@@ -54,7 +54,7 @@ dialog.acd{width:min(920px,96vw);max-height:90vh;overflow:auto}.acd .acts{displa
 <h2>Audit log</h2><div class=scroll><table class=tbl id=aud></table></div>
 <details class=tacc id=taccd><summary>Accounts &amp; test accounts (<span id=taccn>…</span>)</summary><p class=muted style="font-size:13px">Accounts flagged <code>is_test</code> are left out of every number above. Flag with <code>POST /v1/admin/accounts/&lt;id&gt;/test</code> or the buttons below.</p><div class=scroll><table class=tbl id=acc></table></div></details>
 </div></main>
-<dialog class=acd id=acd aria-labelledby=act><div style="display:flex;align-items:center;gap:10px"><h2 id=act style="margin:0;flex:1;text-transform:none;font-family:inherit;font-size:18px;color:var(--fg)">Account</h2><button class="btn ghost sm" onclick="$('acd').close()" aria-label="Close">✕</button></div><div id=acb></div></dialog>
+<dialog class=acd id=acd aria-labelledby=act><div style="display:flex;align-items:center;gap:10px"><h2 id=act style="margin:0;flex:1;text-transform:none;font-family:inherit;font-size:18px;color:var(--fg)">Account</h2><button class="btn ghost sm" onclick="$('acd').close()" aria-label="Close account">Close</button></div><div id=acb></div></dialog>
 <dialog class=cf id=cf aria-labelledby=cft><form method=dialog><h3 id=cft></h3><div id=cfb class=muted style="font-size:14px"></div><div id=cfi></div><div class=acts><button class="btn ghost sm" value=cancel>Cancel</button><button class="btn pri sm" id=cfok value=ok>OK</button></div></form></dialog>
 <script>
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
