@@ -2,7 +2,7 @@
 pytest==9.1.1
 respx==0.23.1
 dnslib==0.9.26
-ruff==0.17.0
+ruff==0.17.2
 pip-audit==2.10.1
 
 # Optional: browser/UI testing (requires system dependencies)
