@@ -385,3 +385,26 @@ def test_consent_shows_requested_scope(srv):
     for p in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"):
         r = c.get(p)
         if r.status_code == 200: assert r.json()["scopes_supported"] == ["paas", "paas:read", "paas:write", "paas:admin"], p
+def test_consent_no_scope_warns_and_can_narrow(srv):
+    """doc-bug 40: no scope (or bare 'paas') -> full-access warning + level picker; the user can narrow, never widen."""
+    c, oauth, _ = srv
+    reg = c.post("/register", json={"redirect_uris": [REDIRECT], "client_name": "NoScope", "token_endpoint_auth_method": "none",
+                                    "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]}).json()
+    def page_for(scope):
+        v, ch = pkce(); p = {"response_type": "code", "client_id": reg["client_id"], "redirect_uri": REDIRECT, "code_challenge": ch, "code_challenge_method": "S256", "state": "st"}
+        if scope: p["scope"] = scope
+        r = c.get("/authorize", params=p, follow_redirects=False); return v, c.get(r.headers["location"].replace("https://mcp.aloof.test", "")).text
+    def approve(page, v, level=None):
+        req = re.search(r'name="req" value="([^"]+)"', page).group(1); d = {"req": req, "action": "approve", "api_key": "pk_good"}
+        if level: d["level"] = level
+        loc = c.post("/oauth/login", data=d, follow_redirects=False).headers["location"]; code = re.search(r"code=([^&]+)", loc).group(1)
+        return c.post("/token", data={"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": reg["client_id"], "code_verifier": v}).json()["scope"]
+    v, page = page_for(None)
+    assert "This gives full access" in page and 'value="1"' in page and 'value="3" checked' in page
+    assert approve(page, v) == "paas"                       # default unchanged: existing clients keep working
+    v, page = page_for("paas"); assert "This gives full access" in page; assert approve(page, v, "2") == "paas:write"
+    v, page = page_for(None); assert approve(page, v, "1") == "paas:read"
+    v, page = page_for("paas:admin"); assert "This gives full access" not in page and 'value="3" checked' in page
+    v, page = page_for("paas:write"); assert 'value="3"' not in page and 'value="2" checked' in page
+    assert approve(page, v, "3") == "paas:write"            # can't widen past the request
+    v, page = page_for("paas:read"); assert "Access level" not in page

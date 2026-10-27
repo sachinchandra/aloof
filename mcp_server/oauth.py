@@ -449,6 +449,7 @@ input:focus{outline:2px solid #ff7a1a;outline-offset:1px;border-color:#ff7a1a}.r
 .btn{flex:1;min-height:46px;font-size:16px;font-weight:700;border-radius:10px;cursor:pointer;border:1px solid #382d24;background:transparent;color:#f6f1ec}
 .pri{background:linear-gradient(135deg,#ff6a00,#ffb020);border:0;color:#140c06}.err{background:#2a1210;border:1px solid #7a2a20;color:#ffd7cf;border-radius:10px;padding:10px 12px;font-size:14px;margin:12px 0 0}
 details{margin-top:16px;font-size:14px;color:#bcafa3}summary{cursor:pointer;color:#ffb020;min-height:40px;display:flex;align-items:center}.btn:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #ffb020;outline-offset:2px}.btn:disabled{opacity:.7;cursor:progress}a{color:#ffb020}.muted{color:#998b7e;font-size:13px}
+fieldset{border:1px solid #382d24;border-radius:10px;margin:0 0 6px;padding:8px 14px 10px}legend{font-size:14px;font-weight:600;color:#bcafa3;padding:0 6px}.opt{display:flex;gap:10px;align-items:flex-start;font-weight:400;color:#f6f1ec;margin:8px 0}.opt input{width:auto;margin-top:4px;accent-color:#ff7a1a}.opt span{font-size:14px}.opt small{display:block;color:#998b7e;font-size:13px}
 .help{border-top:1px solid #2a221c;margin-top:22px;padding-top:16px;font-size:14px;color:#bcafa3}.help p{margin:0 0 8px}"""
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Connect {client} to Aloof</title><style>{css}</style></head><body><main class="w">
@@ -456,7 +457,7 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name=
 <h1>Connect {client} to Aloof</h1>{badge}
 <div class="access">{access} You can revoke it later by deleting its key under API keys. <a href="{www}/docs/mcp#revoke" target="_blank" rel="noopener">How</a></div>
 <p class="muted">After you approve, you'll be sent back to <code>{target}</code></p>
-{err}<form method="post" onsubmit="var b=event.submitter;if(b)setTimeout(function(){{b.disabled=true;b.textContent=b.value=='approve'?'Approving…':'Denying…'}},0)"><input type="hidden" name="req" value="{req}">
+{err}<form method="post" onsubmit="var b=event.submitter;if(b)setTimeout(function(){{b.disabled=true;b.textContent=b.value=='approve'?'Approving…':'Denying…'}},0)"><input type="hidden" name="req" value="{req}">{choice}
 <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" value="{email}">
 <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
 <p class="muted" style="margin:8px 0 0"><b style="color:#ffb020">Only one assistant can be connected with a password.</b> Approving with your password disconnects any assistant you connected that way before. To keep several connected, approve each one with its own API key instead.</p>
@@ -469,6 +470,17 @@ VERIFIED_BADGE = '<div class="badge ok">&#10003; <b>Verified app.</b> It sends y
 UNVERIFIED_BADGE = ('<div role="alert" class="badge warn"><b class="t">&#9888; Unverified app. Be careful.</b><br>'
     'Aloof has not checked this app. Its name was chosen by whoever registered it and may be fake. If you approve, the access token goes to <b>{host}</b>.<br>'
     '<b>Only approve if you started this connection yourself in the last few minutes and you recognise {host}.</b> If you followed a link someone sent you, choose Deny.</div>')
+NO_SCOPE_WARN = ('<div role="alert" class="badge warn"><b class="t">&#9888; This gives full access.</b> {client} didn\'t ask for a specific access level, '
+    'so by default it gets <b>full (admin) access</b>, including deleting apps and databases and restoring backups. If it only needs to look or deploy, choose a lower level below.</div>')
+LEVEL_OPTS = {1: ("paas:read", "Read only", "See apps, status, logs and usage. Can't change anything."),
+              2: ("paas:write", "Read and write", "Deploy, scale and change config. Can't delete apps or data, or restore backups."),
+              3: ("paas:admin", "Full access", "Everything, including deleting apps and data and restoring backups.")}
+def choice_html(max_level, selected):
+    """Radio buttons for access levels up to what the client asked for (you can only narrow a request, never widen it)."""
+    if max_level < 2: return ""
+    opts = "".join(f'<label class="opt"><input type="radio" name="level" value="{lv}"{" checked" if lv == selected else ""}><span><b>{t}</b> '
+                   f'<code>{sc}</code><small>{d}</small></span></label>' for lv, (sc, t, d) in LEVEL_OPTS.items() if lv <= max_level)
+    return f'<fieldset><legend>Access level</legend>{opts}</fieldset>'
 EXPIRED = None
 CONSENT_HEADERS = {"X-Frame-Options": "DENY", "Content-Security-Policy": "frame-ancestors 'none'",
                    "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
@@ -488,9 +500,15 @@ async def login_page(request: Request):
     badge = VERIFIED_BADGE if verified else UNVERIFIED_BADGE.format(host=html.escape(target))
     name = _clean_name(p.get("client_name")) or p["client_id"]
     scopes = params.scopes or ["paas"]; lv = level(scopes) or 3
+    unspecified = not params.scopes or "paas" in params.scopes   # no scope, or the pre-scopes catch-all
     shown = next((x for x in scopes if LEVELS.get(x) == lv), LEVEL_NAMES[lv])
     access = SCOPE_TEXT[lv].format(client=html.escape(name), scope=html.escape(shown))
-    render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(name), access=access, badge=badge, target=html.escape(target), css=CSS, mark=MARK, www=html.escape(WWW), ttl=PAGE_TTL_MIN,
+    if unspecified: badge += NO_SCOPE_WARN.format(client=html.escape(name))
+    try: picked = int(form.get("level") or lv) if form else lv
+    except ValueError: picked = lv
+    picked = min(max(picked, 1), lv)
+    choice = choice_html(lv, picked)
+    render = lambda err="": HTMLResponse(PAGE.format(client=html.escape(name), access=access, badge=badge, target=html.escape(target), css=CSS, mark=MARK, www=html.escape(WWW), ttl=PAGE_TTL_MIN, choice=choice,
         email=html.escape((form.get("email") or "").strip()[:254]) if form else "", key_open=" open" if form and form.get("api_key") else "",
         req=html.escape(rid), err=f'<p class="err" role="alert">{html.escape(err)}</p>' if err else ""), headers=CONSENT_HEADERS)
     if request.method == "GET": return render()
@@ -503,7 +521,8 @@ async def login_page(request: Request):
     if not key: return render("Enter your email and password, or paste an API key.")
     if not check_api_key(key): return render("That API key isn't valid. Check you copied all of it, or create a new one under API keys.")
     code = "mcp_ac_" + secrets.token_urlsafe(32)
-    ac = AuthorizationCode(code=code, scopes=params.scopes or ["paas"], expires_at=time.time()+CODE_TTL, client_id=p["client_id"],
+    granted = (params.scopes or ["paas"]) if picked == lv else [LEVEL_NAMES[picked]]   # narrowed on the consent page
+    ac = AuthorizationCode(code=code, scopes=granted, expires_at=time.time()+CODE_TTL, client_id=p["client_id"],
         code_challenge=params.code_challenge, redirect_uri=params.redirect_uri, redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
         resource=params.resource, subject=subject)
     S.put("code", code, {"code": ac.model_dump(mode="json"), "api_key": key, "subject": subject}, ttl=CODE_TTL); S.rm("pending", rid)

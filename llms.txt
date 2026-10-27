@@ -54,7 +54,7 @@
   No Dockerfile -> Nixpacks, else generated Dockerfile. POST /v1/launch/detect {"files":{name:content}} -> framework, Dockerfile, aloof.toml; POST /v1/config/validate {"config"}
 - aloof.toml: [build] [env] [processes] web/worker, [http_service] + checks, [deploy] release_command, [[mounts]], [autoscale], [[vm]], [scale], [[cron]]
 - Deploy tokens: POST /v1/tokens {"app"?, "expires_in":"90d", "can_destroy"?: false} -> dt_... (scoped to one app, or the whole account). New tokens can deploy, scale and change config but cannot destroy apps, delete volumes/databases/snapshots or restore backups unless created with can_destroy=true (CLI: aloof tokens create --allow-destroy); GET/DELETE /v1/tokens
-- OAuth scopes (MCP): paas:read (read only: inspect, list), paas:write (everything except destroy_app and restore), paas:admin (all); "paas" = paas:admin. Enforced in the MCP server and the API (403 "insufficient scope").
+- OAuth scopes (MCP): paas:read (read only: inspect, list), paas:write (everything except destroy_app and restore), paas:admin (all); "paas" = paas:admin. Enforced in the MCP server and the API (403 "insufficient scope"). No scope requested = full access; the Authorize page warns and lets the user pick a lower level.
 - Secrets: GET/POST /v1/apps/{name}/secrets {"secrets":{},"unset":[],"stage":bool}; POST /v1/apps/{name}/secrets/deploy
 - GET /v1/apps/{name}/status (process groups, release, cron); POST /v1/apps/{name}/scale/count {"counts":{"web":2,"worker":1}}; POST /v1/apps/{name}/scale/vm {"plan","group"?}
 - GET /v1/apps/{name}/certs, GET /v1/apps/{name}/ips; WebSocket /v1/apps/{name}/proxy?port=N (aloof proxy); apps reach each other as <app>.internal
