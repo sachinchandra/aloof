@@ -13,18 +13,30 @@
 .meter{height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px}.meter b{display:block;height:100%;background:var(--ok)}.meter b.w{background:var(--warn)}.meter b.x{background:var(--bad)}
 .tbl td,.tbl th{font-size:13.5px}.pills{display:flex;gap:8px;flex-wrap:wrap}.pills span{background:var(--panel2);border:1px solid var(--line);padding:4px 10px;border-radius:99px;font-size:13px}
 .alert{border:1px solid color-mix(in srgb,var(--bad) 45%,var(--line));background:color-mix(in srgb,var(--bad) 8%,transparent);color:var(--fg);padding:12px 16px;border-radius:12px;margin:8px 0}
+.alert.w{border-color:color-mix(in srgb,var(--acc2) 50%,var(--line));background:color-mix(in srgb,var(--acc2) 9%,transparent)}
+.banner{border:1px solid color-mix(in srgb,var(--acc2) 45%,var(--line));background:color-mix(in srgb,var(--acc2) 8%,transparent);padding:12px 16px;border-radius:12px;margin:8px 0 4px;font-size:14px}
+.errcard{border:1px solid color-mix(in srgb,var(--bad) 45%,var(--line));background:color-mix(in srgb,var(--bad) 7%,var(--panel));border-radius:14px;padding:18px 20px;margin:10px 0;display:flex;gap:14px;align-items:center;flex-wrap:wrap}.errcard p{margin:0;flex:1;min-width:220px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skel .stat b,.skel .chart,.skel .tbl td,.skel .prog{color:transparent!important;background:linear-gradient(90deg,var(--panel2),var(--line),var(--panel2));background-size:200% 100%;animation:sk 1.2s linear infinite;border-radius:6px}
+.skel .stat b{display:block;width:60%;min-height:26px}@keyframes sk{to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){.skel *{animation:none!important}}
+dialog.cf{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:440px;width:calc(100% - 32px)}dialog.cf::backdrop{background:rgba(0,0,0,.6)}
+dialog.cf h3{margin:0 0 8px}dialog.cf .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}dialog.cf input{width:100%;margin-top:6px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;gap:12px;align-items:center;z-index:50;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+details.tacc summary{cursor:pointer;font-family:var(--mono);text-transform:uppercase;font-size:15px;letter-spacing:.02em;color:var(--fg2);margin:34px 0 12px}
 #gate{max-width:440px;margin:12vh auto}.exp{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.exp select{width:auto;height:34px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-size:13px}
 </style></head><body>
-<header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle theme">◐</button><a href="/dashboard">Dashboard</a></div></header>
+<header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><button class="btn ghost sm" id=themebtn onclick="toggleTheme();themeLbl()" aria-label="Switch theme">◐ Theme</button><a href="/dashboard">Dashboard</a></div></header>
 <main class="wrap adm" id=main>
-<div id=app style="display:none">
-<div class=ah><div><h1>Owner dashboard</h1><p class=muted id=gen style="margin:4px 0 0"></p></div><span class=sp></span>
+<p id=live class=sr-only aria-live=polite aria-atomic=true></p>
+<div id=app class=skel aria-busy=true>
+<div class=ah><div><h1>Owner dashboard</h1><p class=muted id=gen style="margin:4px 0 0">Loading…</p></div><span class=sp></span>
 <div class=exp><button class="btn sm" onclick="load()">Refresh</button><select id=ex aria-label="CSV table"><option>summary</option><option>users</option><option>top_users</option><option>signups</option><option>deploys</option><option>failed_deploys</option><option>design_partners</option><option>waitlist</option><option>audit</option></select><button class="btn pri sm" onclick="exportCsv()">Export CSV</button><button class="btn ghost sm" onclick="fetch('/v1/auth/logout',{method:'POST',headers:H()}).then(()=>location='/login')">Log out</button></div></div>
-<div id=alerts></div>
-<h2>Users &amp; revenue</h2><div class=k id=k1></div>
+<div id=err></div><div id=banner></div><div id=alerts></div>
+<h2>Users &amp; revenue</h2><div class=k id=k1><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div></div>
+<h2>Needs attention: errors &amp; failed deploys</h2><div id=stuck></div><div class=two><div class=scroll><table class=tbl id=fd></table></div><div class=scroll><table class=tbl id=ae></table></div></div>
 <div class=two style="margin-top:14px"><div class=card><h3>GPU unlock</h3><p id=gpu class=muted></p><div class=prog><b id=gpub></b></div><p class=muted id=gpun style="font-size:13px"></p></div>
 <div class=card><h3>Signups per day <span class=muted style="font-weight:400">(30 days)</span></h3><div class=chart id=ch1></div><div class=axis><span>30 days ago</span><span>today</span></div></div></div>
-<h2>Deployments</h2><div class=k id=k2></div>
+<h2>Deployments</h2><div class=k id=k2><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div></div>
 <div class=two style="margin-top:14px"><div class=card><h3>Deploys per day <span class=muted style="font-weight:400">(30 days)</span></h3><div class="chart c2" id=ch2></div><div class=axis><span>30 days ago</span><span>today</span></div></div>
 <div class=card><h3>Apps by plan</h3><div class=pills id=byplan></div><h3 style="margin-top:18px">Apps by account tier</h3><div class=pills id=bytier></div></div></div>
 <h2>Top users by usage (this month)</h2><div class=scroll><table class=tbl id=top></table></div>
@@ -34,10 +46,10 @@
 <h3 style="margin-top:22px">Design partners</h3><div class=scroll><table class=tbl id=dp></table></div>
 <h2>Infrastructure</h2><div class=k id=k4></div>
 <div class=two style="margin-top:14px"><div class=card><h3>Backups</h3><div id=bk></div></div><div class=card><h3>Certificates</h3><div class=scroll><table class=tbl id=certs></table></div></div></div>
-<h2>Recent errors &amp; failed deploys</h2><div class=two><div class=scroll><table class=tbl id=fd></table></div><div class=scroll><table class=tbl id=ae></table></div></div>
 <h2>Audit log</h2><div class=scroll><table class=tbl id=aud></table></div>
-<h2>Test accounts (excluded)</h2><p class=muted style="font-size:13px">Accounts flagged <code>is_test</code> are left out of every number above. Flag with <code>POST /v1/admin/accounts/&lt;id&gt;/test</code> or the buttons in the accounts table.</p><div class=scroll><table class=tbl id=acc></table></div>
+<details class=tacc id=taccd><summary>Accounts &amp; test accounts (<span id=taccn>…</span>)</summary><p class=muted style="font-size:13px">Accounts flagged <code>is_test</code> are left out of every number above. Flag with <code>POST /v1/admin/accounts/&lt;id&gt;/test</code> or the buttons below.</p><div class=scroll><table class=tbl id=acc></table></div></details>
 </div></main>
+<dialog class=cf id=cf aria-labelledby=cft><form method=dialog><h3 id=cft></h3><div id=cfb class=muted style="font-size:14px"></div><div id=cfi></div><div class=acts><button class="btn ghost sm" value=cancel>Cancel</button><button class="btn pri sm" id=cfok value=ok>OK</button></div></form></dialog>
 <script>
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const T=t=>t?new Date(t*1000).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'—', $=id=>document.getElementById(id);
@@ -49,14 +61,25 @@ const chart=(id,s)=>{const m=Math.max(1,...s.map(x=>x.n));$(id).innerHTML=s.map(
 const pills=(id,o)=>{const e=Object.entries(o||{});$(id).innerHTML=e.length?e.sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<span><code>${E(k)}</code> ${v}</span>`).join(''):'<span class=muted>none</span>'};
 const meter=p=>`<div class=meter><b class="${p>90?'x':p>75?'w':''}" style="width:${p||0}%"></b></div>`;
 const dur=s=>{if(s==null)return'—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?`${d}d ${h}h`:`${h}h ${Math.floor(s%3600/60)}m`};
-async function load(){
-    const r=await fetch('/v1/admin/dashboard',{headers:H(),credentials:'same-origin'});
-  if(r.status==401){location='/login?next=/admin';return}if(!r.ok){$('gen').textContent='Error '+r.status;$('app').style.display='';return}
-  const m=await r.json();$('app').style.display='';
-  $('gen').textContent='Generated '+T(m.generated)+' · '+m.excluded_test_accounts+' test account(s) excluded';
-  const al=[...(m.backups.alerts||[])];m.certs.forEach(c=>{if(c.days_left!=null&&c.days_left<14)al.push(`certificate for ${c.host} expires in ${c.days_left} days`)});
+let GEN=0,LOADING=0;
+const ago=t=>{const s=Math.max(0,Math.round(Date.now()/1000-t));return s<45?'just now':s<3600?Math.round(s/60)+' min ago':Math.round(s/3600)+' h ago'};
+function genLbl(m){if(!GEN)return;$('gen').textContent='Updated '+ago(GEN)+' · '+(m??$('gen').dataset.x)+' test account(s) excluded · refreshes every minute';if(m!=null)$('gen').dataset.x=m}
+function themeLbl(){const d=(document.documentElement.dataset.theme||'dark')=='dark';$('themebtn').setAttribute('aria-label',d?'Switch to light theme':'Switch to dark theme')}
+const say=t=>{$('live').textContent='';setTimeout(()=>$('live').textContent=t,50)};
+const PANELS=['k1','k2','k3','k4','ch1','ch2','byplan','bytier','top','wlt2','dp','bk','certs','fd','ae','aud','acc','stuck','alerts','banner','wlmail','gpu','gpun','taccn'];
+function fail(msg){PANELS.forEach(id=>$(id).innerHTML='');$('gpub').style.width='0';$('app').classList.remove('skel');$('app').removeAttribute('aria-busy');
+  $('err').innerHTML=`<div class=errcard role=alert><p><b>Couldn't load the dashboard.</b> ${E(msg)}. The numbers are hidden so nothing stale is shown.</p><button class="btn pri sm" onclick="load()">Try again</button></div>`;$('gen').textContent='Not loaded';say('Dashboard failed to load')}
+async function load(){if(LOADING)return;LOADING=1;let r;
+  try{r=await fetch('/v1/admin/dashboard',{headers:H(),credentials:'same-origin'})}catch(e){LOADING=0;return fail('The server could not be reached')}
+  LOADING=0;if(r.status==401){location='/login?next=/admin';return}if(!r.ok)return fail('The server answered '+r.status);
+  let m;try{m=await r.json()}catch(e){return fail('The response was not valid')}
+  $('err').innerHTML='';$('app').classList.remove('skel');$('app').removeAttribute('aria-busy');GEN=m.generated;genLbl(m.excluded_test_accounts);
+  $('banner').innerHTML=m.real_accounts===0?`<div class=banner role=status><b>No real accounts yet</b>, ${m.excluded_test_accounts} test account${m.excluded_test_accounts==1?'':'s'} excluded. Every number below counts real customers only, so zeros are expected for now.</div>`:'';
+  loadCerts();
+  const al=[...(m.backups.alerts||[])];
   if(m.server.disk_pct>85)al.push(`disk ${m.server.disk_pct}% full`);
   $('alerts').innerHTML=al.map(a=>`<div class=alert>⚠ ${E(a)}</div>`).join('');
+  const st=m.errors.stuck_deploys||[];$('stuck').innerHTML=st.length?`<div class="alert w" role=status>⚠ <b>${st.length} release${st.length>1?'s':''} stuck in “deploying” for over 15 minutes:</b> ${st.map(x=>`<code>${E(x.app)}</code> v${x.version} (since ${T(x.created)})`).join(', ')}</div>`:'';
   const u=m.users,t=u.by_tier,rv=m.revenue;
   $('k1').innerHTML=stat('Total users',u.total,`+${u.new_7d} in 7 days`)+stat('Free',t.free||0)+stat('Hobby',t.hobby||0)+stat('Pro',t.pro||0)+stat('Paid customers',m.paid_customers)+stat('MRR',usd(rv.mrr_usd),rv.subscriptions+' subscription(s)')+stat('Revenue '+rv.month,usd(rv.revenue_this_month_usd),'paid Stripe sessions')+stat('Credit balances',usd(rv.credit_balance_usd),'usage this month '+usd(rv.usage_this_month_usd));
   const g=m.gpu_unlock;$('gpu').textContent=g.enabled?'GPUs are enabled.':`${g.have} of ${g.goal} paid customers`;$('gpub').style.width=g.pct+'%';$('gpun').textContent=g.enabled?'':(g.have>=g.goal?'Unlock reached: set PAAS_GPU_ENABLED=1.':`${g.goal-g.have} to go`);
@@ -68,13 +91,25 @@ async function load(){
   tbl('dp',[['Design partner',r=>E(r.email)],['Company',r=>E(r.company)],['What they would run',r=>E(r.note)],['When',r=>T(r.ts)]],m.design_partners,'No applications yet');
   const s=m.server;$('k4').innerHTML=stat('CPU',(s.cpu_pct??'—')+'%',`${s.cpus} vCPU · load ${(s.load||[]).join(' / ')}`+meter(s.cpu_pct))+stat('Memory',(s.mem_pct??'—')+'%',`${s.mem_used_mb} / ${s.mem_total_mb} MB`+meter(s.mem_pct))+stat('Disk',s.disk_pct+'%',`${s.disk_used_gb} / ${s.disk_total_gb} GB`+meter(s.disk_pct))+stat('Uptime',dur(s.uptime_seconds),(s.nodes||[]).length+' remote node(s)');
   const b=m.backups;$('bk').innerHTML=`<p>${b.enabled?'<span class="status s-running">enabled</span>':'<span class="status s-failed">disabled</span>'}</p><p class=muted style="font-size:14px">Last off-site backup: <b>${T(b.last_offsite_backup)}</b> (${b.last_offsite_age_hours??'—'} h ago)<br>Last verify: ${T(b.last_verify)} · objects: ${b.objects??0} · bucket <code>${E(b.bucket)}</code></p>`;
-  tbl('certs',[['Host',r=>E(r.host)],['Expires',r=>r.expires?T(r.expires):'<span class=bad>'+E(r.error||'?')+'</span>'],['Days left',r=>r.days_left==null?'—':`<span class="${r.days_left<14?'bad':r.days_left<30?'warn':'ok'}">${r.days_left}</span>`]],m.certs);
+  $('certs').innerHTML='<tr><td class=muted>Checking certificates…</td></tr>';
   tbl('fd',[['Failed deploy',r=>`<code>${E(r.app)}</code> v${r.version}`],['Reason',r=>E(r.reason)],['When',r=>T(r.created)]],m.errors.failed_deploys,'No failed deploys');
   tbl('ae',[['App error',r=>`<code>${E(r.app)}</code>`],['Error',r=>`<span class=muted>${E((r.error||'').slice(0,160))}</span>`],['When',r=>T(r.updated)]],[...m.errors.app_errors,...m.errors.status_failures.map(x=>({app:'status:'+x.component,error:x.error||('HTTP '+x.code),updated:x.ts}))],'No errors');
   tbl('aud',[['When',r=>T(r.ts)],['Account',r=>E(r.email||r.account_id||'—')],['App',r=>E(r.app||'')],['Action',r=>`<code>${E(r.action)}</code>`],['Detail',r=>`<span class=muted>${E(r.detail)}</span>`]],m.audit);
-  const rows=[...m.test_accounts.map(a=>({...a,t:1})),...m.accounts.slice(0,30)];
-  tbl('acc',[['Account',r=>E(r.email)],['Created',r=>T(r.created)],['Flag',r=>r.t?'<span class=tag>is_test</span>':`<span class=tag>${E(r.tier)}</span>`],['',r=>`<button class="btn ghost sm" onclick="flag(${r.id},${r.t?'false':'true'})">${r.t?'Unflag':'Mark test'}</button>`]],rows);
+  $('taccn').textContent=m.accounts.length+' real · '+m.test_accounts.length+' test';
+  const rows=[...m.accounts.slice(0,30),...m.test_accounts.map(a=>({...a,t:1}))];
+  tbl('acc',[['Account',r=>E(r.email)],['Created',r=>T(r.created)],['Flag',r=>r.t?'<span class=tag>is_test</span>':`<span class=tag>${E(r.tier)}</span>`],['',r=>`<button class="btn ghost sm" data-e="${E(r.email)}" onclick="flag(${r.id},${r.t?'false':'true'},this.dataset.e)">${r.t?'Unflag':'Mark test'}</button>`]],rows);
+  say('Dashboard loaded: '+m.users.total+' real users, '+m.deployments.apps_active+' active apps, '+(m.errors.failed_deploys.length+m.errors.app_errors.length)+' recent errors');
 }
+async function loadCerts(){let c;try{const r=await fetch('/v1/admin/certs',{headers:H()});if(!r.ok)throw 0;c=await r.json()}catch(e){$('certs').innerHTML='<tr><td class=bad>Couldn\'t check certificates. <button class="btn ghost sm" onclick="loadCerts()">Try again</button></td></tr>';return}
+  tbl('certs',[['Host',r=>E(r.host)],['Expires',r=>r.expires?T(r.expires):'<span class=bad>'+E(r.error||'?')+'</span>'],['Days left',r=>r.days_left==null?'—':`<span class="${r.days_left<14?'bad':r.days_left<30?'warn':'ok'}">${r.days_left}</span>`]],c);
+  const bad=c.filter(x=>x.days_left!=null&&x.days_left<14);bad.forEach(x=>$('alerts').insertAdjacentHTML('beforeend',`<div class=alert>⚠ certificate for ${E(x.host)} expires in ${x.days_left} days</div>`))}
+function ask(title,body,ok,{danger=0,type=''}={}){return new Promise(res=>{const d=$('cf');$('cft').textContent=title;$('cfb').innerHTML=body;$('cfok').textContent=ok;$('cfok').className='btn sm '+(danger?'danger':'pri');
+  $('cfi').innerHTML=type?`<label style="display:block;margin-top:12px;font-size:13px">Type <code>${E(type)}</code> to confirm<input id=cfin autocomplete=off spellcheck=false></label>`:'';
+  const chk=()=>{$('cfok').disabled=!!type&&$('cfin').value.trim()!==type};if(type){$('cfin').oninput=chk}chk();
+  d.onclose=()=>res(d.returnValue=='ok'&&(!type||$('cfin').value.trim()===type));d.returnValue='';d.showModal();(type?$('cfin'):$('cfok')).focus()})}
+let TT;function toast(msg,undo){clearTimeout(TT);document.querySelector('.toast')?.remove();const t=document.createElement('div');t.className='toast';t.setAttribute('role','status');
+  t.innerHTML=`<span>${E(msg)}</span>`+(undo?'<button class="btn ghost sm">Undo</button>':'');document.body.append(t);say(msg);
+  if(undo)t.querySelector('button').onclick=()=>{t.remove();undo()};TT=setTimeout(()=>t.remove(),undo?8000:4000)}
 const wq=()=>{const p=new URLSearchParams();if($('wlk').value)p.set('kind',$('wlk').value);if($('wlg').value)p.set('gpu',$('wlg').value);p.set('include_test',$('wlt').checked);return p.toString()};
 const ms=v=>!v?'<span class=muted>pending</span>':v.startsWith('sent')?'<span class=ok>sent</span>':`<span class="${v.startsWith('skipped')?'warn':'bad'}" title="${E(v)}">${E(v.split(':')[0])}</span>`;
 async function loadWl(){const r=await fetch('/v1/admin/waitlist?'+wq(),{headers:H()});if(!r.ok)return;const j=await r.json(),g=$('wlg');
@@ -84,12 +119,19 @@ async function loadWl(){const r=await fetch('/v1/admin/waitlist?'+wq(),{headers:
   if(mh.last_error)al.push(`Last mail error (${T(mh.last_error.ts)}, ${mh.last_error.where}): ${mh.last_error.error}`);
   $('wlmail').innerHTML=al.map(a=>`<div class=alert>⚠ ${E(a)}</div>`).join('')+(mh.admin_recipients.length?`<p class=muted style="font-size:13px;margin:8px 0 0">Signup notifications go to ${mh.admin_recipients.map(E).join(', ')}.</p>`:'');
   tbl('wlt2',[['Email',r=>E(r.email)+(r.is_test?' <span class=tag>test</span>':'')],['Kind',r=>`<span class=tag>${E(r.kind)}</span>`],['GPU / region / provider',r=>E(r.gpu||r.region||(r.kind=='byo_server'?(r.note||'not given'):'')||'—')],['Note',r=>`<span class=muted>${E((r.company?r.company+': ':'')+(r.note||''))}</span>`],['First signed up',r=>T(r.created)],['Updated',r=>T(r.updated)],['Source',r=>`<code>${E(r.source||'—')}</code>`],['Emails',r=>'user '+ms(r.mail_user)+' · admin '+ms(r.mail_admin)],
-    ['',r=>`<button class="btn ghost sm" onclick="wlFlag(${r.id},${r.is_test?'false':'true'})">${r.is_test?'Unmark':'Mark test'}</button> <button class="btn ghost sm" onclick="wlDel(${r.id},'${E(r.email)}')">Delete</button>`]],j.entries,'No entries');
+    ['',r=>`<button class="btn ghost sm" data-e="${E(r.email)}" onclick="wlFlag(${r.id},${r.is_test?'false':'true'},this.dataset.e)">${r.is_test?'Unmark':'Mark test'}</button> <button class="btn ghost sm" data-id="${r.id}" data-e="${E(r.email)}" onclick="wlDel(${r.id},this.dataset.e)">Delete</button>`]],j.entries,'No entries');
 }
-async function wlDel(id,e){if(!confirm('Delete waitlist entry '+e+'?'))return;const r=await fetch('/v1/admin/waitlist/'+id,{method:'DELETE',headers:H()});if(r.ok)load();else alert('delete failed: '+r.status)}
-async function wlFlag(id,v){const r=await fetch(`/v1/admin/waitlist/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:v})});if(r.ok)load();else alert('failed: '+r.status)}
-async function wlCsv(){const r=await fetch('/v1/admin/waitlist.csv?'+wq(),{headers:H()});if(!r.ok)return alert('export failed: '+r.status);const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='aloof-waitlist.csv';a.click()}
-async function flag(id,v){const r=await fetch(`/v1/admin/accounts/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:v})});if(r.ok)load();else alert('failed: '+r.status)}
-async function exportCsv(){const t=$('ex').value,r=await fetch('/v1/admin/export.csv?table='+t,{headers:H()});if(!r.ok)return alert('export failed: '+r.status);const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`aloof-${t}.csv`;a.click()}
-load();
+async function wlDel(id,e){if(!await ask('Delete waitlist entry?',`<p>${E(e)} will be removed from the waitlist. You get a few seconds to undo.</p>`,'Delete',{danger:1}))return;
+  const row=[...document.querySelectorAll('#wlt2 button')].find(b=>b.dataset.id==id)?.closest('tr');if(row)row.style.display='none';
+  let undone=0;const go=setTimeout(async()=>{if(undone)return;const r=await fetch('/v1/admin/waitlist/'+id,{method:'DELETE',headers:H()});if(r.ok){toast('Deleted '+e);load()}else{if(row)row.style.display='';toast('Couldn\'t delete '+e+' (error '+r.status+')')}},8000);
+  toast('Deleting '+e+'…',()=>{undone=1;clearTimeout(go);if(row)row.style.display='';toast('Kept '+e)})}
+async function wlFlag(id,v,e){if(!await ask(v?'Mark as test entry?':'Unmark test entry?',`<p>${E(e||'This entry')} will be ${v?'left out of':'counted in'} the waitlist numbers.</p>`,v?'Mark test':'Unmark'))return;
+  const r=await fetch(`/v1/admin/waitlist/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:v})});if(!r.ok)return toast('Failed: error '+r.status);load();
+  toast((v?'Marked test: ':'Unmarked: ')+(e||id),async()=>{const u=await fetch(`/v1/admin/waitlist/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:!v})});toast(u.ok?'Undone':'Undo failed: error '+u.status);load()})}
+async function wlCsv(){const r=await fetch('/v1/admin/waitlist.csv?'+wq(),{headers:H()});if(!r.ok)return toast('Export failed: error '+r.status);const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='aloof-waitlist.csv';a.click()}
+async function flag(id,v,e){if(!await ask(v?'Mark account as test?':'Count this account as real?',`<p>${E(e||'Account '+id)} will be ${v?'left out of every number on this page':'counted in every number on this page'}.</p>`,v?'Mark test':'Unflag'))return;
+  const r=await fetch(`/v1/admin/accounts/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:v})});if(!r.ok)return toast('Failed: error '+r.status);load();
+  toast((v?'Marked test: ':'Counted as real: ')+(e||id),async()=>{const u=await fetch(`/v1/admin/accounts/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:!v})});toast(u.ok?'Undone':'Undo failed: error '+u.status);load()})}
+async function exportCsv(){const t=$('ex').value,r=await fetch('/v1/admin/export.csv?table='+t,{headers:H()});if(!r.ok)return toast('Export failed: error '+r.status);const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`aloof-${t}.csv`;a.click()}
+themeLbl();load();setInterval(()=>{if(!document.hidden)load()},60000);setInterval(()=>genLbl(),15000);
 </script></body></html>

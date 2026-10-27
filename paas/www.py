@@ -260,6 +260,12 @@ def server_health():
     except Exception: pass
     h["nodes"] = q("select id,provider,status,public_ip,vcpu,mem_mb,last_seen from nodes order by created desc limit 20")
     return h
+STUCK_SECS = 15 * 60
+def certs():
+    from . import api
+    hosts = sorted({h for h in [site.SITE.split("//")[-1], api.API_HOST, api.MCP_HOST, api.BASE_DOMAIN] if h and "." in h and h != "localhost"})
+    import concurrent.futures as cf
+    with cf.ThreadPoolExecutor(8) as ex: return list(ex.map(cert_expiry, hosts))
 def _tier_fee(t): return float((TIERS.get(t or "free") or {}).get("fee_usd") or 0)
 def metrics():
     from . import api, billing, offsite
@@ -276,14 +282,15 @@ def metrics():
     subs = [a for a in accts if a["stripe_subscription"] and (a["tier"] or "free") != "free"]
     mrr = sum(_tier_fee(a["tier"]) for a in subs)
     rev = sum((r["amount_cents"] or 0) for r in q("select account_id, amount_cents from stripe_sessions where status='paid' and created>=?", (m0,)) if r["account_id"] in real) / 100
-    apps = [a for a in q("select name,account_id,spec,status,created,error,updated from apps") if a["account_id"] in real]
+    all_apps = [a for a in q("select name,account_id,spec,status,created,error,updated from apps") if a["account_id"] in real]
+    apps = [a for a in all_apps if a["status"] != "destroyed"]
     acct_tier = {a["id"]: a["tier"] or "free" for a in accts}
     by_plan, by_tier = {}, {}
     for a in apps:
         try: pl = json.loads(a["spec"] or "{}").get("plan", "?")
         except Exception: pl = "?"
         by_plan[pl] = by_plan.get(pl, 0) + 1; t = acct_tier.get(a["account_id"], "free"); by_tier[t] = by_tier.get(t, 0) + 1
-    app_names = {a["name"] for a in apps}
+    app_names = {a["name"] for a in all_apps}   # history (releases, failures) still counts apps deleted since
     inst = q("select app, count(*) n from instances where status='running' group by app")
     running = sum(r["n"] for r in inst if r["app"] in app_names); active = sum(1 for r in inst if r["app"] in app_names)
     rels = [r for r in q("select app,version,status,reason,created from releases where created>?", (now - 30 * 86400,)) if r["app"] in app_names]
@@ -295,10 +302,15 @@ def metrics():
     wlc = W.counts()
     partners = [{"email": r["email"], "company": r["company"], "note": r["note"], "ts": r["created"]} for r in W.rows("design_partner", include_test=False)]
     failed = [r for r in q("select app,version,status,reason,created from releases where status='failed' order by created desc limit 40") if r["app"] in app_names][:20]
-    errs = q("select name as app, status, error, updated from apps where error is not null and error != '' order by updated desc limit 15")
+    errs = [r for r in q("select name as app, account_id, status, error, updated from apps where error is not null and error != '' and status != 'destroyed' order by updated desc limit 200")
+            if r["account_id"] in real][:15]
+    for r in errs: r.pop("account_id", None)
+    stuck = [r for r in q("select app,version,status,reason,created from releases where status='deploying' and created<? order by created", (now - STUCK_SECS,)) if r["app"] in app_names][:20]
     st_fail = q("select component, ts, code, error from status_checks where ok=0 order by ts desc limit 10")
     aud = q("select au.ts, au.account_id, ac.email, au.app, au.action, substr(au.detail,1,200) detail, au.ip from audit au left join accounts ac on ac.id=au.account_id order by au.id desc limit 120")
     aud = [r for r in aud if r["account_id"] is None or r["account_id"] in real][:30]
+    pgs = [r for r in q("select account_id from pg_dbs") if r["account_id"] in real]
+    vols = [r for r in q("select account_id, size_gb from volumes") if r["account_id"] in real]
     hosts = sorted({h for h in [site.SITE.split("//")[-1], api.API_HOST, api.MCP_HOST, api.BASE_DOMAIN] if h and "." in h and h != "localhost"})
     return {"generated": now, "excluded_test_accounts": len(test),
         "users": {"total": len(accts), "by_tier": tiers, "signups_per_day": _series([a["created"] for a in accts if a["created"]]),
@@ -308,15 +320,16 @@ def metrics():
                     "credit_balance_usd": round(sum((a["credit_cents"] or 0) for a in accts) / 100, 2), "usage_this_month_usd": round(sum((r["c"] or 0) for r in usage if r["account_id"] in real) / 100, 2)},
         "deployments": {"apps_total": len(apps), "apps_active": active, "running_instances": running, "apps_by_plan": by_plan, "apps_by_tier": by_tier,
                         "deploys_per_day": _series([r["created"] for r in rels]), "deploys_30d": len(rels), "failed_30d": sum(1 for r in rels if r["status"] == "failed")},
-        "data": {"postgres_dbs": q("select count(*) n from pg_dbs", one=True)["n"], "volumes": q("select count(*) n from volumes", one=True)["n"],
-                 "volume_gb": q("select coalesce(sum(size_gb),0) n from volumes", one=True)["n"]},
+        "data": {"postgres_dbs": len(pgs), "volumes": len(vols), "volume_gb": sum((v["size_gb"] or 0) for v in vols)},
         "waitlist": wlc, "mail": W.mail_health(),
         "design_partners": partners[:50], "top_users": top, "server": server_health(), "backups": offsite.status(),
-        "certs": [cert_expiry(h) for h in hosts], "errors": {"failed_deploys": failed, "app_errors": errs, "status_failures": st_fail}, "audit": aud,
+        "certs_hosts": hosts, "errors": {"failed_deploys": failed, "app_errors": errs, "status_failures": st_fail, "stuck_deploys": stuck}, "audit": aud, "real_accounts": len(accts),
         "accounts": [{"id": a["id"], "email": a["email"], "tier": a["tier"] or "free", "created": a["created"], "credit_usd": round((a["credit_cents"] or 0) / 100, 2)} for a in sorted(accts, key=lambda a: -(a["created"] or 0))][:200],
         "test_accounts": q("select id,email,created from accounts where is_test=1 order by created desc limit 100")}
 @R.get("/v1/admin/dashboard")
 def admin_dashboard_json(_=Depends(require_admin)): return metrics()
+@R.get("/v1/admin/certs")
+def admin_certs_json(_=Depends(require_admin)): return certs()
 EXPORTS = {"users": lambda m: m["accounts"], "top_users": lambda m: m["top_users"], "signups": lambda m: m["users"]["signups_per_day"], "deploys": lambda m: m["deployments"]["deploys_per_day"],
            "audit": lambda m: m["audit"], "failed_deploys": lambda m: m["errors"]["failed_deploys"], "design_partners": lambda m: m["design_partners"], "waitlist": lambda m: __import__("paas.waitlist", fromlist=["rows"]).rows(include_test=False),
            "summary": lambda m: [{"metric": k, "value": v} for k, v in _flat(m).items()]}

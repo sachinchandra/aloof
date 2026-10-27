@@ -61,7 +61,7 @@ def test_admin_access_control_and_metrics():
     assert c.get("/v1/admin/dashboard").status_code == 401
     assert other.get("/v1/admin/dashboard", headers={"X-Admin-Token": api.ADMIN}).status_code == 401   # token + wrong user
     m = o.get("/v1/admin/dashboard").json()
-    for k in ("users", "paid_customers", "gpu_unlock", "revenue", "deployments", "data", "waitlist", "server", "backups", "certs", "errors", "audit", "top_users", "design_partners"): assert k in m
+    for k in ("users", "paid_customers", "gpu_unlock", "revenue", "deployments", "data", "waitlist", "server", "backups", "certs_hosts", "errors", "audit", "top_users", "design_partners"): assert k in m
     assert m["excluded_test_accounts"] >= 1 and all("example.com" not in a["email"] for a in m["accounts"])
     assert len(m["users"]["signups_per_day"]) == 30 and m["waitlist"]["design_partners"] >= 1
     j = c.get("/v1/admin/metrics", headers={"Authorization": f"Bearer {api.ADMIN}"}).json(); assert "dashboard" in j and "paid_customers" in j
