@@ -446,7 +446,7 @@ CSS = """:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;backgroun
 .w{max-width:480px;margin:0 auto;padding:40px 16px 56px}.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px;margin:0 0 22px;color:#f6f1ec;text-decoration:none}
 .card{background:#16120f;border:1px solid #2a221c;border-radius:16px;padding:28px}h1{font-size:24px;line-height:1.25;margin:0 0 14px}
 .badge{border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:14px}.ok{background:#0f2418;border:1px solid #1f5135;color:#bdf3d0}
-.warn{background:#2a1210;border:1px solid #7a2a20;color:#ffd7cf}.warn b.t{color:#ff8b73}.access{background:#1c1713;border:1px solid #382d24;border-radius:10px;padding:12px 14px;font-size:14px;color:#bcafa3;margin:0 0 16px}
+.amber{background:#2a1c0a;border:1px solid #8a5a12;color:#ffe7c2}.amber b.t{color:#ffb547}.warn{background:#2a1210;border:1px solid #7a2a20;color:#ffd7cf}.warn b.t{color:#ff8b73}.access{background:#1c1713;border:1px solid #382d24;border-radius:10px;padding:12px 14px;font-size:14px;color:#bcafa3;margin:0 0 16px}
 .access b{color:#f6f1ec}code{font:13px SFMono-Regular,Menlo,Consolas,monospace;background:#0c0a08;border:1px solid #2a221c;border-radius:6px;padding:2px 6px;word-break:break-all}
 label{display:block;font-size:14px;font-weight:600;color:#bcafa3;margin:16px 0 6px}input{width:100%;font-size:16px;padding:12px 14px;border-radius:10px;border:1px solid #382d24;background:#0c0a08;color:#f6f1ec}
 input:focus{outline:2px solid #ff7a1a;outline-offset:1px;border-color:#ff7a1a}.row{display:flex;gap:10px;margin-top:22px}
@@ -474,7 +474,7 @@ VERIFIED_BADGE = '<div class="badge ok">&#10003; <b>Verified app.</b> It sends y
 UNVERIFIED_BADGE = ('<div role="alert" class="badge warn"><b class="t">&#9888; Unverified app. Be careful.</b><br>'
     'Aloof has not checked this app. Its name was chosen by whoever registered it and may be fake. If you approve, the access token goes to <b>{host}</b>.<br>'
     '<b>Only approve if you started this connection yourself in the last few minutes and you recognise {host}.</b> If you followed a link someone sent you, choose Deny.</div>')
-NO_SCOPE_WARN = ('<div role="alert" class="badge warn"><b class="t">&#9888; This gives full access.</b> {client} didn\'t ask for a specific access level, '
+NO_SCOPE_WARN = ('<div role="alert" class="badge amber"><b class="t">&#9888; This gives full access.</b> {client} didn\'t ask for a specific access level, '
     'so by default it gets <b>full (admin) access</b>, including deleting apps and databases and restoring backups. If it only needs to look or deploy, choose a lower level below.</div>')
 LEVEL_OPTS = {1: ("paas:read", "Read only", "See apps, status, logs and usage. Can't change anything."),
               2: ("paas:write", "Read and write", "Deploy, scale and change config. Can't delete apps or data, or restore backups."),

@@ -52,11 +52,17 @@ def _client(cid):
     raw = q("select v from kv where kind='oauth:client' and k=?", (cid,), one=True)
     try: return json.loads(raw["v"]) if raw else {}
     except ValueError: return {}
+# Same ladder as mcp_server/oauth.py: no scope or the bare pre-scopes "paas" means full access.
+SCOPE_LEVELS = {"paas:read": 1, "paas:write": 2, "paas:admin": 3, "paas": 3}
+ACCESS = {1: ("read", "Read only"), 2: ("write", "Can deploy"), 3: ("admin", "Full access incl. delete")}
+def scope_level(scopes):
+    return max((SCOPE_LEVELS.get(x, 1) for x in (scopes or [])), default=3) if scopes else 3
 def list_apps(account_id):
     apps = {}
     for kind, _, v in _tokens(account_id):
         cid = v.get("client_id"); a = apps.setdefault(cid, {"client_id": cid, "access_tokens": 0, "refresh_tokens": 0, "expires_at": 0, "last_token_at": None})
         a[kind + "_tokens"] += 1; a["expires_at"] = max(a["expires_at"], v.get("expires_at") or 0)
+        a["level"] = max(a.get("level", 0), scope_level(v.get("scopes")))
         if kind == "refresh" and v.get("expires_at"):   # a refresh token is issued on approval and on every renewal
             a["last_token_at"] = max(a["last_token_at"] or 0, int(v["expires_at"]) - REFRESH_TTL)
     out = []
@@ -64,7 +70,8 @@ def list_apps(account_id):
         c = _client(cid); ru = (c.get("redirect_uris") or [None])[0]
         from urllib.parse import urlsplit
         out.append(a | {"name": c.get("client_name") or (cid if str(cid).startswith("https://") else "Unnamed app"),
-                        "redirect_host": urlsplit(ru).hostname if ru else None, "registered_at": c.get("client_id_issued_at")})
+                        "redirect_host": urlsplit(ru).hostname if ru else None, "registered_at": c.get("client_id_issued_at"),
+                        "access": ACCESS[a.get("level") or 3][0], "access_label": ACCESS[a.get("level") or 3][1]})
     return sorted(out, key=lambda x: -x["expires_at"])
 def revoke(account_id, client_id):
     """Deletes this account's tokens and unexchanged codes for client_id. Returns counts per kind."""

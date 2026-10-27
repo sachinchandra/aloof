@@ -58,4 +58,4 @@ def test_cli_and_dashboard_show_destroy():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cli = open(os.path.join(root, "cli", "aloof")).read(); dash = open(os.path.join(root, "dashboard", "index.html")).read()
     assert "DESTROY" in cli and "legacy_destroy" in cli and "created before Oct 26 2026 can still destroy" in cli
-    assert "legacy_destroy" in dash and "can destroy" in dash and "no destroy" in dash and "nk_destroy" in dash and "id=keys_legacy" in dash
+    assert "legacy_destroy" in dash and "Can deploy and delete" in dash and "Can deploy, no delete" in dash and "nk_destroy" in dash and "id=keys_legacy" in dash
