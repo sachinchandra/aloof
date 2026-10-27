@@ -607,21 +607,31 @@ def _cookie_kw(age): return {"max_age": age, "httponly": True, "samesite": "lax"
 @app.get("/v1/auth/providers")
 def auth_providers(): return {"providers": oauth_login.providers(), "magic_link": True}
 @app.get("/auth/{p}/start")
-def social_start(p: str, request: Request, next: str | None = None, intent: str | None = None):
+def social_start(p: str, request: Request, next: str | None = None):
+    """Login/signup only: always a plain sign-in. Connecting to the current account is POST /auth/{p}/connect (CSRF header)."""
     nxt = auth.safe_next(next, "/dashboard")
+    qk = [k for k, _ in request.query_params.multi_items()]
+    if "intent" in qk or len(qk) != len(set(qk)): return _auth_err("state_invalid", p[:20], nxt)   # no GET connect; no duplicate keys
     if p not in oauth_login.PROVIDERS: return _auth_err("provider_disabled", p[:20], nxt)
     base = oauth_login.base_url(); bh = _up.urlsplit(base).netloc
     if SECURE_COOKIES and bh and request.url.netloc != bh:   # one canonical host, so the state cookie and the session land where the callback is
         return RedirectResponse(f"{base}/auth/{p}/start?" + _up.urlencode({"next": nxt}), 303)
     try: _rate_check(("oauth-ip:" + _ipk(request),))
     except HTTPException: return _auth_err("rate_limited", p, nxt)
-    cur = auth.session_account(request.cookies.get(auth.COOKIE))
-    # Connect only when explicitly asked from the dashboard (intent=connect) by a signed-in user; from the login/signup page it is
-    # always a plain sign-in that replaces whatever session the browser had, so the account you land in is the provider's.
-    if intent == "connect" and not cur: return _auth_err("state_invalid", p, nxt)
-    try: url, st = oauth_login.start(p, nxt, link_account=cur["id"] if (cur and intent == "connect") else None)
+    # from the login/signup page it replaces whatever session the browser had, so the account you land in is the provider's
+    try: url, st = oauth_login.start(p, nxt, link_account=None)
     except oauth_login.AuthError as e: return _auth_err(e.code, p, nxt)
     r = RedirectResponse(url, 303); r.set_cookie(oauth_login.STATE_COOKIE, st, **_cookie_kw(oauth_login.STATE_TTL)); return r
+@app.post("/auth/{p}/connect")
+def social_connect(p: str, request: Request):
+    """Dashboard Connect: signed-in session + X-Aloof-CSRF: 1. Returns {url} to navigate to; the callback links to this account."""
+    if request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
+    cur = auth.session_account(request.cookies.get(auth.COOKIE))
+    if not cur: raise HTTPException(401, "sign in first")
+    if p not in oauth_login.PROVIDERS or not oauth_login.enabled(p): raise HTTPException(404, "provider not available")
+    _rate_check(("oauth-ip:" + _ipk(request),))
+    url, st = oauth_login.start(p, "/dashboard#account", link_account=cur["id"])
+    r = JSONResponse({"url": url}); r.set_cookie(oauth_login.STATE_COOKIE, st, **_cookie_kw(oauth_login.STATE_TTL)); return r
 @app.get("/auth/{p}/callback")
 def social_callback(p: str, request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     nxt = auth.safe_next(oauth_login.peek_next(state), "/dashboard")
