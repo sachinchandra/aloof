@@ -898,7 +898,13 @@ def login_page(request: Request):
     n = request.query_params.get("next")
     if n is not None and auth.safe_next(n, None) is None: return RedirectResponse("/login", 303)   # F1: drop unsafe next server-side
     if n and auth.session_account(request.cookies.get(auth.COOKIE)): return RedirectResponse(auth.safe_next(n, "/dashboard"), 303)   # already signed in: go where the link pointed
-    return www.at("/login", "default", site.login, BRAND)
+    pv = request.query_params.get("provider"); err = request.query_params.get("auth_error")
+    return www.at("/login", "default", site.login, BRAND, oauth_login.providers(), auth.safe_next(n, None) if n else None, err, pv)
+@app.get("/signup", include_in_schema=False)
+@app.get("/register", include_in_schema=False)
+def signup_page(request: Request):
+    n = request.query_params.get("next"); n = auth.safe_next(n, None) if n else None
+    return RedirectResponse("/login" + ("?" + _up.urlencode({"next": n}) if n else "") + "#register", 303)
 @app.get("/static/analytics.js", include_in_schema=False)
 def static_analytics(): return FileResponse(os.path.join(ROOT, "paas", "static", "analytics.js"), media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"})
 @app.get("/static/aloof.css", include_in_schema=False)
@@ -928,6 +934,16 @@ def dash(request: Request):
     h = open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND).replace("<!--ANALYTICS-->", "" if a.get("impersonated_by") else site.analytics_tag())
     if a.get("impersonated_by"): from .admin_ops import imp_banner; h = h.replace("<body>", "<body>" + imp_banner(a), 1)
     return HTMLResponse(h, headers={"X-Robots-Tag": "noindex, nofollow"})
+DASH_TABS = {"apps", "volumes", "pg", "postgres", "keys", "billing", "account", "settings", "audit"}
+@app.get("/dashboard/{rest:path}", include_in_schema=False)
+def dash_sub(rest: str, request: Request):
+    """/dashboard/<tab> deep links: signed out -> /login?next=, signed in -> the matching dashboard tab."""
+    t = rest.strip("/").split("/")[0].lower()
+    if not auth.session_account(request.cookies.get(auth.COOKIE)):
+        n = auth.safe_next("/dashboard/" + rest.strip("/"), "/dashboard") if t in DASH_TABS else "/dashboard"
+        return RedirectResponse("/login?" + _up.urlencode({"next": n}), 303)
+    tab = {"settings": "account", "postgres": "pg"}.get(t, t)
+    return RedirectResponse("/dashboard" + (f"#{tab}" if tab in DASH_TABS else ""), 303)
 
 
 # ---------------- Fly parity: releases/rollback, managed Postgres, snapshots, exec/console, log drains/history, audit ----------------

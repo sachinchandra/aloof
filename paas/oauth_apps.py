@@ -54,7 +54,7 @@ def _client(cid):
     except ValueError: return {}
 # Same ladder as mcp_server/oauth.py: no scope or the bare pre-scopes "paas" means full access.
 SCOPE_LEVELS = {"paas:read": 1, "paas:write": 2, "paas:admin": 3, "paas": 3}
-ACCESS = {1: ("read", "Read only"), 2: ("write", "Can deploy"), 3: ("admin", "Full access incl. delete")}
+ACCESS = {1: ("read", "Read only"), 2: ("write", "Read and write"), 3: ("admin", "Full access")}
 def scope_level(scopes):
     return max((SCOPE_LEVELS.get(x, 1) for x in (scopes or [])), default=3) if scopes else 3
 def list_apps(account_id):

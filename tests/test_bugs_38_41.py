@@ -28,12 +28,12 @@ def test_connected_apps_report_access_from_real_scopes(monkeypatch):
     monkeypatch.setattr(oauth_apps, "_tokens", lambda *a, **k: iter(rows))
     monkeypatch.setattr(oauth_apps, "_client", lambda cid: {"client_name": cid})
     got = {x["client_id"]: (x["access"], x["access_label"]) for x in oauth_apps.list_apps("acc")}
-    assert got == {"a": ("read", "Read only"), "w": ("write", "Can deploy"), "n": ("admin", "Full access incl. delete"),
-                   "p": ("admin", "Full access incl. delete"), "x": ("admin", "Full access incl. delete")}
+    assert got == {"a": ("read", "Read only"), "w": ("write", "Read and write"), "n": ("admin", "Full access"),
+                   "p": ("admin", "Full access"), "x": ("admin", "Full access")}
     sys.path.insert(0, os.path.join(ROOT, "mcp_server")); import oauth
     assert oauth_apps.SCOPE_LEVELS == oauth.LEVELS
 
 def test_dashboard_shows_access_labels():
     d = open(os.path.join(ROOT, "dashboard/index.html")).read()
     assert "<th>Access</th>" in d and "oaccess(x)" in d and "x.access_label" in d
-    assert "type:'Full access incl. delete'" in d and "Can deploy and delete" in d and "Can deploy, no delete" in d
+    assert "type:'Full access'" in d and "Can deploy and delete" in d and "Can deploy, no delete" in d

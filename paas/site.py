@@ -301,9 +301,9 @@ def pricing(brand):
 <h2 class=pp-h id=faq>Pricing FAQ</h2><div class=pp-faq>{faqh}</div>
 <div class=pp-end><h2>Start free, upgrade when you need to.</h2><p class=muted>{free['max_apps']} apps and ${free['included_usage_usd']:g} of usage a month on Free. No card required.</p><a class="btn pri" href="/login#register" data-cta=deploy_free data-cta-loc=pricing_end>Create an account</a> <a class="btn ghost" href="/docs/billing">Billing docs</a></div>
 </div></section>""", brand, desc="Aloof pricing: Free, Hobby $5/month and Pro $20/month, each with the fee back as included usage. Compute billed per second in Nuremberg, Germany; volumes, egress and managed Postgres in USD.")
-DOCS = ["quickstart", "self-driving", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "mcp", "api", "nodes", "troubleshooting", "support", "templates", "self-healing"]
+DOCS = ["quickstart", "self-driving", "cli", "deploy", "config", "private", "github", "ci", "processes", "networking", "releases", "gpu", "volumes", "postgres", "console", "logs", "autoscaling", "domains", "billing", "sign-in", "mcp", "api", "nodes", "troubleshooting", "support", "templates", "self-healing"]
 TITLES = {"quickstart": "Quickstart", "self-driving": "How self-driving works", "cli": "CLI", "deploy": "Deploying apps", "config": "aloof.toml reference", "private": "Private registries & repos", "github": "GitHub App: push-to-deploy & previews", "ci": "Deploy tokens & CI", "processes": "Workers, release commands & cron", "networking": "Private networking, proxy, IPs & certs", "gpu": "GPU workloads", "volumes": "Volumes", "autoscaling": "Autoscaling & scale to zero",
-          "domains": "Custom domains", "releases": "Releases & rollback", "postgres": "Managed Postgres", "console": "SSH & exec console", "logs": "Logs, retention & drains", "billing": "Billing, invoices & tax", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes", "troubleshooting": "Troubleshooting & FAQ", "support": "Support", "templates": "One-click templates", "self-healing": "Self-healing deploys"}
+          "domains": "Custom domains", "releases": "Releases & rollback", "postgres": "Managed Postgres", "console": "SSH & exec console", "logs": "Logs, retention & drains", "billing": "Billing, invoices & tax", "sign-in": "Sign-in methods", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes", "troubleshooting": "Troubleshooting & FAQ", "support": "Support", "templates": "One-click templates", "self-healing": "Self-healing deploys"}
 def docs(pg, brand, base, api, mcp):
     if pg not in DOCS: return None
     from . import domains as _d
@@ -541,6 +541,19 @@ aloof self-heal my-app off      # turn it off for this app
 aloof self-heal my-app on       # turn it back on</pre>
 <p>The same is available over the API: <code>GET</code> or <code>PUT /v1/apps/&lt;app&gt;/self-heal</code> with <code>{"enabled": false}</code>. Turning it off only affects that app, and each change is written to the audit log.</p>
 <h2>When it does nothing</h2><p>A release isn't watched when the previous release didn't serve enough traffic to compare against (at least 100 requests are needed), and rollbacks are never rolled back. A very quiet app can still deploy a bad release, so keep a health check configured too.</p>""",
+"sign-in": f"""<h1>Sign-in methods</h1><p>You can sign in to {brand} with an email sign-in link, a password, or your GitHub, Google or X account. All of them open the same {brand} account, and an emailed sign-in link always works, so removing a social login can't lock you out.</p>
+<h2>Signing in with GitHub, Google or X</h2><p>On the <a href="/login">log in page</a>, choose <b>Continue with GitHub</b>, <b>Google</b> or <b>X</b>. If no {brand} account uses that email yet, one is created. If the email already belongs to an account, sign in to that account first (an email sign-in link works) and connect the provider from Settings, as below.</p>
+<p>X doesn't always share an email address. When it doesn't, we ask for one and send a link to confirm it before the account is ready.</p>
+<h2>Connecting and disconnecting</h2><p>In the dashboard, open <b>Account</b> and find the <b>Sign-in methods</b> card. It lists each provider with <b>Connect</b> or <b>Disconnect</b>. Connect takes you to the provider to approve, then back to the card. Each provider can be connected to one {brand} account at a time.</p>
+<p>The same is available over the API with a full-access key:</p>
+<pre>curl {api}/v1/auth/identities -H "Authorization: Bearer $ALOOF_KEY"            # what's connected, and which providers are on
+curl -X DELETE {api}/v1/auth/identities/github -H "Authorization: Bearer $ALOOF_KEY"   # disconnect GitHub</pre>
+<p>Connecting needs a browser, so it's only in the dashboard.</p>
+<h2>Using the CLI if you signed up with GitHub, Google or X</h2><p>The CLI doesn't open a browser to sign in. It uses an API key:</p>
+<ol><li>Sign in to the dashboard and open <b>API keys</b>.</li><li>Create a <b>Full access</b> key for your own machine (or a deploy token for CI).</li><li>Run <code>aloof login</code> and paste the key at the prompt. It checks the key, then saves it to <code>~/.aloof.json</code>.</li></ol>
+<pre>aloof login                       # paste the key at the hidden prompt
+aloof login --key-stdin &lt; key.txt   # or read it from a file or a secret store</pre>
+<p>The same key works on the MCP Authorize page, which is handy because a social-only account has no password. You can also set a password under <b>Account</b> if you'd rather type one.</p>""",
 "nodes": f"""<h1>Bring your own nodes</h1><p>An admin can add any Ubuntu 22.04/24.04 server to a pool, for example Yotta Shakti bare metal or your own GPU box. The node gets a single-use join token, connects to the control plane over WireGuard (outbound UDP only, so no inbound ports are needed), and runs the {brand} agent.</p>
 <pre>curl -X POST {api}/v1/admin/nodes -H "Authorization: Bearer $ADMIN" -d '{{"pool":"self-hosted","plan":"gpu-h100","gpu":true}}'
 # run the returned one-liner on the server:
@@ -549,14 +562,14 @@ curl -fsSL '{api}/v1/nodes/bootstrap.sh?node=n-…&token=jt_…' | sudo bash</pr
     if pg == "postgres":
         from .plans import PG_PLANS
         c = c.replace("{PGROWS}", "".join(f"<tr><td><code>{k}</code></td><td>{p['vcpu']:g} {'shared' if p['compute'].startswith('shared') else 'dedicated'} vCPU / {_gb(p['memory_mb'])} GB</td><td>{p['disk_gb']} GB</td><td><b>${p['price_usd_month']}</b>/mo</td></tr>" for k, p in PG_PLANS.items()))
-    groups = [("Getting started", ["quickstart", "cli", "deploy", "templates", "config", "releases"]), ("Source & CI", ["private", "github", "ci"]), ("Apps", ["processes", "networking"]), ("Platform", ["autoscaling", "volumes", "postgres", "domains", "gpu"]), ("Operate", ["console", "logs", "self-healing"]), ("Account", ["billing"]), ("Integrations", ["mcp", "api", "nodes"])]
+    groups = [("Getting started", ["quickstart", "cli", "deploy", "templates", "config", "releases"]), ("Source & CI", ["private", "github", "ci"]), ("Apps", ["processes", "networking"]), ("Platform", ["autoscaling", "volumes", "postgres", "domains", "gpu"]), ("Operate", ["console", "logs", "self-healing"]), ("Account", ["sign-in", "billing"]), ("Integrations", ["mcp", "api", "nodes"])]
     navh = "".join(f"<h4>{g}</h4>" + "".join(f'<a href="/docs/{d}" class="{"on" if d == pg else ""}"{" aria-current=page" if d == pg else ""}>{TITLES[d]}</a>' for d in ds) for g, ds in groups)
     c = c.replace("<table>", "<div class=scroll><table class=tbl>").replace("</table>", "</table></div>")
     return page(f"{TITLES[pg]} · {brand} docs", f"<div class='wrap docs'><aside aria-label='Docs navigation'>{navh}</aside><article class=docmain style='min-width:0;max-width:780px'>{c}</article></div>", brand,
                 desc=("Aloof documentation: quickstart, CLI, aloof.toml config, deploys from Docker images or git, managed Postgres, volumes, domains, billing and the MCP server for AI assistants." if pg == "quickstart"
                       else f"{TITLES[pg]} on Aloof: how it works, commands and limits. Part of the Aloof docs for EU backend hosting with scale to zero and MCP deploys."))
 
-# ---- Sign in with GitHub / Google / X. Buttons come from GET /v1/auth/providers (enabled ones only, none if the call fails);
+# ---- Sign in with GitHub / Google / X. Buttons are server-rendered from oauth_login.providers() (enabled ones only);
 # each one is a plain link to Backend's GET /auth/{id}/start?next=... Brand marks follow each provider's guidelines; the rest is Ember.
 SSO_MARKS = {
  "github": '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>',
@@ -574,30 +587,41 @@ SSO_CSS = """<style>
 .ordiv{display:flex;align-items:center;gap:12px;color:var(--fg3,#998b7e);font-size:13px;margin:14px 0 4px}.ordiv[hidden]{display:none}.ordiv:before,.ordiv:after{content:"";flex:1;height:1px;background:var(--line,#2a2420)}
 .autherr{border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.08);border-radius:10px;padding:10px 12px;font-size:14px;margin:14px 0 0}
 </style>"""
+# Each code has a line that names the provider (when /login gets ?provider=github|google|x) and a generic one.
 AUTH_ERRORS = {
- "cancelled": "Sign-in with {p} was cancelled. Pick another option, or try again.",
- "email_unverified": "Your {p} email address isn't verified yet. Verify it with {p}, or use your email below.",
- "email_linked_other": "This email already belongs to an Aloof account. Sign in to that account first (an email sign-in link works and also confirms the address), then connect {p} in Settings.",
- "already_linked": "This {p} account is connected to a different Aloof account, or your account is already connected to another {p} account. Sign in with the account it's connected to, or disconnect {p} in Settings and try again.",
- "state_invalid": "That sign-in link expired or was opened in another browser. Please try again.",
- "provider_error": "{p} didn't respond properly. Please try again in a moment, or use your email below.",
- "rate_limited": "Too many sign-in attempts. Wait a minute and try again.",
- "provider_disabled": "Sign-in with {p} isn't available right now. Use your email below.",
+ "cancelled": ("You cancelled signing in with {p}. Try again, or use your email below.",
+               "Sign-in was cancelled. Try again, or use your email below."),
+ "email_unverified": ("Your email address at {p} isn't verified yet. Verify it there and try again, or use your email below.",
+                      "The email on that account isn't verified yet. Verify it and try again, or use your email below."),
+ "email_linked_other": ("This email already belongs to an Aloof account. Sign in to that account first (an email sign-in link works and also confirms the address), then connect {p} in Settings.",
+                        "This email already belongs to an Aloof account. Sign in to that account first (an email sign-in link works and also confirms the address), then connect this sign-in method in Settings."),
+ "already_linked": ("This {p} account is connected to a different Aloof account, or yours is already connected to another {p} account. Sign in with the account it's connected to, or disconnect {p} in Settings and try again.",
+                    "That account is connected to a different Aloof account. Sign in with the account it's connected to, or disconnect it in Settings and try again."),
+ "state_invalid": ("Your {p} sign-in expired or was opened in another browser. Please start again.",
+                   "That sign-in expired or was opened in another browser. Please start again."),
+ "provider_error": ("{p} didn't respond properly. Try again in a moment, or use your email below.",
+                    "The sign-in service didn't respond properly. Try again in a moment, or use your email below."),
+ "rate_limited": ("Too many sign-in attempts. Wait a minute and try again.",
+                  "Too many sign-in attempts. Wait a minute and try again."),
+ "provider_disabled": ("Signing in with {p} isn't available right now. Use your email below.",
+                       "That sign-in option isn't available right now. Use your email below."),
 }
-def sso_js():
-    import json as _j
-    return """<script>(function(){var MK=%s,ER=%s,ORDER=['github','google','x'],NAMES={github:'GitHub',google:'Google',x:'X'};
-function safeNext(){var n=new URLSearchParams(location.search).get('next');try{if(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&!/[\\\\\\x00-\\x20\\x7f]/.test(n)){var u=new URL(n,location.origin);if(u.origin===location.origin&&u.pathname.charAt(1)!='/')return u.pathname+u.search+u.hash}}catch(e){}return ''}
-var qs=new URLSearchParams(location.search),code=qs.get('auth_error'),pv=qs.get('provider');
-if(code){var box=document.getElementById('autherr'),t=ER[code]||'Sign-in didn\\'t work. Please try again, or use your email below.';box.textContent=t.split('{p}').join(NAMES[pv]||'that provider');box.hidden=false;
- if(code=='email_linked_other'&&window.mode)mode('login');}
-function render(list){var el=document.getElementById('sso'),n=safeNext(),h='';
- list.filter(function(p){return p&&p.enabled&&MK[p.id]}).sort(function(a,b){return ORDER.indexOf(a.id)-ORDER.indexOf(b.id)}).forEach(function(p){
-  var lb='Continue with '+(NAMES[p.id]||p.label);h+='<a class="p-'+p.id+'" href="/auth/'+p.id+'/start'+(n?'?next='+encodeURIComponent(n):'')+'" data-p="'+p.id+'">'+MK[p.id]+'<span>'+lb+'</span></a>'});
- el.innerHTML=h;el.hidden=!h;document.getElementById('ordiv').hidden=!h;
- el.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){if(window.aloofTrack)aloofTrack(window.M=='register'?'signup_started':'login_started',{method:a.dataset.p})})})}
-window.aloofSso=render;
-fetch('/v1/auth/providers',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():{providers:[]}}).then(function(j){render(j.providers||[])}).catch(function(){render([])})})()</script>""" % (_j.dumps(SSO_MARKS), _j.dumps(AUTH_ERRORS))
+AUTH_ERROR_FALLBACK = "Sign-in didn't work. Try again, or use your email below."
+SSO_NAMES = {"github": "GitHub", "google": "Google", "x": "X"}
+def auth_error_text(code, provider=None):
+    if not code: return ""
+    t = AUTH_ERRORS.get(code)
+    if not t: return AUTH_ERROR_FALLBACK
+    n = SSO_NAMES.get((provider or "").lower())
+    return t[0].replace("{p}", n) if n else t[1]
+def sso_buttons(providers, nxt=None):
+    """Server-rendered: one plain link per enabled provider, GitHub, Google, X order. Works without JS."""
+    import urllib.parse as _u, html as _h
+    on = {p["id"] for p in (providers or []) if p and p.get("enabled")}
+    q = ("?next=" + _u.quote(nxt, safe="")) if nxt else ""
+    return "".join(f'<a class="p-{p}" href="/auth/{p}/start{_h.escape(q)}" data-p="{p}">{SSO_MARKS[p]}<span>Continue with {SSO_NAMES[p]}</span></a>'
+                   for p in ("github", "google", "x") if p in on)
+SSO_JS = """<script>if(/[?&]auth_error=email_linked_other/.test(location.search)&&window.mode)mode('login');document.querySelectorAll('#sso a').forEach(function(a){a.addEventListener('click',function(){if(window.aloofTrack)aloofTrack(window.M=='register'?'signup_started':'login_started',{method:a.dataset.p})})})</script>"""
 def x_email(brand):
     """X returned no email: ask for one; Backend (GET/POST /auth/x/email) sends a link to confirm it. Pending state is in an HttpOnly cookie."""
     return page(f"Add your email · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
@@ -620,11 +644,13 @@ msg.className='bad';var d=typeof j.detail=='string'?j.detail:'';
 if(!r){msg.textContent="Couldn't reach Aloof. Check your connection and try again.";return}
 if(r.status==400){var bad=/email address/i.test(d);msg.textContent=d||T[400];restart.hidden=false;if(!bad)lb.disabled=true;else email.focus();return}
 msg.textContent=d||T[r.status]||"That didn't work. Please try again."}})()</script>"""
-def login(brand):
+def login(brand, providers=None, nxt=None, err=None, provider=None):
+    import html as _h
+    btns = sso_buttons(providers, nxt); et = auth_error_text(err, provider)
     return page(f"Log in · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>
 <h1 id=title>Welcome back</h1><p class=muted id=subt style="margin:0">Log in to deploy and manage your apps.</p>
 <div class=tabs role=tablist aria-label="Log in or create an account"><button type=button role=tab id=tl class=on aria-selected=true onclick="mode('login')">Log in</button><button type=button role=tab id=tr aria-selected=false onclick="mode('register')">Create account</button></div>
-<p id=autherr class=autherr role=alert hidden></p><div class=sso id=sso role=group aria-label="Sign in with another account" hidden></div><div class=ordiv id=ordiv hidden>or</div>
+{f'<p id=autherr class=autherr role=alert>{_h.escape(et, quote=False)}</p>' if et else ''}<div class=sso id=sso role=group aria-label="Sign in with another account"{'' if btns else ' hidden'}>{btns}</div><div class=ordiv id=ordiv{'' if btns else ' hidden'}>or</div>
 <form onsubmit="event.preventDefault();go(M)"><div id=msg role=status aria-live=polite class=muted style="min-height:20px;font-size:14px"></div>
 <label for=email>Email</label><input id=email type=email autocomplete=email required placeholder="you@company.com">
 <label for=pw id=pwl>Password</label><input id=pw type=password autocomplete=current-password placeholder="Your password" aria-describedby=pwh><small id=pwh class="muted helper" style="display:none">At least 10 characters.</small>
@@ -642,7 +668,7 @@ async function go(kind){{if(lb.disabled)return;if(kind=='register'&&window.aloof
  if(j.api_key) sessionStorage.newKey=j.api_key; var n=new URLSearchParams(location.search).get('next'),d='/dashboard';try{{if(n&&n.charAt(0)=='/'&&n.charAt(1)!='/'&&!/[\\\\\\x00-\\x20\\x7f]/.test(n)){{var u=new URL(n,location.origin);if(u.origin===location.origin&&u.pathname.charAt(1)!='/')d=u.pathname+u.search+u.hash}}}}catch(e){{}}location=d}}
 async function magic(){{if(!email.value||!email.checkValidity()){{msg.className='bad';msg.textContent='Enter your email address first, then tap the sign-in link option again.';email.focus();return}}if(M=='register'&&window.aloofTrack)aloofTrack('signup_started',{{method:'magic_link'}});msg.className='muted';msg.textContent='Sending…';
  const x=await post('/v1/auth/magic',{{email:email.value,attribution:window.aloofAttribution?aloofAttribution():null}}),j=x.j; msg.className=x.ok?'ok':'bad'; msg.textContent=x.ok?(j.detail||'Check your inbox for a sign-in link.'):errText(j,x.r)}}
-</script>""" + SSO_CSS + sso_js(), brand)
+</script>""" + SSO_CSS + SSO_JS, brand)
 LEGAL = {
 "security": ("Security", """<p>This page lists what the platform does today. We don't claim certifications we don't hold.</p>
 <h3>Transport</h3><ul><li>All public endpoints (site, API, MCP, apps) are served over HTTPS; certificates are issued automatically and only for known hosts.</li><li>Nodes connect to the control plane over WireGuard and expose no inbound ports.</li></ul>
