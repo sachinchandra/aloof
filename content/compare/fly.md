@@ -1,14 +1,14 @@
 # Aloof vs Fly.io
 
-> Competitor prices fetched 2026-10-27 from https://fly.io/pricing (Fly compute prices vary by region; figures below are as shown on the page's default view). Aloof prices from https://www.aloof.si/pricing, same day.
+> Competitor prices fetched 2026-10-27 from https://fly.io/pricing and https://fly.io/docs/about/pricing/ (re-checked 2026-10-28). Fly machine prices are for Ashburn (iad) / Secaucus (ewr), Fly's lowest-priced regions; other regions cost more. Like-for-like configs: 1 shared CPU. Aloof prices from https://www.aloof.si/pricing, same day.
 
 **TL;DR:** Fly for global edge and many regions. Aloof for cheap, self-driving backends your AI agent can run safely.
 
 | | **Aloof** | **Fly.io** |
 |---|---|---|
-| 256MB app, always-on | **$1.99/mo** | $2.19/mo |
-| 512MB app | **$3.49/mo** | $4.39/mo (shared-cpu-2x) |
-| 1GB app | **$5.99/mo** | $8.78/mo (shared-cpu-4x) |
+| 256MB app, always-on | **$1.99/mo** | $2.19/mo (shared-cpu-1x, iad/ewr) |
+| 512MB app (1 shared CPU) | **$3.49/mo** | $3.69/mo (shared-cpu-1x, 512MB, iad/ewr) |
+| 1GB app (1 shared CPU) | **$5.99/mo** | $6.70/mo (shared-cpu-1x, 1GB, iad/ewr) |
 | Smallest managed Postgres | **$2.99/mo** | $38/mo (Basic) |
 | Egress | $0.06/GB | **$0.02/GB** (NA/EU) |
 | Volumes | $0.22/GB-mo | **$0.15/GB-mo** |
