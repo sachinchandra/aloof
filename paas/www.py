@@ -163,7 +163,7 @@ def status_page():
 @R.get("/robots.txt", response_class=PlainTextResponse)
 def robots(): return f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /dashboard\nDisallow: /v1/\nSitemap: {SITE}/sitemap.xml\n"
 def urls():
-    u = ["/", "/pricing", "/docs", "/blog", "/guides", "/examples", "/regions", "/about", "/security", "/status", "/privacy", "/terms"]
+    u = ["/", "/pricing", "/docs", "/blog", "/guides", "/examples", "/regions", "/about", "/security", "/status", "/privacy", "/terms", "/compare/fly", "/compare/render"]
     u += [f"/blog/{p['slug']}" for p in POSTS] + [f"/guides/{k}" for k in GUIDES]
     u += [f"/docs/{k}" for k in ("quickstart", "self-driving", "templates", "self-healing", "cli", "deploy", "config", "private", "github", "ci", "sign-in", "processes", "networking", "mcp")]
     return u

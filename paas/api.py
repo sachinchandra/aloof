@@ -883,7 +883,8 @@ _MD_TYPE = "text/markdown; charset=utf-8"
 def llms_full():
     from . import llms_full as LF
     site_url = PUBLIC_API_URL.replace("://api.", "://www.", 1)
-    body = LF.full(site.docs, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL, site_url, _llms_text()) + _regions_md()
+    head = open(os.path.join(ROOT, "llms-full.txt"), encoding="utf-8").read().rstrip() + "\n\n---\n\n"   # curated summary, then every docs page
+    body = head + LF.full(site.docs, BRAND, URL_DOMAIN, PUBLIC_API_URL, PUBLIC_MCP_URL, site_url, _llms_text()) + _regions_md()
     return Response(body, media_type="text/plain; charset=utf-8")
 @app.get("/mcp-tools.md")
 def mcp_tools_md():
@@ -1202,6 +1203,7 @@ def admin_backups_run(verify: bool=False):
 from . import devx
 app.include_router(devx.R)
 app.include_router(www.R)
+from . import www_compare as _cmp; app.include_router(_cmp.R)
 from . import templating as _tpl; app.include_router(_tpl.R)
 from . import waitlist as _wl; app.include_router(_wl.R)
 from . import lifecycle as _lcm; app.include_router(_lcm.R)
