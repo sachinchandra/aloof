@@ -198,3 +198,19 @@ def test_deployments_split_customers_vs_all():
     finally:
         for n in ("dt" + k[-8:], "dr" + k[-8:]):
             q("delete from apps where name=?", (n,)); q("delete from instances where app=?", (n,)); q("delete from releases where app=?", (n,))
+
+def test_internal_domains_are_test_and_flags_sync_to_posthog(monkeypatch):
+    from paas import engine, analytics
+    for e in ("sachin+qa1@aloof.si", "X@Aloof.si", "a@enigmaticitsolutions.com"): assert engine.is_test_email(e), e
+    for e in ("a@aloof.si.evil.com", "a@notaloof.sii", "a@realco.io"): assert not engine.is_test_email(e), e
+    sent = []; monkeypatch.setattr(analytics, "identify", lambda i: sent.append(i) or True)
+    k = time.time_ns(); a = engine.create_account(f"u{k}@realco.io")
+    q("update accounts set email=? where id=?", (f"sachin+t{k}@aloof.si", a["id"])); q("update accounts set is_test=0 where id=?", (a["id"],))
+    assert a["id"] in www.mark_flags() and a["id"] in sent
+    assert q("select is_test from accounts where id=?", (a["id"],), one=True)["is_test"] == 1
+    from test_admin_cockpit import owner
+    b = engine.create_account(f"v{k}@realco.io"); sent.clear()
+    assert owner().post(f"/v1/admin/accounts/{b['id']}/test", json={"is_test": True}, headers={"X-Aloof-CSRF": "1"}).status_code == 200
+    assert sent[-1] == b["id"]
+    assert owner().post(f"/v1/admin/accounts/{b['id']}/test", json={"is_test": False}, headers={"X-Aloof-CSRF": "1"}).status_code == 200
+    assert sent[-1] == b["id"] and q("select is_test from accounts where id=?", (b["id"],), one=True)["is_test"] == 0

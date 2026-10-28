@@ -201,8 +201,18 @@ from .engine import TEST_EMAIL_PATTERNS
 def mark_flags():
     q("update accounts set is_admin=1 where lower(email)=?", (ADMIN_EMAIL,))
     q("update accounts set is_admin=0 where lower(email)!=? and is_admin=1", (ADMIN_EMAIL,))
+    newly = []
     for pat in TEST_EMAIL_PATTERNS:
-        q("update accounts set is_test=1 where email like ? and (is_test is null or is_test=0)", (pat,))
+        newly += [r["id"] for r in q("select id from accounts where lower(email) like ? and (is_test is null or is_test=0)", (pat,))]
+        q("update accounts set is_test=1 where lower(email) like ? and (is_test is null or is_test=0)", (pat,))
+    sync_test_flags(newly)
+    return newly
+def sync_test_flags(ids):
+    """Push accounts.is_test to the PostHog person ($identify $set is_test) so dashboards filtering is_test stay right. Never raises."""
+    from . import analytics
+    for i in ids or ():
+        try: analytics.identify(i)
+        except Exception: pass
 def _session(request):
     from . import auth
     from .crypto import sha256
@@ -447,7 +457,7 @@ class TestFlag(BaseModel): is_test: bool
 @R.post("/v1/admin/accounts/{account_id}/test")
 def admin_flag_test(account_id: int, b: TestFlag, ctx=Depends(require_admin)):
     if not q("select 1 from accounts where id=?", (account_id,), one=True): raise HTTPException(404, "no such account")
-    q("update accounts set is_test=? where id=?", (int(b.is_test), account_id))
+    q("update accounts set is_test=? where id=?", (int(b.is_test), account_id)); sync_test_flags([account_id])
     from .db import audit; audit((ctx.get("account") or {}).get("id"), None, "admin.flag_test", f"account={account_id} is_test={b.is_test}"); return {"ok": True}
 @R.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 def admin_page(request: Request):

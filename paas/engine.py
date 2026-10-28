@@ -623,7 +623,8 @@ def usage(account_id):
     for t in tot.values(): t["hours"]=round(t["hours"],4); t["cost_usd"]=round(t["cost_usd"],2)
     return {"apps": tot, "total_usd": round(sum(t["cost_usd"] for t in tot.values()),2)}
 def new_api_key(): return "pk_" + secrets.token_urlsafe(24)
-TEST_EMAIL_PATTERNS = ("%@example.com", "%@example.org", "%@example.net", "%.test", "%.invalid", "%@localhost")   # SQL LIKE; also used by www.mark_flags
+TEST_EMAIL_PATTERNS = ("%@example.com", "%@example.org", "%@example.net", "%.test", "%.invalid", "%@localhost",
+                       "%@aloof.si", "%@enigmaticitsolutions.com")   # last two: our own (internal) domains, incl. plus addresses   # SQL LIKE; also used by www.mark_flags
 def is_test_email(email):
     e = (email or "").strip().lower()
     return any(e.endswith(p[1:]) for p in TEST_EMAIL_PATTERNS)
