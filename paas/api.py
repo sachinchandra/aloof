@@ -25,6 +25,12 @@ PUBLIC_API_URL = os.environ.get("PAAS_PUBLIC_API_URL", f"https://{API_HOST}"); P
 ROOT = os.path.dirname(os.path.dirname(__file__))
 app = FastAPI(title=f"{BRAND} control plane", version="0.3", docs_url=None, redoc_url=None, openapi_url="/api/openapi.json")
 from . import capacity
+from fastapi.exceptions import RequestValidationError as _RVE
+@app.exception_handler(_RVE)
+async def _validation_422(request, exc):
+    """422 like FastAPI's default, but never echo the raw input back: NaN/Infinity can't be serialized to JSON (and inputs may hold secrets)."""
+    errs = [{k: v for k, v in e.items() if k in ("type", "loc", "msg")} for e in exc.errors()]
+    return JSONResponse({"detail": errs}, status_code=422)
 @app.exception_handler(capacity.PlatformAtCapacity)
 async def _at_capacity(request, exc):   # local node memory budget exhausted: 503 + Retry-After, clients retry with backoff
     return JSONResponse({"detail": str(exc), "retry_after": exc.retry_after, "retry": "safe to retry the same request after Retry-After seconds"},
@@ -823,7 +829,7 @@ def paid_customers():
       union select id from accounts where stripe_subscription is not null and stripe_subscription != ''
       union select account_id as id from payments where status='paid') t""", one=True)["c"]
 from . import www
-@app.get("/v1/admin/metrics", dependencies=[Depends(www.require_admin)])
+@app.get("/v1/admin/metrics", dependencies=[Depends(www.require_admin_or_token)])
 def admin_metrics():
     """Owner metrics (test accounts excluded). Legacy top-level keys kept; full dashboard data under "dashboard"."""
     m = www.metrics(); n = m["paid_customers"]; goal = _plans.GPU_UNLOCK_PAID_CUSTOMERS

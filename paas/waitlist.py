@@ -169,9 +169,12 @@ def admin_delete(entry_id: int, ctx=Depends(require_admin)):
     return {"ok": True}
 class TestFlag(BaseModel): is_test: bool
 @R.post("/v1/admin/waitlist/{entry_id}/test")
-def admin_flag(entry_id: int, b: TestFlag, _=Depends(require_admin)):
-    if not q("select 1 from waitlist where id=?", (entry_id,), one=True): raise HTTPException(404, "no such entry")
-    q("update waitlist set is_test=? where id=?", (int(b.is_test), entry_id)); return {"ok": True}
+def admin_flag(entry_id: int, b: TestFlag, ctx=Depends(require_admin)):
+    r = q("select email from waitlist where id=?", (entry_id,), one=True)
+    if not r: raise HTTPException(404, "no such entry")
+    q("update waitlist set is_test=? where id=?", (int(b.is_test), entry_id))
+    from .db import audit; audit(((ctx or {}).get("account") or {}).get("id"), None, "admin.waitlist_test", f"entry={entry_id} email={r['email']} is_test={int(b.is_test)}")
+    return {"ok": True}
 
 class SendReq(BaseModel): confirm: str
 @R.post("/v1/admin/waitlist/{entry_id}/send")

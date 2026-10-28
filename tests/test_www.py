@@ -66,8 +66,9 @@ def test_admin_access_control_and_metrics():
     assert len(m["users"]["signups_per_day"]) == 30 and m["waitlist"]["design_partners"] >= 1
     j = c.get("/v1/admin/metrics", headers={"Authorization": f"Bearer {api.ADMIN}"}).json(); assert "dashboard" in j and "paid_customers" in j
     assert c.get("/v1/admin/metrics").status_code == 401
-    r = c.get("/v1/admin/export.csv?table=users", headers={"Authorization": f"Bearer {api.ADMIN}"}); assert r.status_code == 200 and r.text.startswith("id,email")
-    assert c.get("/v1/admin/export.csv?table=summary", headers={"Authorization": f"Bearer {api.ADMIN}"}).text.startswith("metric,value")
+    assert c.get("/v1/admin/export.csv?table=users", headers={"Authorization": f"Bearer {api.ADMIN}"}).status_code == 401   # token is infra-only
+    r = o.get("/v1/admin/export.csv?table=users"); assert r.status_code == 200 and r.text.startswith("id,email")
+    assert o.get("/v1/admin/export.csv?table=summary").text.startswith("metric,value")
     os.environ["PAAS_ADMIN_REQUIRE_2FA"] = "1"
     try: assert o.get("/admin").status_code == 200   # flag on but the owner has not enrolled: never locked out (enrolled case: test_admin_stages)
     finally: os.environ.pop("PAAS_ADMIN_REQUIRE_2FA")

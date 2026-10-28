@@ -165,6 +165,14 @@ create table if not exists provider_identities(id AUTOPK, account_id bigint not 
 create unique index if not exists provider_identities_ps on provider_identities(provider, subject);
 create unique index if not exists provider_identities_ap on provider_identities(account_id, provider);
 """)
+    # v20: admin 2FA hardening: TOTP replay guard (last accepted step), salted single-use recovery codes, failed-attempt lockout
+    ,(20, """
+alter table accounts add column if not exists totp_last_step bigint default 0;
+create table if not exists mfa_recovery(id AUTOPK, account_id bigint not null, salt TEXT not null, hash TEXT not null, used REAL);
+create index if not exists mfa_recovery_acct on mfa_recovery(account_id);
+create table if not exists mfa_failures(id AUTOPK, account_id bigint not null, ts REAL not null);
+create index if not exists mfa_failures_acct on mfa_failures(account_id, ts);
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

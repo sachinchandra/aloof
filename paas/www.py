@@ -219,16 +219,27 @@ def is_owner(a): return bool(a and a.get("is_admin") and not a.get("impersonated
 def needs_2fa(a):
     """PAAS_ADMIN_REQUIRE_2FA=1 asks for a verified session, but only once the owner has enrolled: the flag can never lock the owner out."""
     return os.environ.get("PAAS_ADMIN_REQUIRE_2FA") == "1" and bool(a.get("totp_enabled")) and not a.get("mfa_verified")
-def require_admin(request: Request, authorization: str = Header(None), x_admin_token: str = Header(None)):
-    """Admin token as Bearer (API/automation), or a logged-in owner session (is_admin + owner email, 2FA-ready)."""
+def require_admin_or_token(request: Request, authorization: str = Header(None)):
+    """Read-only monitoring (/v1/admin/metrics): the static admin Bearer token, or an owner session."""
     import hmac
     from . import api
     if authorization and hmac.compare_digest(authorization.removeprefix("Bearer ").strip(), api.ADMIN): return {"via": "token"}
+    return require_admin(request)
+def require_admin(request: Request):
+    """Owner dashboard: a logged-in owner session (is_admin + owner email; verified 2FA when PAAS_ADMIN_REQUIRE_2FA=1 and enrolled).
+    The static admin Bearer token is NOT accepted here: it is for infra routes only (nodes, edge, backups, metrics)."""
     a = admin_session(request)
     if a:   # owner session is enough for the dashboard; cookie writes still need the CSRF header
         if request.method not in ("GET", "HEAD") and request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
         return {"via": "session", "account": a}
-    raise HTTPException(401, "admin token required")
+    raise HTTPException(401, "owner sign-in required")
+def require_owner_2fa(request: Request):
+    """Money and account actions (suspend, credit, refund, read-only view): owner session that has enrolled in 2FA and verified it
+    in this session, whatever PAAS_ADMIN_REQUIRE_2FA says. Never the Bearer token."""
+    ctx = require_admin(request); a = ctx["account"]
+    if not a.get("totp_enabled"): raise HTTPException(403, "turn on two-factor authentication first (Owner dashboard > 2FA, /admin/2fa)")
+    if not a.get("mfa_verified"): raise HTTPException(403, "verify your two-factor code first (/admin/2fa)")
+    return ctx
 def _ids_test(): return {r["id"] for r in q("select id from accounts where is_test=1")}
 def _day(ts): return time.strftime("%Y-%m-%d", time.localtime(ts))
 def _series(tss, days=30):

@@ -3,7 +3,7 @@ plus admin 2FA enrollment. Every action needs the account's email typed back and
 import html, json, time
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from .db import q, audit
 from . import auth, www
 R = APIRouter()
@@ -39,7 +39,7 @@ def detail(account_id: int, _=Depends(www.require_admin)):
             "audit": q("select ts, account_id, app, action, substr(detail,1,200) detail from audit where account_id=? or detail like ? order by id desc limit 40", (account_id, f"account={account_id} %"))}
 class Suspend(BaseModel): suspended: bool; confirm: str; reason: str = ""
 @R.post("/v1/admin/accounts/{account_id}/suspend")
-def suspend(account_id: int, b: Suspend, ctx=Depends(www.require_admin)):
+def suspend(account_id: int, b: Suspend, ctx=Depends(www.require_owner_2fa)):
     a = _acct(account_id); _typed(a, b.confirm); why = _reason(b.reason)
     if a.get("is_admin"): raise HTTPException(400, "the owner account can't be suspended")
     from . import engine, billing
@@ -53,9 +53,9 @@ def suspend(account_id: int, b: Suspend, ctx=Depends(www.require_admin)):
         q("update accounts set suspended=0 where id=?", (account_id,)); billing.resume_suspended(account_id)
     audit(_who(ctx), None, "admin.suspend" if b.suspended else "admin.unsuspend", f"account={account_id} email={a['email']} reason={why}")
     return {"ok": True, "suspended": b.suspended}
-class Credit(BaseModel): amount_usd: float; confirm: str; reason: str = ""
+class Credit(BaseModel): amount_usd: float = Field(allow_inf_nan=False, ge=-1000, le=1000); confirm: str; reason: str = ""
 @R.post("/v1/admin/accounts/{account_id}/credit")
-def credit(account_id: int, b: Credit, ctx=Depends(www.require_admin)):
+def credit(account_id: int, b: Credit, ctx=Depends(www.require_owner_2fa)):
     a = _acct(account_id); _typed(a, b.confirm); why = _reason(b.reason)
     cents = round(b.amount_usd * 100)
     if not cents or abs(cents) > 100000: raise HTTPException(400, "amount must be non-zero and at most $1,000 either way")
@@ -63,35 +63,42 @@ def credit(account_id: int, b: Credit, ctx=Depends(www.require_admin)):
     (billing.credit if cents > 0 else billing.credit_rows)(account_id, cents, "admin_adjust", why)
     audit(_who(ctx), None, "admin.credit", f"account={account_id} email={a['email']} amount_usd={cents/100:.2f} reason={why}")
     return {"ok": True, "credit_usd": round((_acct(account_id)["credit_cents"] or 0) / 100, 2)}
-class Refund(BaseModel): session_id: str; amount_usd: float; confirm: str; reason: str = ""
+class Refund(BaseModel): session_id: str; amount_usd: float = Field(allow_inf_nan=False, gt=0, le=100000); confirm: str; reason: str = ""
 @R.post("/v1/admin/accounts/{account_id}/refund")
-def refund(account_id: int, b: Refund, ctx=Depends(www.require_admin), client=None):
+def refund(account_id: int, b: Refund, ctx=Depends(www.require_owner_2fa)):
+    return do_refund(account_id, b, ctx)
+def do_refund(account_id, b, ctx, client=None):
     """Refund a paid top-up or invoice through Stripe, never more than what's left of the original amount. A top-up refund also takes
     the refunded credit back out of the wallet."""
     a = _acct(account_id); _typed(a, b.confirm); why = _reason(b.reason)
-    s = q("select * from stripe_sessions where id=? and account_id=?", (b.session_id, account_id), one=True)
-    if not s: raise HTTPException(404, "no such payment on this account")
-    left = _refundable(s); cents = round(b.amount_usd * 100)
-    if cents <= 0 or cents > left: raise HTTPException(400, f"refund must be between $0.01 and ${left/100:.2f}")
+    from .db import tx, PG
     from . import stripe_billing as sb
-    pi = s.get("payment_intent")
-    try:
-        if not pi and s["kind"] == "invoice": pi = sb._call("GET", f"/invoices/{s['invoice_id'] or s['id']}", client=client).get("payment_intent")
-        if not pi: raise HTTPException(400, "this payment has no Stripe payment to refund")
-        r = sb._call("POST", "/refunds", {"payment_intent": pi, "amount": cents, "metadata": {"account_id": account_id, "reason": why}},
-                     idem=f"admrefund-{s['id']}-{left}-{cents}", client=client)
-    except HTTPException: raise
-    except Exception as e:
-        audit(_who(ctx), None, "admin.refund_failed", f"account={account_id} session={s['id']} amount_usd={cents/100:.2f} error={str(e)[:200]}")
-        raise HTTPException(502, f"Stripe refused the refund: {str(e)[:200]}")
-    q("insert into admin_refunds(id,session_id,account_id,amount_cents,reason,created) values(?,?,?,?,?,?)", (r.get("id"), s["id"], account_id, cents, why, time.time()))
-    if s["kind"] == "topup":
-        from . import billing; billing.credit_rows(account_id, -cents, "refund", f"refund {r.get('id')} of {s['id']}")
+    failed = None
+    with tx():   # row lock: concurrent refunds of one payment run one at a time, so the limit check and the write are atomic
+        s = q("select * from stripe_sessions where id=? and account_id=?" + (" for update" if PG else ""), (b.session_id, account_id), one=True)
+        if not s: raise HTTPException(404, "no such payment on this account")
+        left = _refundable(s); cents = round(b.amount_usd * 100)
+        if cents <= 0 or cents > left: raise HTTPException(400, f"refund must be between $0.01 and ${left/100:.2f}")
+        pi = s.get("payment_intent")
+        try:
+            if not pi and s["kind"] == "invoice": pi = sb._call("GET", f"/invoices/{s['invoice_id'] or s['id']}", client=client).get("payment_intent")
+            if not pi: raise HTTPException(400, "this payment has no Stripe payment to refund")
+            r = sb._call("POST", "/refunds", {"payment_intent": pi, "amount": cents, "metadata": {"account_id": account_id, "reason": why}},
+                         idem=f"admrefund-{s['id']}-{left}-{cents}", client=client)
+        except HTTPException: raise
+        except Exception as e: failed = e
+        if not failed:
+            q("insert into admin_refunds(id,session_id,account_id,amount_cents,reason,created) values(?,?,?,?,?,?)", (r.get("id"), s["id"], account_id, cents, why, time.time()))
+            if s["kind"] == "topup":
+                from . import billing; billing.credit_rows(account_id, -cents, "refund", f"refund {r.get('id')} of {s['id']}")
+    if failed:
+        audit(_who(ctx), None, "admin.refund_failed", f"account={account_id} session={s['id']} amount_usd={cents/100:.2f} error={str(failed)[:200]}")
+        raise HTTPException(502, f"Stripe refused the refund: {str(failed)[:200]}")
     audit(_who(ctx), None, "admin.refund", f"account={account_id} email={a['email']} session={s['id']} refund={r.get('id')} amount_usd={cents/100:.2f} reason={why}")
     return {"ok": True, "refund": r.get("id"), "refundable_left_usd": round((left - cents) / 100, 2)}
 class Imp(BaseModel): confirm: str; reason: str = ""
 @R.post("/v1/admin/accounts/{account_id}/impersonate")
-def impersonate(account_id: int, b: Imp, request: Request, ctx=Depends(www.require_admin)):
+def impersonate(account_id: int, b: Imp, request: Request, ctx=Depends(www.require_owner_2fa)):
     """Read-only view as this account: a short session flagged impersonated_by, which the API refuses for every write."""
     if ctx.get("via") != "session": raise HTTPException(400, "sign in to the dashboard to use the read-only view")
     a = _acct(account_id); _typed(a, b.confirm); why = _reason(b.reason)
@@ -135,6 +142,22 @@ def mfa_status(a=Depends(owner_session)):
     from . import mfa
     import os
     return mfa.status(a["id"]) | {"required": os.environ.get("PAAS_ADMIN_REQUIRE_2FA") == "1", "session_verified": bool(a.get("mfa_verified"))}
+ALERT_TO = "sachin@aloof.si"
+def _not_locked(a):
+    from . import mfa
+    until = mfa.locked_until(a["id"])
+    if until: raise HTTPException(429, "too many wrong codes; 2FA is locked for 30 minutes", headers={"Retry-After": str(int(until - time.time()) + 1)})
+def _failed(a):
+    from . import mfa
+    audit(a["id"], None, "admin.2fa_failed", "")
+    if mfa.record_failure(a["id"]):
+        audit(a["id"], None, "admin.2fa_locked", f"{mfa.LOCK_FAILS} failures in {mfa.LOCK_WINDOW // 60} min; locked {mfa.LOCK_FOR // 60} min")
+        try:
+            auth.send_mail(ALERT_TO, "Aloof admin 2FA locked after repeated wrong codes",
+                           f"The owner account's 2FA had {mfa.LOCK_FAILS} wrong codes within {mfa.LOCK_WINDOW // 60} minutes and is locked for "
+                           f"{mfa.LOCK_FOR // 60} minutes ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}).\n\nIf this wasn't you, someone has an "
+                           "owner session: sign out all sessions and change the owner password.")
+        except Exception: pass
 @R.post("/v1/admin/2fa/start")
 def mfa_start(a=Depends(owner_session)):
     from . import mfa
@@ -146,15 +169,17 @@ def _verify_session(request): q("update sessions set mfa_verified=1 where token_
 def mfa_confirm(b: Code, request: Request, a=Depends(owner_session)):
     from . import mfa
     from .api import _rate_check; _rate_check((f"2fa:{a['id']}",))
+    _not_locked(a)
     try: codes = mfa.confirm(a["id"], b.code)
     except PermissionError as e: raise HTTPException(409, str(e))
-    except ValueError as e: raise HTTPException(400, str(e))
+    except ValueError as e: _failed(a); raise HTTPException(400, str(e))
     _verify_session(request); audit(a["id"], None, "admin.2fa_enabled", ""); return {"ok": True, "recovery_codes": codes}
 @R.post("/v1/admin/2fa/verify")
 def mfa_verify(b: Code, request: Request, a=Depends(owner_session)):
     from . import mfa
     from .api import _rate_check; _rate_check((f"2fa:{a['id']}",))
-    if not mfa.verify(a["id"], b.code): audit(a["id"], None, "admin.2fa_failed", ""); raise HTTPException(400, "that code didn't work")
+    _not_locked(a)
+    if not mfa.verify(a["id"], b.code): _failed(a); raise HTTPException(400, "that code didn't work")
     _verify_session(request); audit(a["id"], None, "admin.2fa_verified", ""); return {"ok": True}
 @R.get("/admin/2fa", response_class=HTMLResponse, include_in_schema=False)
 def mfa_page(request: Request):

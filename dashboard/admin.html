@@ -30,7 +30,7 @@ dialog.acd{background:var(--panel);color:var(--fg);border:1px solid var(--line);
 .acd dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:14px;margin:0}.acd dt{color:var(--fg3)}.linkish{background:none;border:0;padding:0;color:inherit;font:inherit;text-decoration:underline dotted;cursor:pointer;text-align:left}
 .fld{display:block;margin-top:10px;font-size:13px}.fld input{display:block;width:100%;margin-top:4px}
 </style></head><body>
-<header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><button class="btn ghost sm" id=themebtn onclick="toggleTheme();themeLbl()" aria-label="Switch theme">◐<span class=tl> Theme</span></button><a href="/admin/2fa">2FA</a><a href="/dashboard">Dashboard</a></div></header>
+<header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><a class="btn ghost sm" id=mfabtn href="/admin/2fa" title="Two-factor authentication">2FA</a><button class="btn ghost sm" id=themebtn onclick="toggleTheme();themeLbl()" aria-label="Switch theme">◐<span class=tl> Theme</span></button><a href="/admin/2fa">2FA</a><a href="/dashboard">Dashboard</a></div></header>
 <main class="wrap adm" id=main>
 <p id=live class=sr-only aria-live=polite aria-atomic=true></p>
 <div id=app class=skel aria-busy=true>
@@ -166,4 +166,6 @@ async function flag(id,v,e){if(!await ask(v?'Mark account as test?':'Count this 
   toast((v?'Marked test: ':'Counted as real: ')+(e||id),async()=>{const u=await fetch(`/v1/admin/accounts/${id}/test`,{method:'POST',headers:H(),body:JSON.stringify({is_test:!v})});toast(u.ok?'Undone':'Undo failed: error '+u.status);load()})}
 async function exportCsv(){const t=$('ex').value,r=await fetch('/v1/admin/export.csv?table='+t,{headers:H()});if(!r.ok)return toast('Export failed: error '+r.status);const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`aloof-${t}.csv`;a.click()}
 themeLbl();load();setInterval(()=>{if(!document.hidden)load()},60000);setInterval(()=>genLbl(),15000);
-</script></body></html>
+</script><script>fetch('/v1/admin/2fa').then(r=>r.ok?r.json():null).then(s=>{if(!s)return;const b=document.getElementById('mfabtn');if(!b)return;
+b.textContent=s.enrolled?(s.session_verified?'2FA ✓':'Verify 2FA'):'Turn on 2FA';if(!s.enrolled||!s.session_verified)b.classList.remove('ghost')}).catch(()=>{})</script>
+</body></html>

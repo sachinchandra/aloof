@@ -515,7 +515,8 @@ def reap_destroyed():
             r = q("select status from apps where name=?", (app,), one=True)
             if r and r["status"] == "destroyed":
                 for o in q("select * from instances where app=? and status!='stopped'", (app,)): _stop(o)
-                _sweep_containers(app)
+                r2 = q("select status from apps where name=?", (app,), one=True)   # re-check: a redeploy may have revived the name meanwhile
+                if r2 and r2["status"] == "destroyed": _sweep_containers(app)
     try: prune_networks()
     except Exception as e: event("system", f"network prune: {e}")
 NET_PRUNE_AGE = 600

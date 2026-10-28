@@ -8,6 +8,13 @@ from paas.db import q
 @pytest.fixture(autouse=True)
 def _fresh_login_limits():
     yield; api._login_hits.clear()   # these tests sign in a lot from one test-client IP
+def owner2fa():
+    """Owner session that has enrolled in 2FA and verified it (money/account actions need this)."""
+    o = owner(); oid = q("select id from accounts where lower(email)=?", (www.ADMIN_EMAIL,), one=True)["id"]
+    q("update accounts set totp_enabled=0, totp_secret_enc=null, totp_recovery=null where id=?", (oid,)); q("delete from mfa_failures where account_id=?", (oid,))
+    st = o.post("/v1/admin/2fa/start", headers=CS).json()
+    r = o.post("/v1/admin/2fa/confirm", json={"code": mfa.code(st["secret"])}, headers=CS); assert r.status_code == 200
+    o.secret, o.oid, o.codes = st["secret"], oid, r.json()["recovery_codes"]; return o
 def _real():
     n = time.time_ns(); e = f"cust{n}@realco.io"; cl = _reg(e); www.mark_flags(); return cl, acct(e)
 
@@ -62,7 +69,9 @@ def test_pulse_today_vs_week_real_accounts_only():
     h = html(); assert "id=pulse" in h and "function pulse(" in h
 
 def test_account_detail_and_actions_need_admin_typed_confirm_and_audit():
-    o = owner(); ucl, u = _real(); other, _ = _real(); path = f"/v1/admin/accounts/{u['id']}"
+    o = owner2fa(); ucl, u = _real(); other, _ = _real(); path = f"/v1/admin/accounts/{u['id']}"
+    plain = owner()   # owner session without 2FA: can look, can't act
+    assert plain.post(path + "/suspend", json={"suspended": True, "confirm": u["email"], "reason": "x"}, headers=CS).status_code == 403
     for cl in (c, other):
         assert cl.get(path).status_code == 401
         assert cl.post(path + "/suspend", json={"suspended": True, "confirm": u["email"], "reason": "x"}, headers=CS).status_code == 401
@@ -84,7 +93,7 @@ def test_account_detail_and_actions_need_admin_typed_confirm_and_audit():
     assert o.post(f"/v1/admin/accounts/{own}/suspend", json={"suspended": True, "confirm": www.ADMIN_EMAIL, "reason": "no"}, headers=CS).status_code == 400
 
 def test_refund_capped_at_original_and_goes_through_stripe(monkeypatch):
-    o = owner(); _, u = _real(); k = str(time.time_ns()); calls = []
+    o = owner2fa(); _, u = _real(); k = str(time.time_ns()); calls = []
     from paas import stripe_billing as sb
     monkeypatch.setattr(sb, "_call", lambda m, p, d=None, idem=None, client=None: calls.append((m, p, d)) or {"id": "re_" + str(len(calls)) + k})
     q("insert into stripe_sessions(id,account_id,kind,amount_cents,status,payment_intent,created,updated) values(?,?,?,?,?,?,?,?)", ("cs" + k, u["id"], "topup", 1000, "paid", "pi_" + k, time.time(), time.time()))
@@ -101,7 +110,7 @@ def test_refund_capped_at_original_and_goes_through_stripe(monkeypatch):
         q("delete from stripe_sessions where id=?", ("cs" + k,)); q("delete from admin_refunds where session_id=?", ("cs" + k,))
 
 def test_read_only_view_blocks_writes_and_exits():
-    o = owner(); _, u = _real(); path = f"/v1/admin/accounts/{u['id']}/impersonate"
+    o = owner2fa(); _, u = _real(); path = f"/v1/admin/accounts/{u['id']}/impersonate"
     assert o.post(path, json={"confirm": "x", "reason": "support"}, headers=CS).status_code == 400
     r = o.post(path, json={"confirm": u["email"], "reason": "support ticket"}, headers=CS); assert r.status_code == 200
     assert o.get("/v1/apps").status_code == 200
@@ -137,3 +146,75 @@ def test_totp_and_2fa_never_locks_owner_out(monkeypatch):
         monkeypatch.delenv("PAAS_ADMIN_REQUIRE_2FA"); assert o3.get("/v1/admin/dashboard").status_code == 200   # flag off: as before
     finally:
         q("update accounts set totp_enabled=0, totp_secret_enc=null, totp_recovery=null where id=?", (oid,))
+
+def _bearer(): return {"Authorization": f"Bearer {api.ADMIN}", **CS}
+
+def test_bearer_token_is_infra_only():
+    _, u = _real(); p = f"/v1/admin/accounts/{u['id']}"
+    for path, body in ((p + "/credit", {"amount_usd": 1, "confirm": u["email"], "reason": "x"}), (p + "/suspend", {"suspended": True, "confirm": u["email"], "reason": "x"}),
+                       (p + "/refund", {"session_id": "x", "amount_usd": 1, "confirm": u["email"], "reason": "x"}), (p + "/impersonate", {"confirm": u["email"], "reason": "x"})):
+        assert c.post(path, json=body, headers=_bearer()).status_code == 401, path
+    assert c.get(p, headers=_bearer()).status_code == 401 and c.get("/v1/admin/dashboard", headers=_bearer()).status_code == 401
+    assert c.get("/v1/admin/metrics", headers=_bearer()).status_code == 200   # read-only monitoring
+    assert c.get("/v1/admin/nodes", headers=_bearer()).status_code == 200
+
+def test_credit_amount_validated():
+    o = owner2fa(); _, u = _real(); p = f"/v1/admin/accounts/{u['id']}/credit"
+    for bad in ('NaN', 'Infinity', '-Infinity', '1e308', '1001', '-1001'):
+        r = o.post(p, content='{"amount_usd": %s, "confirm": "%s", "reason": "x"}' % (bad, u["email"]), headers={**CS, "content-type": "application/json"})
+        assert r.status_code == 422, bad
+    assert q("select credit_cents from accounts where id=?", (u["id"],), one=True)["credit_cents"] == u["credit_cents"]
+
+def test_refund_ignores_client_query_param(monkeypatch):
+    o = owner2fa(); _, u = _real(); k = str(time.time_ns()); calls = []
+    from paas import stripe_billing as sb
+    monkeypatch.setattr(sb, "_call", lambda m, p, d=None, idem=None, client=None: calls.append(client) or {"id": "re_" + k})
+    q("insert into stripe_sessions(id,account_id,kind,amount_cents,status,payment_intent,created,updated) values(?,?,?,?,?,?,?,?)", ("cs" + k, u["id"], "topup", 1000, "paid", "pi_" + k, time.time(), time.time()))
+    try:
+        r = o.post(f"/v1/admin/accounts/{u['id']}/refund?client=evil", json={"session_id": "cs" + k, "amount_usd": 1, "confirm": u["email"], "reason": "billing error"}, headers=CS)
+        assert r.status_code == 200 and calls == [None], r.text
+        r = o.post(f"/v1/admin/accounts/{u['id']}/refund", json={"session_id": "cs" + k, "amount_usd": float("nan") if False else -1, "confirm": u["email"], "reason": "billing error"}, headers=CS)
+        assert r.status_code == 422
+    finally:
+        q("delete from stripe_sessions where id=?", ("cs" + k,)); q("delete from admin_refunds where session_id=?", ("cs" + k,))
+
+def test_totp_replay_rejected():
+    o = owner2fa()
+    o2 = TestClient(api.app, base_url="http://api.aloof.test"); o2.post("/v1/auth/login", json={"email": www.ADMIN_EMAIL, "password": "correct horse 1"})
+    # the code used to confirm enrollment can't be used again in its time step
+    assert o2.post("/v1/admin/2fa/verify", json={"code": mfa.code(o.secret)}, headers=CS).status_code == 400
+    q("update accounts set totp_last_step=0 where id=?", (o.oid,))
+    assert o2.post("/v1/admin/2fa/verify", json={"code": mfa.code(o.secret)}, headers=CS).status_code == 200
+    o3 = TestClient(api.app, base_url="http://api.aloof.test"); o3.post("/v1/auth/login", json={"email": www.ADMIN_EMAIL, "password": "correct horse 1"})
+    assert o3.post("/v1/admin/2fa/verify", json={"code": mfa.code(o.secret)}, headers=CS).status_code == 400   # same code, second session
+
+def test_recovery_codes_strong_salted_single_use():
+    o = owner2fa(); assert len(o.codes) == 8 and len(set(o.codes)) == 8
+    for cde in o.codes: assert len(cde.replace("-", "")) * 4 >= 80
+    rows = q("select salt, hash from mfa_recovery where account_id=?", (o.oid,)); assert len(rows) == 8 and len({r["salt"] for r in rows}) == 8
+    assert all(cde not in r["hash"] for r in rows for cde in o.codes)
+    assert mfa._spend_recovery(o.oid, o.codes[1]) and not mfa._spend_recovery(o.oid, o.codes[1])
+
+def test_2fa_lockout_after_repeated_failures_and_alerts(monkeypatch):
+    o = owner2fa(); sent = []
+    from paas import auth
+    monkeypatch.setattr(auth, "send_mail", lambda to, subj, body: sent.append((to, subj)))
+    o2 = TestClient(api.app, base_url="http://api.aloof.test"); o2.post("/v1/auth/login", json={"email": www.ADMIN_EMAIL, "password": "correct horse 1"})
+    good = mfa.code(o.secret); bad = "000000" if good != "000000" else "111111"
+    try:
+        for i in range(mfa.LOCK_FAILS):
+            api._login_hits.clear()
+            assert o2.post("/v1/admin/2fa/verify", json={"code": bad}, headers=CS).status_code in (400, 429)
+        q("update accounts set totp_last_step=0 where id=?", (o.oid,))
+        r = o2.post("/v1/admin/2fa/verify", json={"code": good}, headers=CS); assert r.status_code == 429 and "locked" in r.text   # even the right code
+        assert sent == [("sachin@aloof.si", sent[0][1])] and "locked" in sent[0][1]
+        assert q("select 1 from audit where action='admin.2fa_locked' and account_id=?", (o.oid,), one=True)
+    finally:
+        q("delete from mfa_failures where account_id=?", (o.oid,))
+
+def test_flag_on_unenrolled_owner_can_still_reach_enrollment(monkeypatch):
+    o = owner(); oid = q("select id from accounts where lower(email)=?", (www.ADMIN_EMAIL,), one=True)["id"]
+    q("update accounts set totp_enabled=0, totp_secret_enc=null where id=?", (oid,)); monkeypatch.setenv("PAAS_ADMIN_REQUIRE_2FA", "1")
+    assert o.get("/admin").status_code == 200 and "/admin/2fa" in o.get("/admin").text
+    assert o.get("/admin/2fa").status_code == 200 and o.get("/v1/admin/2fa").status_code == 200
+    assert o.post("/v1/admin/2fa/start", headers=CS).status_code == 200
