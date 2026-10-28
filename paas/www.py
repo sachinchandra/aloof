@@ -383,6 +383,11 @@ def metrics():
     inst = q("select app, count(*) n from instances where status='running' group by app")
     running = sum(r["n"] for r in inst if r["app"] in app_names); active = sum(1 for r in inst if r["app"] in app_names)
     rels = [r for r in q("select app,version,status,reason,created from releases where created>?", (now - 30 * 86400,)) if r["app"] in app_names]
+    every = q("select name,account_id,status from apps"); every_names = {a["name"] for a in every}   # incl. test + owner accounts
+    rel_all = [r for r in q("select app,status from releases where created>?", (now - 30 * 86400,)) if r["app"] in every_names]
+    dep_all = {"apps_total": sum(1 for a in every if a["status"] != "destroyed"), "apps_active": sum(1 for r in inst if r["app"] in every_names),
+               "running_instances": sum(r["n"] for r in inst if r["app"] in every_names), "deploys_30d": len(rel_all),
+               "failed_30d": sum(1 for r in rel_all if r["status"] == "failed")}
     usage = q("select account_id, sum(cost_cents) c from usage_month where month=? group by account_id order by c desc", (mk,))
     email = {a["id"]: a["email"] for a in accts}
     top = [{"account_id": r["account_id"], "email": email[r["account_id"]], "tier": acct_tier[r["account_id"]], "usage_usd": round((r["c"] or 0) / 100, 4),
@@ -409,7 +414,8 @@ def metrics():
         "revenue": {**money, "month": mk,
                     "credit_balance_usd": round(sum((a["credit_cents"] or 0) for a in accts) / 100, 2), "usage_this_month_usd": round(sum((r["c"] or 0) for r in usage if r["account_id"] in real) / 100, 2)},
         "deployments": {"apps_total": len(apps), "apps_active": active, "running_instances": running, "apps_by_plan": by_plan, "apps_by_tier": by_tier,
-                        "deploys_per_day": _series([r["created"] for r in rels]), "deploys_30d": len(rels), "failed_30d": sum(1 for r in rels if r["status"] == "failed")},
+                        "deploys_per_day": _series([r["created"] for r in rels]), "deploys_30d": len(rels), "failed_30d": sum(1 for r in rels if r["status"] == "failed"),
+                        "all": dep_all},   # top-level numbers: real customers only; "all": including test and owner accounts
         "data": {"postgres_dbs": len(pgs), "volumes": len(vols), "volume_gb": sum((v["size_gb"] or 0) for v in vols)},
         "waitlist": wlc, "mail": W.mail_health(),
         "design_partners": partners[:50], "top_users": top, "server": server_health(), "backups": offsite.status(),

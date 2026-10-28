@@ -179,3 +179,22 @@ def test_conversion_path_ctas_and_signup_js():
     l = c.get("/login").text
     assert "hashchange" in l and "errText" in l and "Could not reach Aloof" in l and "Enter your email address first" in l and "lb.disabled=true" in l
     js = c.get("/static/analytics.js").text; assert "sessionStorage.setItem('aloof_anon'" in js
+
+def test_deployments_split_customers_vs_all():
+    """Apps of test/owner accounts are excluded from the customer numbers but shown under deployments.all."""
+    from paas import engine
+    k = str(time.time_ns()); t = engine.create_account(f"dep{k}@x-test.io"); r = engine.create_account(f"dep{k}@realco.io")
+    q("update accounts set is_test=1 where id=?", (t["id"],)); q("update accounts set is_test=0 where id=?", (r["id"],))
+    now = time.time()
+    try:
+        for n, a in (("dt" + k[-8:], t["id"]), ("dr" + k[-8:], r["id"])):
+            q("insert into apps(name,account_id,spec,status,created,updated) values(?,?,?,?,?,?)", (n, a, "{}", "running", now, now))
+            q("insert into instances(id,app,status) values(?,?,?)", ("i" + n, n, "running"))
+            q("insert into releases(app,version,status,created) values(?,?,?,?)", (n, 1, "live", now))
+        d = www.metrics()["deployments"]; base = d["all"]
+        assert base["apps_total"] >= d["apps_total"] + 1 and base["apps_active"] >= d["apps_active"] + 1 and base["deploys_30d"] >= d["deploys_30d"] + 1
+        q("update accounts set is_test=1 where id=?", (r["id"],)); d2 = www.metrics()["deployments"]
+        assert d2["apps_total"] == d["apps_total"] - 1 and d2["all"]["apps_total"] == base["apps_total"]
+    finally:
+        for n in ("dt" + k[-8:], "dr" + k[-8:]):
+            q("delete from apps where name=?", (n,)); q("delete from instances where app=?", (n,)); q("delete from releases where app=?", (n,))

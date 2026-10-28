@@ -200,7 +200,8 @@ def _promo_view(pc):
             "customer_restricted": bool(pc.get("customer")), "percent_off": c.get("percent_off"), "amount_off": c.get("amount_off"),
             "duration": c.get("duration"), "duration_in_months": c.get("duration_in_months"), "applies_to_products": (c.get("applies_to") or {}).get("products") or []}
 @R.get("/v1/admin/promos")
-def promos(_=Depends(www.require_admin), client=None):
+def promos(_=Depends(www.require_admin)): return promos_view()
+def promos_view(client=None):
     """Active Stripe promotion codes with redemptions used/max, expiry and restrictions. GETs only; never changes Stripe."""
     try: d = _stripe_get("/promotion_codes?active=true&limit=100&expand[]=data.coupon.applies_to", client)
     except RuntimeError as e: raise HTTPException(503, f"Stripe unavailable: {e}")
@@ -219,7 +220,8 @@ def prior_paid(a, client=None):
     out["eligible_first_time_codes"] = not out["has_prior_paid"]   # Razorpay payments don't count for Stripe's rule (shown for context)
     return out
 @R.get("/v1/admin/accounts/{account_id}/promo-eligibility")
-def promo_eligibility(account_id: int, _=Depends(www.require_admin), client=None):
+def promo_eligibility(account_id: int, _=Depends(www.require_admin)): return promo_eligibility_view(account_id)
+def promo_eligibility_view(account_id, client=None):
     a = _acct(account_id)
     try: return {"account_id": account_id, "email": a["email"]} | prior_paid(a, client)
     except RuntimeError as e: raise HTTPException(503, f"Stripe unavailable: {e}")
