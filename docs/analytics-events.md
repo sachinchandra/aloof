@@ -29,8 +29,13 @@ Frontend passes UTM/referrer as optional JSON fields on the signup bodies: `{"em
 | Event | When | Properties |
 |---|---|---|
 | `$pageview` | every page load | `utm_*` from the URL (if present), `referrer` (external, no query), and first-touch `first_utm_source/medium/campaign/term/content`, `first_referrer`, `first_landing` (kept in sessionStorage from the first page of the visit) |
-| `cta_click` | click on any `[data-cta]` element | `cta`, `location` |
+| `cta_clicked` | click on any `[data-cta]` element | `cta` (`deploy_free` sign-up buttons, `login`, `pricing_<plan>`, `connect_mcp`, `github_signin`/`google_signin`/`x_signin`, `deploy_app`, `subscribe_card`, `<promo>_claim` e.g. `first1_claim` = Subscribe by card after landing with `?promo=FIRST1`), `location`, `href` (no query), `promo` (claim only) |
+| `$autocapture` | click on any link/button/summary/[data-cta] (own cookieless autocapture; posthog-js is not used) | `$event_type`=`click`, `$elements_chain` (tag, classes, id, href without query, button/link text ≤60 chars, data-cta; never input values), `$el_text` |
 | `signup_started` | Create account clicked / sign-in link requested on the Create tab | `method` |
 | `$identify` | console load after login (distinct_id = account id) | `$set_once`: `initial_utm_*`, `initial_referrer`, `initial_landing` |
 
 Key: `POSTHOG_API_KEY` (env, deploy/golive.env); never hardcoded. `POSTHOG_KEY` / `data/posthog_key` are legacy fallbacks.
+
+
+All browser events carry first-touch `first_utm_*`, `first_referrer`, `first_landing`, `first_promo`. Visiting with `?aloof_test=1` (or `is_test=1`) marks the tab: every event gets `is_test=true` and so does the person on identify.
+Social sign-up (GitHub/Google/X): the login page appends first-touch UTM to `/auth/{p}/start`; it is kept in an HttpOnly `aloof_attr` cookie (path /auth/, same TTL as the OAuth state) and attached to `signup_completed`.

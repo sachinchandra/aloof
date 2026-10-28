@@ -68,7 +68,7 @@ def posthog_host(): return (os.environ.get("POSTHOG_HOST") or POSTHOG_DEFAULT_HO
 def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
-    return f'<script>window.ALOOF_PH={json.dumps({"key": k, "host": posthog_host(), "hosts": analytics_hosts()})}</script><script src="/static/analytics.js?v=7" defer></script>' if k else ""
+    return f'<script>window.ALOOF_PH={json.dumps({"key": k, "host": posthog_host(), "hosts": analytics_hosts()})}</script><script src="/static/analytics.js?v=8" defer></script>' if k else ""
 def analytics_hosts():
     """Only platform hosts load analytics (never <app>.<domain> user apps): base, www and api for the base + alt domains."""
     ds = [d.strip() for d in (os.environ.get("PAAS_BASE_DOMAIN", "aloof.si") + "," + os.environ.get("PAAS_ALT_DOMAINS", "")).split(",") if d.strip()]
@@ -619,9 +619,9 @@ def sso_buttons(providers, nxt=None):
     import urllib.parse as _u, html as _h
     on = {p["id"] for p in (providers or []) if p and p.get("enabled")}
     q = ("?next=" + _u.quote(nxt, safe="")) if nxt else ""
-    return "".join(f'<a class="p-{p}" href="/auth/{p}/start{_h.escape(q)}" data-p="{p}">{SSO_MARKS[p]}<span>Continue with {SSO_NAMES[p]}</span></a>'
+    return "".join(f'<a class="p-{p}" href="/auth/{p}/start{_h.escape(q)}" data-p="{p}" data-cta="{p}_signin" data-cta-loc=login>{SSO_MARKS[p]}<span>Continue with {SSO_NAMES[p]}</span></a>'
                    for p in ("github", "google", "x") if p in on)
-SSO_JS = """<script>if(/[?&]auth_error=email_linked_other/.test(location.search)&&window.mode)mode('login');document.querySelectorAll('#sso a').forEach(function(a){a.addEventListener('click',function(){if(window.aloofTrack)aloofTrack(window.M=='register'?'signup_started':'login_started',{method:a.dataset.p})})})</script>"""
+SSO_JS = """<script>if(/[?&]auth_error=email_linked_other/.test(location.search)&&window.mode)mode('login');document.querySelectorAll('#sso a').forEach(function(a){a.addEventListener('click',function(){if(window.aloofTrack)aloofTrack(window.M=='register'?'signup_started':'login_started',{method:a.dataset.p});try{var f=window.aloofAttribution?aloofAttribution():{},u=new URL(a.href);['utm_source','utm_medium','utm_campaign','utm_term','utm_content','referrer','landing'].forEach(function(k){if(f[k])u.searchParams.set(k,String(f[k]).slice(0,300))});a.href=u.toString()}catch(e){}})})</script>"""
 def x_email(brand):
     """X returned no email: ask for one; Backend (GET/POST /auth/x/email) sends a link to confirm it. Pending state is in an HttpOnly cookie."""
     return page(f"Add your email · {brand}", f"""<div class=auth><div class=card><a class=logo href="/" style="margin-bottom:18px"><i></i>{brand}</a>

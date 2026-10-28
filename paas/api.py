@@ -621,13 +621,20 @@ def social_start(p: str, request: Request, next: str | None = None):
     if p not in oauth_login.PROVIDERS: return _auth_err("provider_disabled", p[:20], nxt)
     base = oauth_login.base_url(); bh = _up.urlsplit(base).netloc
     if SECURE_COOKIES and bh and request.url.netloc != bh:   # one canonical host, so the state cookie and the session land where the callback is
-        return RedirectResponse(f"{base}/auth/{p}/start?" + _up.urlencode({"next": nxt}), 303)
+        return RedirectResponse(f"{base}/auth/{p}/start?" + _up.urlencode({"next": nxt} | {k: v for k, v in request.query_params.items() if k in ATTR_KEYS}), 303)
     try: _rate_check(("oauth-ip:" + _ipk(request),))
     except HTTPException: return _auth_err("rate_limited", p, nxt)
     # from the login/signup page it replaces whatever session the browser had, so the account you land in is the provider's
     try: url, st = oauth_login.start(p, nxt, link_account=None)
     except oauth_login.AuthError as e: return _auth_err(e.code, p, nxt)
-    r = RedirectResponse(url, 303); r.set_cookie(oauth_login.STATE_COOKIE, st, **_cookie_kw(oauth_login.STATE_TTL)); return r
+    r = RedirectResponse(url, 303); r.set_cookie(oauth_login.STATE_COOKIE, st, **_cookie_kw(oauth_login.STATE_TTL))
+    attr = {k: str(v)[:300] for k, v in request.query_params.items() if k in ATTR_KEYS and v}   # first-touch UTM from the login page, for signup_completed
+    if attr: r.set_cookie(ATTR_COOKIE, _up.urlencode(attr), **_cookie_kw(oauth_login.STATE_TTL))
+    return r
+ATTR_COOKIE = "aloof_attr"
+def _cookie_attr(request):
+    try: return {k: v[:300] for k, v in _up.parse_qsl(request.cookies.get(ATTR_COOKIE) or "") if k in ATTR_KEYS and v}
+    except Exception: return {}
 @app.post("/auth/{p}/connect")
 def social_connect(p: str, request: Request):
     """Dashboard Connect: signed-in session + X-Aloof-CSRF: 1. Returns {url} to navigate to; the callback links to this account."""
@@ -660,10 +667,12 @@ def social_callback(p: str, request: Request, code: str | None = None, state: st
     if pid:
         r = RedirectResponse("/auth/x/email?" + _up.urlencode({"next": nxt}), 303)
         r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); r.set_cookie("aloof_oauth_pending", pid, **_cookie_kw(oauth_login.PENDING_TTL)); return r
-    if created: analytics.capture(a["id"], "signup_completed", {"method": p})
+    if created:
+        at = _cookie_attr(request); _save_attribution(a["id"], at)
+        analytics.capture(a["id"], "signup_completed", {"method": p} | analytics.attribution(at))
     else: analytics.identify(a["id"])
     _audit(a["id"], None, "auth.identity_connect" if s.get("link") else "auth.login", p, _ip(request))
-    r = RedirectResponse(nxt, 303); r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/")
+    r = RedirectResponse(nxt, 303); r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); r.delete_cookie(ATTR_COOKIE, path="/auth/")
     if not s.get("link"): r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
 @app.get("/auth/x/email", response_class=HTMLResponse)
