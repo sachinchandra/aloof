@@ -49,6 +49,8 @@ def register(email, password):
     if q("select 1 from accounts where email=?", (email,), one=True): raise PermissionError("account exists; log in or use a magic link")
     a = engine.create_account(email, hash_password(password))
     if engine.is_test_email(email): return a   # reserved test domains (example.com, .test, ...) never get mail
+    from . import lifecycle
+    if lifecycle.enabled(): lifecycle.welcome(a["id"], a["api_key"]); return a   # onboarding welcome with the key block (one welcome only)
     try:
         from . import emailkit; subj, txt, htm = emailkit.welcome(a["api_key"], f"{E('PAAS_PUBLIC_API_URL','http://localhost:8000')}/dashboard")
         send_mail(email, subj, txt, html=htm)

@@ -90,6 +90,8 @@ def start():
     threading.Thread(target=_loop, args=(engine.reap_destroyed, 120), daemon=True).start()
     from . import waitlist as _wl
     threading.Thread(target=_loop, args=(_wl.retry_unsent, 300), daemon=True).start()
+    from . import lifecycle as _lc
+    threading.Thread(target=_loop, args=(_lc.tick, 600), daemon=True).start()   # no-op unless LIFECYCLE_EMAILS_ENABLED=1
     from . import www as _www
     threading.Thread(target=_loop, args=(_www.snapshot, 1800), daemon=True).start()
     from . import domains as _doms

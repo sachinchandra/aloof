@@ -173,6 +173,13 @@ create index if not exists mfa_recovery_acct on mfa_recovery(account_id);
 create table if not exists mfa_failures(id AUTOPK, account_id bigint not null, ts REAL not null);
 create index if not exists mfa_failures_acct on mfa_failures(account_id, ts);
 """)
+    # v21: lifecycle (onboarding) emails: per-account opt-out and one row per (account, kind) claimed before sending
+    ,(21, """
+alter table accounts add column if not exists email_optout INTEGER default 0;
+alter table accounts add column if not exists email_optout_at REAL;
+create table if not exists lifecycle_mail(account_id bigint not null, kind TEXT not null, sent_at REAL, status TEXT, primary key(account_id, kind));
+create index if not exists lifecycle_mail_sent on lifecycle_mail(account_id, sent_at);
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

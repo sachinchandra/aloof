@@ -135,6 +135,7 @@ def signup(s: Signup):
     except ValueError as x: raise HTTPException(400, str(x))
     if q("select 1 from accounts where email=?", (e,), one=True): raise HTTPException(409, "exists")
     a = engine.create_account(e); analytics.capture(a["id"], "signup_completed", {"method": "api"} | analytics.attribution(s))
+    from . import lifecycle; lifecycle.welcome(a["id"])   # no-op while LIFECYCLE_EMAILS_ENABLED=0
     return {"email":a["email"],"api_key":a["api_key"],"credit_usd":billing.usd(a.get("credit_cents"))}
 def _live_regions():
     from . import regions as R
@@ -483,6 +484,11 @@ def billing_alerts(p: AlertPrefs, a=Depends(acct)):
     th = p.threshold_usd
     if th is not None and not (0 < th <= 5000): raise HTTPException(400, "threshold must be between $0 and $5,000, or empty")
     q("update accounts set lowbal_alerts=?, lowbal_threshold_usd=? where id=?", (int(p.enabled), th, a["id"])); return billing.runway(a["id"])
+class EmailPrefs(BaseModel): onboarding: bool = True
+@app.put("/v1/account/email-prefs")
+def email_prefs(p: EmailPrefs, a=Depends(acct)):
+    """Onboarding/tips emails on or off (transactional mail is unaffected)."""
+    from . import lifecycle; lifecycle.set_optout(a["id"], not p.onboarding); return {"onboarding": p.onboarding}
 @app.get("/v1/billing")
 def billing_summary(a=Depends(acct)):
     a = q("select * from accounts where id=?", (a["id"],), one=True)
@@ -599,7 +605,9 @@ def auth_magic_finish(token: str):
         try:
             if oauth_login.finish_pending(pend, a["id"]): via = "x"
         except oauth_login.AuthError: pass
-    if a.get("_created"): analytics.capture(a["id"], "signup_completed", {"method": via} | (a.get("_attribution") or {}))
+    if a.get("_created"):
+        analytics.capture(a["id"], "signup_completed", {"method": via} | (a.get("_attribution") or {}))
+        from . import lifecycle; lifecycle.welcome(a["id"])   # no-op while LIFECYCLE_EMAILS_ENABLED=0
     else: analytics.identify(a["id"])
     r = RedirectResponse("/dashboard", 303); r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
@@ -670,6 +678,7 @@ def social_callback(p: str, request: Request, code: str | None = None, state: st
     if created:
         at = _cookie_attr(request); _save_attribution(a["id"], at)
         analytics.capture(a["id"], "signup_completed", {"method": p} | analytics.attribution(at))
+        from . import lifecycle; lifecycle.welcome(a["id"])   # no-op while LIFECYCLE_EMAILS_ENABLED=0
     else: analytics.identify(a["id"])
     _audit(a["id"], None, "auth.identity_connect" if s.get("link") else "auth.login", p, _ip(request))
     r = RedirectResponse(nxt, 303); r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); r.delete_cookie(ATTR_COOKIE, path="/auth/")
@@ -723,7 +732,7 @@ def auth_sessions_revoke_others(request: Request, a=Depends(acct)):
 @app.get("/v1/auth/me")
 def auth_me(a=Depends(acct)):
     return {"id": a["id"], "email": a["email"], "name": a.get("billing_name"), "created": a.get("created"), "tier": a.get("tier") or "free",
-            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")),
+            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")), "email_optout": bool(a.get("email_optout")),
             "api_key_prefix": key_hint(a.get("api_key_prefix")), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}
@@ -1195,6 +1204,7 @@ app.include_router(devx.R)
 app.include_router(www.R)
 from . import templating as _tpl; app.include_router(_tpl.R)
 from . import waitlist as _wl; app.include_router(_wl.R)
+from . import lifecycle as _lcm; app.include_router(_lcm.R)
 from . import admin_ops as _aops; app.include_router(_aops.R)
 try: _wl.migrate_kv()
 except Exception as _e: logging.getLogger('paas').error('waitlist kv migration failed: %s', _e)
