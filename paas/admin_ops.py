@@ -163,3 +163,38 @@ def mfa_page(request: Request):
     if not www.is_owner(a): raise HTTPException(404, "Not Found")
     import os
     return open(os.path.join(www.ROOT, "dashboard", "admin2fa.html")).read()
+# ---- promo codes (read-only from Stripe; terms live there) ----
+def _stripe_get(path, client=None):
+    from . import stripe_billing as sb
+    return sb._call("GET", path, client=client)
+def _promo_view(pc):
+    c = pc.get("coupon") or {}; r = pc.get("restrictions") or {}
+    return {"code": pc["code"], "id": pc["id"], "active": pc.get("active"), "used": pc.get("times_redeemed", 0), "max": pc.get("max_redemptions"),
+            "remaining": (pc["max_redemptions"] - pc.get("times_redeemed", 0)) if pc.get("max_redemptions") else None,
+            "expires_at": pc.get("expires_at"), "first_time_only": bool(r.get("first_time_transaction")), "minimum_amount": r.get("minimum_amount"),
+            "customer_restricted": bool(pc.get("customer")), "percent_off": c.get("percent_off"), "amount_off": c.get("amount_off"),
+            "duration": c.get("duration"), "duration_in_months": c.get("duration_in_months"), "applies_to_products": (c.get("applies_to") or {}).get("products") or []}
+@R.get("/v1/admin/promos")
+def promos(_=Depends(www.require_admin), client=None):
+    """Active Stripe promotion codes with redemptions used/max, expiry and restrictions. GETs only; never changes Stripe."""
+    try: d = _stripe_get("/promotion_codes?active=true&limit=100&expand[]=data.coupon.applies_to", client)
+    except RuntimeError as e: raise HTTPException(503, f"Stripe unavailable: {e}")
+    return {"promos": [_promo_view(p) for p in d.get("data", [])]}
+def prior_paid(a, client=None):
+    """Has this account ever paid anything? Local paid sessions, plus (when it has a Stripe customer) succeeded charges or paid
+    invoices with a non-zero amount. Stripe's first_time_transaction rule rejects customers with any prior successful payment."""
+    local = q("select count(*) n from stripe_sessions where account_id=? and status='paid' and coalesce(amount_cents,0)>0", (a["id"],), one=True)
+    rzp = q("select count(*) n from payments where account_id=? and status='paid'", (a["id"],), one=True)
+    out = {"local_paid_sessions": int((local or {}).get("n") or 0), "razorpay_paid": int((rzp or {}).get("n") or 0), "stripe_customer": bool(a.get("stripe_customer")), "stripe_paid_charges": 0, "stripe_paid_invoices": 0}
+    if a.get("stripe_customer"):
+        cu = a["stripe_customer"]
+        out["stripe_paid_charges"] = sum(1 for c in _stripe_get(f"/charges?customer={cu}&limit=100", client).get("data", []) if c.get("status") == "succeeded" and c.get("amount", 0) > 0 and not c.get("refunded"))
+        out["stripe_paid_invoices"] = sum(1 for i in _stripe_get(f"/invoices?customer={cu}&status=paid&limit=100", client).get("data", []) if i.get("amount_paid", 0) > 0)
+    out["has_prior_paid"] = bool(out["local_paid_sessions"] or out["stripe_paid_charges"] or out["stripe_paid_invoices"])
+    out["eligible_first_time_codes"] = not out["has_prior_paid"]   # Razorpay payments don't count for Stripe's rule (shown for context)
+    return out
+@R.get("/v1/admin/accounts/{account_id}/promo-eligibility")
+def promo_eligibility(account_id: int, _=Depends(www.require_admin), client=None):
+    a = _acct(account_id)
+    try: return {"account_id": account_id, "email": a["email"]} | prior_paid(a, client)
+    except RuntimeError as e: raise HTTPException(503, f"Stripe unavailable: {e}")
