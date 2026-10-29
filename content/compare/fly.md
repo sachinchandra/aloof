@@ -1,36 +1,30 @@
 # Aloof vs Fly.io
 
-> Competitor prices fetched 2026-10-27 from https://fly.io/pricing and https://fly.io/docs/about/pricing/ (re-checked 2026-10-28). Fly machine prices are for Ashburn (iad) / Secaucus (ewr), Fly's lowest-priced regions; other regions cost more. Like-for-like configs: 1 shared CPU. Aloof prices from https://www.aloof.si/pricing, same day.
+> Fly.io facts checked 2026-10-28 against fly.io's own docs, linked in each row. This page compares features only; see each provider's site for their prices.
 
-**TL;DR:** Fly for global edge and many regions. Aloof for cheap, self-driving backends your AI agent can run safely.
+Fly.io is the better pick if you need many regions and edge routing. Aloof is built for small backends that an AI assistant can deploy and run with limited, server-enforced permissions.
 
 | | **Aloof** | **Fly.io** |
 |---|---|---|
-| 256MB app, always-on | **$1.99/mo** | $2.19/mo (shared-cpu-1x, iad/ewr) |
-| 512MB app (1 shared CPU) | **$3.49/mo** | $3.69/mo (shared-cpu-1x, 512MB, iad/ewr) |
-| 1GB app (1 shared CPU) | **$5.99/mo** | $6.70/mo (shared-cpu-1x, 1GB, iad/ewr) |
-| Smallest managed Postgres | **$2.99/mo** | $38/mo (Basic) |
-| Egress | $0.06/GB | **$0.02/GB** (NA/EU) |
-| Volumes | $0.22/GB-mo | **$0.15/GB-mo** |
-| Regions | 1 (Nuremberg, EU) | **17** (listed on pricing page) |
-| Billing | per second | per second |
-| Free plan | $0, $1/mo usage, never bills | No free tier; trial up to 2h Machine runtime or 7 days ([source](https://fly.io/docs/about/pricing/)) |
-| MCP server | ✅ remote, 25 tools, OAuth scopes | Experimental local `fly mcp server` in flyctl ([source](https://fly.io/docs/flyctl/mcp-server/)) |
-| Health-gated deploys | ✅ + auto-rollback on error/latency spikes | ✅ canary / bluegreen strategies ([source](https://fly.io/docs/launch/deploy/)) |
+| Regions | 1 (Nuremberg, Germany) | 17, as listed 2026-10-28 ([source](https://fly.io/docs/reference/regions/)) |
+| Billing | Per second while running | Per second |
+| Scale to zero | Yes (on by default on Free) | Yes ([source](https://fly.io/docs/launch/autostop-autostart/)) |
+| Remote MCP server | Yes, __MCP_TOOL_COUNT__ tools, OAuth with read/write/admin scopes | No. Experimental local `fly mcp server` in flyctl ([source](https://fly.io/docs/flyctl/mcp-server/)) |
+| Health-gated deploys | Yes, with automatic rollback on errors or latency spikes | Yes, canary and blue-green strategies ([source](https://fly.io/docs/launch/deploy/)) |
+| Managed Postgres | Yes | Yes |
+| Largest machine | 8 dedicated CPU, 16 GB RAM | Up to 128 GB RAM ([source](https://fly.io/pricing)) |
 
-## Where Fly is stronger
-- 🌍 Many regions and edge routing; Aloof is single region (more coming soon).
-- 💸 Cheaper egress and volumes.
-- 🧰 Bigger machines: up to performance-16x and 128GB RAM (source: https://fly.io/pricing). Aloof tops out at 8 dedicated CPU / 16GB.
-- 🏢 Longer track record, larger ecosystem.
+## Where Fly.io is stronger
+- Many regions and edge routing. Aloof runs in one region for now.
+- Much bigger machines.
+- A longer track record and a larger ecosystem.
 
 ## Where Aloof is stronger
-- 🚗 Self-driving: rolls back bad releases, routes around failing instances, scales to zero.
-- 🤖 Agent-safe MCP: `paas:read` / `paas:write` / `paas:admin`, enforced server-side; deploy tokens can't destroy by default.
-- 🔎 Requested-vs-serving release status, so an agent never mistakes an old release for a new one.
-- 🐘 Postgres from $2.99.
+- Bad releases roll back on their own, traffic routes around failing instances, and apps can scale to zero (on by default on Free).
+- The MCP server has read, write and admin scopes, checked on the server. Deploy tokens can't delete anything by default.
+- Release status shows what you asked for next to what is actually serving, so an assistant can't mistake an old release for a new one.
 
-## Try it
-First-time customers get 1 month of Hobby free with code FIRST1 (then $5/mo, cancel anytime).
+## Aloof pricing
+Free costs $0 and is hard-capped at $1 of usage a month. Hobby is $5/mo and Pro $20/mo (single seat), and the plan fee comes back as included usage. Apps start at $1.99/mo always-on and Postgres at $2.99/mo. Full list on the [pricing page](https://www.aloof.si/pricing?utm_source=aloof_compare_fly&utm_medium=referral&utm_campaign=agent_discovery_w44).
 
-[Connect your AI](https://www.aloof.si/docs/mcp?utm_source=aloof_compare_fly&utm_medium=referral&utm_campaign=agent_discovery_w44) · [Pricing](https://www.aloof.si/pricing?utm_source=aloof_compare_fly&utm_medium=referral&utm_campaign=agent_discovery_w44)
+First-time customers get their first month of Hobby free with code FIRST1 (then $5/mo, cancel anytime).

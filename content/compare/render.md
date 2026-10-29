@@ -1,37 +1,31 @@
 # Aloof vs Render
 
-> Competitor prices fetched 2026-10-27 from https://render.com/pricing and regions from https://render.com/docs/regions. Aloof prices from https://www.aloof.si/pricing, same day.
+> Render facts checked 2026-10-28 against render.com's own docs, linked in each row. This page compares features only; see each provider's site for their prices.
 
-**TL;DR:** Render for teams, global CDN and multiple regions. Aloof for per-second, cheaper small backends your AI agent can run safely.
+Render is the better pick if you need a team workspace, a CDN for static sites, or more than one region. Aloof is built for small backends billed per second, which an AI assistant can deploy and run with limited, server-enforced permissions.
 
 | | **Aloof** | **Render** |
 |---|---|---|
-| Workspace plan | Hobby $5 / Pro $20 (fee returns as usage) | Hobby $0 / Pro $25 + compute |
-| Small always-on app | **$1.99/mo** (256MB) | $7/mo (512MB Starter) |
-| 512MB app | **$3.49/mo** | $7/mo |
-| 2GB app | **$11.99/mo** (2 shared CPU) | $25/mo (1 CPU) |
-| Smallest paid Postgres | **$2.99/mo** | $6/mo (256MB) |
-| Egress | $0.06/GB | 5 GB incl. (Hobby), then $0.15/GB |
-| Billing | per second | Compute prorated to the second ([source](https://render.com/pricing)) |
-| Regions | 1 (Nuremberg, EU) | **5** (Oregon, Ohio, Virginia, Frankfurt, Singapore) ([source](https://render.com/docs/regions)) |
-| Free plan | $0, $1/mo usage, never bills | Free 512MB web service (limitations apply) |
-| CDN / static sites | ❌ | **✅** |
-| MCP server | ✅ remote, 25 tools, read/write/admin scopes | ✅ hosted at mcp.render.com, OAuth or API key; docs warn it can modify env vars and trigger deploys ([source](https://render.com/docs/mcp-server)) |
-| Rollback | ✅ automatic on error/latency spikes + one command | Manual, from dashboard or API ([source](https://render.com/docs/rollbacks)) |
+| Regions | 1 (Nuremberg, Germany) | 5 (Oregon, Ohio, Virginia, Frankfurt, Singapore), as listed 2026-10-28 ([source](https://render.com/docs/regions)) |
+| Billing | Per second while running | Compute prorated to the second ([source](https://render.com/pricing)) |
+| Static sites and CDN | No | Yes ([source](https://render.com/docs/static-sites)) |
+| Team workspaces | No, Pro is single seat | Yes ([source](https://render.com/docs/team-members)) |
+| Remote MCP server | Yes, __MCP_TOOL_COUNT__ tools, OAuth with read/write/admin scopes | Yes, hosted, OAuth or API key ([source](https://render.com/docs/mcp-server)) |
+| Rollback | Automatic on errors or latency spikes, or one command | From the dashboard or API ([source](https://render.com/docs/rollbacks)) |
+| Managed Postgres | Yes | Yes |
 
 ## Where Render is stronger
-- 🌍 Several regions plus global CDN and static sites.
-- 👥 Team features: unlimited seats, previews, audit logs (Pro and up).
-- 🏢 Larger company, SLAs available on higher plans; Aloof has no SLA.
-- 📦 More bandwidth included on paid plans.
+- Several regions, plus static sites on a global CDN.
+- Team workspaces with more than one member.
+- A larger company with a longer track record. Aloof has no SLA.
 
 ## Where Aloof is stronger
-- 💰 Lower prices on small instances and Postgres, billed per second.
-- 🚗 Self-driving: auto-rollback, health-based routing, scale to zero.
-- 🤖 Agent-safe MCP: read/write/admin scopes enforced server-side; deploy tokens can't destroy by default.
-- 🔎 Requested-vs-serving release status and read-only `diagnose`.
+- Billed per second, with small instance sizes and small Postgres plans.
+- Bad releases roll back on their own, traffic routes around failing instances, and apps can scale to zero (on by default on Free).
+- The MCP server has read, write and admin scopes, checked on the server. Deploy tokens can't delete anything by default.
+- Release status shows what you asked for next to what is actually serving, and `diagnose` is read-only.
 
-## Try it
-First-time customers get 1 month of Hobby free with code FIRST1 (then $5/mo, cancel anytime).
+## Aloof pricing
+Free costs $0 and is hard-capped at $1 of usage a month. Hobby is $5/mo and Pro $20/mo (single seat), and the plan fee comes back as included usage. Apps start at $1.99/mo always-on and Postgres at $2.99/mo. Full list on the [pricing page](https://www.aloof.si/pricing?utm_source=aloof_compare_render&utm_medium=referral&utm_campaign=agent_discovery_w44).
 
-[Connect your AI](https://www.aloof.si/docs/mcp?utm_source=aloof_compare_render&utm_medium=referral&utm_campaign=agent_discovery_w44) · [Pricing](https://www.aloof.si/pricing?utm_source=aloof_compare_render&utm_medium=referral&utm_campaign=agent_discovery_w44)
+First-time customers get their first month of Hobby free with code FIRST1 (then $5/mo, cancel anytime).

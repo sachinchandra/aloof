@@ -151,7 +151,8 @@ def list_regions():
 def plans(legacy: bool = False):
     """Pricing v3 (USD excl. tax/VAT): per-second plans, usage rates, workspace tiers and regions."""
     """GPU plans are only listed once GPUs are enabled (phase 2); until then `gpu` says they're coming soon, with the waitlist."""
-    out = [{"id": k, **{x: y for x, y in v.items() if x not in ("providers",)}} for k, v in PLANS.items()
+    # internal-only keys: supply pools and our private competitor price notes (never public; no competitor pricing on the site or API)
+    out = [{"id": k, **{x: y for x, y in v.items() if x not in ("providers", "compare_usd_month", "compare_usd_hr", "note")}} for k, v in PLANS.items()
            if (legacy or not v["legacy"]) and (v["kind"] != "gpu" or _plans.GPU_ENABLED)]
     gpu = _plans.gpu_status() | ({} if _plans.GPU_ENABLED else {"coming_soon": [{"id": k, "gpu": v["gpu"]} for k, v in PLANS.items() if v["kind"] == "gpu"]})
     return {"currency": "USD", "tax": "Prices in USD; taxes may apply where required", "billing": "per second while running; volumes per provisioned GB-month; egress per GB (counts toward included usage)",

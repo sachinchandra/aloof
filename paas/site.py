@@ -79,21 +79,17 @@ def page(title, body, brand="Aloof", desc=None):
 def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(round(g))
 def _money(v, unit=""):
     return (f"${v:,.2f}" if v < 100 or v != int(v) else f"${v:,.0f}") + unit
-def _cmp(v): return f"${v:g}" if v else "<span class=muted>—</span>"
-def _plan_rows(kind=None, compare=False):
+def _plan_rows(kind=None):
     rows = []
     for k, p in PLANS.items():
         if p["legacy"] or (kind and (p["cpu_class"] if p["kind"] == "cpu" else "gpu") != kind): continue
         if p["kind"] == "cpu":
-            c = p["compare_usd_month"]; mo = p["price_usd_month"]
-            cmpc = f"<td>{_cmp(c['fly'])}</td><td>{_cmp(c['render'])}</td><td>{_cmp(c['railway'])}</td>" if compare else ""
+            mo = p["price_usd_month"]
             rows.append(f"<tr><td><code>{k}</code></td><td>{p['vcpu']:g} {p['cpu_class']}</td><td>{_gb(p['memory_mb'])} GB</td>"
-                        f"<td><b>{_money(mo)}</b>/mo</td><td>${p['price_usd_hr']:.4f}/hr</td>{cmpc}</tr>")
+                        f"<td><b>{_money(mo)}</b>/mo</td><td>${p['price_usd_hr']:.4f}/hr</td></tr>")
         else:
-            f = (p.get("compare_usd_hr") or {}).get("fly_last_list")
-            cmpc = f"<td>{_cmp(f)}{' <span class=muted>' + p['note'] + '</span>' if p.get('note') else ''}</td>" if compare else ""
             rows.append(f"<tr><td><code>{k}</code></td><td>{p['gpu']}</td><td>{p['vcpu']} vCPU · {_gb(p['memory_mb'])} GB</td>"
-                        f"<td><b>${p['price_usd_hr']:.2f}</b>/hr</td><td>${p['price_usd_hr']/3600:.6f}/s</td>{cmpc}</tr>")
+                        f"<td><b>${p['price_usd_hr']:.2f}</b>/hr</td><td>${p['price_usd_hr']/3600:.6f}/s</td></tr>")
     return "".join(rows)
 CPU_HEAD = "<tr><th>Plan</th><th>CPU</th><th>RAM</th><th>Always-on (30 days)</th><th>Per hour</th></tr>"
 GPU_HEAD = "<tr><th>Plan</th><th>GPU</th><th>Host</th><th>Per hour</th><th>Per second</th></tr>"
@@ -276,8 +272,8 @@ def pricing(brand):
            ("How is egress billed?", f"Outbound data costs ${R['egress_usd_gb']:.2f}/GB and counts toward your included usage. Inbound data is free."),
            ("Do my apps sleep?", f"On Free, yes: after {free['idle_seconds']//60} minutes idle, and they wake on the next request in about a second. On Hobby and Pro you choose per app: always-on, or scale to zero and pay nothing while idle (volumes are still billed)."),
            ("Where does my code run?", "All compute runs on Hetzner Cloud in Nuremberg, Germany. Encrypted off-site backups are stored in Helsinki, Finland. Typical latency is ~10–40 ms within Europe, ~90–110 ms from US East and ~150–200 ms from India or US West. More regions will be listed only once they're live."),
-           ("I have a promo code. Where do I use it?", "On the Stripe Checkout page when you subscribe to Hobby or Pro by card: choose <b>Add promotion code</b>, and Stripe shows the discount before you pay. Codes don't apply to credit top-ups or to paying a plan from your balance, and a card is always required, even if the first payment comes to $0. <a href=\"/docs/billing#promo\">More in the billing docs</a>."),
-           ("Can I upgrade, downgrade or cancel anytime?", "Yes. Upgrades are prorated. Downgrades apply immediately, with no refund. If you cancel a card subscription, your plan stays active until the end of the paid period and then drops to Free. Nothing is deleted when you cancel. Details in the <a href='/docs/billing#cancel'>billing docs</a>."),
+           ("I have a promo code. Where do I use it?", "On the Stripe Checkout page when you subscribe to Hobby by card: choose <b>Add promotion code</b>, and Stripe shows the discount before you pay. <b>FIRST1</b> gives your first month of Hobby free; <b>EARLY3</b> gives your first three months of Hobby free. Both are for first-time customers only (Stripe rejects them if you've made any earlier payment, including a top-up), work on Hobby only (not Pro, not top-ups), are limited to 50 redemptions each and expire on 31 December 2026 at 23:59 UTC+4. After the free period, Hobby renews at $5/month unless you cancel. One code per subscription; codes don't stack. Codes don't apply to paying a plan from your balance, and a card is always required, even if the first payment comes to $0. <a href=\"/docs/billing#promo\">More in the billing docs</a>."),
+           ("Can I upgrade, downgrade or cancel anytime?", "Yes. If you pay for the plan from your balance, upgrades charge the difference for the rest of the month, and downgrades take effect immediately with no refund for the rest of the month. If you pay by card, change plan or cancel in the Billing portal: a plan change applies as soon as Stripe confirms it, and a cancelled plan stays active until the end of the paid month, then drops to Free. Nothing is deleted when you downgrade or cancel. Details in the <a href='/docs/billing#cancel'>billing docs</a>."),
            ("Can my AI assistant deploy for me?", "Yes. Connect Claude, ChatGPT or Cursor to our remote MCP server (OAuth 2.1 with PKCE) and ask it to deploy, read logs, scale or add a domain. You can revoke their access anytime by deleting the key under API keys in the dashboard. Agents that prefer REST can use <a href='/llms.txt'>llms.txt</a> and our <a href='/api/docs'>OpenAPI spec</a>.")]
     faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq)
     head = "<tr><th>Instance</th><th>CPU</th><th>RAM</th><th class=num>Always-on / month</th><th class=num>Per hour</th></tr>"
@@ -306,6 +302,15 @@ TITLES = {"quickstart": "Quickstart", "self-driving": "How self-driving works", 
           "domains": "Custom domains", "releases": "Releases & rollback", "postgres": "Managed Postgres", "console": "SSH & exec console", "logs": "Logs, retention & drains", "billing": "Billing, invoices & tax", "sign-in": "Sign-in methods", "mcp": "MCP for AI assistants", "api": "REST API", "nodes": "Bring your own nodes", "troubleshooting": "Troubleshooting & FAQ", "support": "Support", "templates": "One-click templates", "self-healing": "Self-healing deploys"}
 def docs(pg, brand, base, api, mcp):
     if pg not in DOCS: return None
+    from . import oauth_login as _ol
+    _on = [v["label"] for v in _ol.providers() if v["enabled"]]; _off = [v["label"] for v in _ol.providers() if not v["enabled"]]
+    _or = lambda xs: (", ".join(xs[:-1]) + " or " + xs[-1]) if len(xs) > 1 else (xs[0] if xs else "")
+    _and = lambda xs: (", ".join(xs[:-1]) + " and " + xs[-1]) if len(xs) > 1 else (xs[0] if xs else "")
+    SOCIAL_NOW = (f", or your {_or(_on)} account" if _on else "")
+    SOCIAL_SOON = (f" {_and(_off)} sign-in {'is' if len(_off) == 1 else 'are'} coming soon." if _off else "")
+    SOCIAL_HOW = (f"<h2>Signing in with {_or(_on)}</h2><p>On the <a href=\"/login\">log in page</a>, choose " + " or ".join(f"<b>Continue with {x}</b>" for x in _on) + f". If no {brand} account uses that email yet, one is created. If the email already belongs to an account, sign in to that account first (an email sign-in link works) and connect the provider from Settings, as below.</p>") if _on else ""
+    SOCIAL_X = "<p>X doesn't always share an email address. When it doesn't, we ask for one and send a link to confirm it before the account is ready.</p>" if "X" in _on else ""
+    SOCIAL_ANY = _or(_on) or "a social login"
     from . import domains as _d
     _ips = [x.strip() for x in os.environ.get('PAAS_EDGE_IPS', '').split(',') if x.strip()]; _v4, _v6 = _d.edge_split(_ips)
     EDGE_A = ' or '.join(f'<code>{x}</code>' for x in _v4) or 'our edge IP (<code>aloof ips &lt;app&gt;</code>)'
@@ -452,7 +457,7 @@ MCP tools: add_domain, verify_domain, remove_domain, list(kind=&quot;domains&quo
 <h2 id=cards>Paying by card</h2><p>Card payments go through Stripe Checkout. Stripe stores your card, so we never see the number. There are two things you can pay for by card:</p><ul>
 <li><b>Prepaid credit (top-ups)</b>: a one-off payment of $10 to $5,000. The credit is added to your balance as soon as Stripe confirms the payment, and Stripe sends an invoice for it.</li>
 <li><b>A plan subscription (Hobby or Pro)</b>: Stripe charges the plan fee when you subscribe and then once a month until you cancel. Your workspace switches to the new plan as soon as Stripe confirms the first payment.</li></ul>
-<p id=promo><b>Promo codes</b>: if you have one, choose <b>Subscribe by card</b> for Hobby or Pro and enter it on the Stripe Checkout page (<b>Add promotion code</b>). Stripe shows the discount, and how long it lasts, before you pay. Codes don't work on credit top-ups or on <b>Pay from balance</b>, and Checkout still asks for a card even if the code makes the first payment $0.</p>
+<p id=promo><b>Promo codes</b>: choose <b>Subscribe by card</b> for Hobby and enter the code on the Stripe Checkout page (<b>Add promotion code</b>). Stripe shows the discount, and how long it lasts, before you pay. <b>FIRST1</b> gives your first month of Hobby free; <b>EARLY3</b> gives your first three months of Hobby free. Both are for first-time customers only (Stripe rejects them if you've made any earlier payment, including a top-up), work on Hobby only (not Pro, not top-ups), are limited to 50 redemptions each and expire on 31 December 2026 at 23:59 UTC+4. After the free period, Hobby renews at $5/month unless you cancel. One code per subscription; codes don't stack. Codes don't work on <b>Pay from balance</b>, and Checkout still asks for a card even if the code makes the first payment $0.</p>
 <p><b>Usage is never charged to your card directly.</b> Apps are metered per second while they run. Usage up to your plan's included amount is covered by the plan; anything above it comes out of your prepaid balance. When a paid account's balance runs out, its apps are suspended (volumes and databases are kept) and they resume automatically after a top-up. Unless you turn the alerts off, we email you before that happens: when your balance has about 3 days left, and again at less than 24 hours.</p>
 <p>If a card payment fails or you close the checkout page, nothing is added and your plan doesn't change. You can try again from Dashboard → Billing &amp; usage.</p>
 <p id=soon class=muted>If card payments are ever paused on our side, the Billing page shows <b>Paid plans opening soon</b> and card payments won't go through until it's back. Nothing is charged when that happens, and your balance and Free plan keep working.</p>
@@ -463,7 +468,7 @@ MCP tools: add_domain, verify_domain, remove_domain, list(kind=&quot;domains&quo
 <h2 id=cancel>Cancelling and changing plans</h2><ul>
 <li><b>Cancel any time.</b> There's no contract or minimum term. If you pay for Hobby or Pro by card, cancel in Dashboard → Billing &amp; usage → <b>Billing portal</b>. You keep the plan until the end of the month you've paid for, then the workspace moves to Free and nothing more is charged for the plan. If you pay for the plan from your balance, switch to Free in Dashboard → Billing &amp; usage → Plan. The change is immediate.</li>
 <li><b>Upgrades</b> take effect immediately. Paying from your balance, you're charged only for the rest of the current month (pro-rated by day). By card, Stripe bills the new plan from the change.</li>
-<li><b>Downgrades</b> take effect at the end of a card-paid month, or immediately for balance-paid plans. Before moving to Free, change or remove apps on plans Free doesn't include; the dashboard tells you which.</li>
+<li><b>Downgrades</b> paid from your balance take effect immediately, and the rest of this month's fee isn't refunded. The switch is refused while you have apps on instance sizes the lower plan doesn't include; the error lists them so you can resize or remove them first. By card, a plan change in the Billing portal applies as soon as Stripe confirms it, and cancelling keeps the plan until the end of the paid month. If a card plan ends while apps on sizes Free doesn't include are running, your apps are paused until you upgrade again. Nothing is deleted.</li>
 <li><b>Plan fees aren't refunded</b> for the part of a month you don't use, whether you cancel, downgrade or stop using the service.</li></ul>
 <h2 id=usage>What happens to usage and credit</h2><ul>
 <li><b>Cancelling a plan doesn't stop your apps.</b> Compute is billed per second while instances run, and volumes, backups and snapshots are billed until you delete them. To stop all charges, destroy the apps, databases and volumes you no longer need.</li>
@@ -541,15 +546,15 @@ aloof self-heal my-app off      # turn it off for this app
 aloof self-heal my-app on       # turn it back on</pre>
 <p>The same is available over the API: <code>GET</code> or <code>PUT /v1/apps/&lt;app&gt;/self-heal</code> with <code>{"enabled": false}</code>. Turning it off only affects that app, and each change is written to the audit log.</p>
 <h2>When it does nothing</h2><p>A release isn't watched when the previous release didn't serve enough traffic to compare against (at least 100 requests are needed), and rollbacks are never rolled back. A very quiet app can still deploy a bad release, so keep a health check configured too.</p>""",
-"sign-in": f"""<h1>Sign-in methods</h1><p>You can sign in to {brand} with an email sign-in link, a password, or your GitHub, Google or X account. All of them open the same {brand} account, and an emailed sign-in link always works, so removing a social login can't lock you out.</p>
-<h2>Signing in with GitHub, Google or X</h2><p>On the <a href="/login">log in page</a>, choose <b>Continue with GitHub</b>, <b>Google</b> or <b>X</b>. If no {brand} account uses that email yet, one is created. If the email already belongs to an account, sign in to that account first (an email sign-in link works) and connect the provider from Settings, as below.</p>
-<p>X doesn't always share an email address. When it doesn't, we ask for one and send a link to confirm it before the account is ready.</p>
+"sign-in": f"""<h1>Sign-in methods</h1><p>You can sign in to {brand} with an email sign-in link, a password{SOCIAL_NOW}. All of them open the same {brand} account, and an emailed sign-in link always works, so removing a social login can't lock you out.{SOCIAL_SOON}</p>
+{SOCIAL_HOW}
+{SOCIAL_X}
 <h2>Connecting and disconnecting</h2><p>In the dashboard, open <b>Account</b> and find the <b>Sign-in methods</b> card. It lists each provider with <b>Connect</b> or <b>Disconnect</b>. Connect takes you to the provider to approve, then back to the card. Each provider can be connected to one {brand} account at a time.</p>
 <p>The same is available over the API with a full-access key:</p>
 <pre>curl {api}/v1/auth/identities -H "Authorization: Bearer $ALOOF_KEY"            # what's connected, and which providers are on
 curl -X DELETE {api}/v1/auth/identities/github -H "Authorization: Bearer $ALOOF_KEY"   # disconnect GitHub</pre>
 <p>Connecting needs a browser, so it's only in the dashboard.</p>
-<h2>Using the CLI if you signed up with GitHub, Google or X</h2><p>The CLI doesn't open a browser to sign in. It uses an API key:</p>
+<h2>Using the CLI if you signed up with {SOCIAL_ANY}</h2><p>The CLI doesn't open a browser to sign in. It uses an API key:</p>
 <ol><li>Sign in to the dashboard and open <b>API keys</b>.</li><li>Create a <b>Full access</b> key for your own machine (or a deploy token for CI).</li><li>Run <code>aloof login</code> and paste the key at the prompt. It checks the key, then saves it to <code>~/.aloof.json</code>.</li></ol>
 <pre>aloof login                       # paste the key at the hidden prompt
 aloof login --key-stdin &lt; key.txt   # or read it from a file or a secret store</pre>

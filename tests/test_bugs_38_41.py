@@ -11,7 +11,9 @@ def test_promo_note_matches_checkout_code():
     assert '"allow_promotion_codes": True' in sub and '"payment_method_collection": "always"' in sub and "allow_promotion_codes" not in top
     for path in ("/docs/billing", "/pricing"):
         h = c.get(path).text; low = h.lower()
-        assert "promo code" in low and "Hobby or Pro" in h and "top-ups" in low and "card" in low, path
+        assert "promo code" in low and "Hobby only" in h and "top-ups" in low and "card" in low, path
+        # bug 46: exact FIRST1/EARLY3 terms from docs/billing-promos.md
+        for t in ("FIRST1", "EARLY3", "first month of Hobby free", "first three months of Hobby free", "50 redemptions each", "31 December 2026 at 23:59 UTC+4", "first-time customers only"): assert t in h, (path, t)
     b = c.get("/docs/billing").text; note = re.search(r"<p id=promo>(.*?)</p>", b, re.S).group(1).lower()
     assert "tax" not in note and "pay from balance" in note
     assert 'href="/docs/billing#promo"' in c.get("/pricing").text
