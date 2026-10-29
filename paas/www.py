@@ -202,9 +202,11 @@ def mark_flags():
     q("update accounts set is_admin=1 where lower(email)=?", (ADMIN_EMAIL,))
     q("update accounts set is_admin=0 where lower(email)!=? and is_admin=1", (ADMIN_EMAIL,))
     from .engine import is_test_email
+    from .db import kv_get
     changed = []   # internal domains: test only when verified; undeliverable: always. Other accounts (admin flag) untouched.
     for pat in TEST_EMAIL_PATTERNS:
         for r in q("select id, email, email_verified, is_test from accounts where lower(email) like ?", (pat,)):
+            if kv_get("is_test_pin", str(r["id"])) is not None: continue   # the owner set this flag by hand: keep it
             v = int(is_test_email(r["email"], r.get("email_verified")))
             if v != int(r.get("is_test") or 0): q("update accounts set is_test=? where id=?", (v, r["id"])); changed.append(r["id"])
     sync_test_flags(changed)
@@ -460,6 +462,7 @@ class TestFlag(BaseModel): is_test: bool
 def admin_flag_test(account_id: int, b: TestFlag, ctx=Depends(require_admin)):
     if not q("select 1 from accounts where id=?", (account_id,), one=True): raise HTTPException(404, "no such account")
     q("update accounts set is_test=? where id=?", (int(b.is_test), account_id)); sync_test_flags([account_id])
+    from .db import kv_put; kv_put("is_test_pin", str(account_id), str(int(b.is_test)))   # survives mark_flags/recompute_test
     from .db import audit; audit((ctx.get("account") or {}).get("id"), None, "admin.flag_test", f"account={account_id} is_test={b.is_test}"); return {"ok": True}
 @R.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 def admin_page(request: Request):

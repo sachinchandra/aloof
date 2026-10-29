@@ -644,6 +644,8 @@ def recompute_test(account_id):
     """Re-derive is_test for internal-domain/undeliverable accounts after verification changes; syncs PostHog when it flips."""
     a = q("select id, email, email_verified, is_test from accounts where id=?", (account_id,), one=True)
     if not a or not (internal_email(a["email"]) or undeliverable_email(a["email"])): return False
+    from .db import kv_get
+    if kv_get("is_test_pin", str(account_id)) is not None: return False   # set by the owner in /admin
     v = int(is_test_email(a["email"], a.get("email_verified")))
     if v == int(a.get("is_test") or 0): return False
     q("update accounts set is_test=? where id=?", (v, account_id))

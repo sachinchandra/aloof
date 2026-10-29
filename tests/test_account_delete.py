@@ -63,3 +63,10 @@ def test_admin_endpoint_needs_typed_email(calls):
     r = o.post(f"/v1/admin/accounts/{a['id']}/delete", json={"confirm": "nope", "reason": "test"}, headers=CS); assert r.status_code == 400
     r = o.post(f"/v1/admin/accounts/{a['id']}/delete", json={"confirm": a["email"], "reason": "test"}, headers=CS); assert r.status_code == 200, r.text
     assert not acct(a["email"])
+
+def test_manual_test_flag_survives_mark_flags():
+    from test_admin_cockpit import owner
+    o = owner(); e = f"pin{time.time_ns()}@aloof.si"; _reg(e); a = acct(e)
+    q("update accounts set email_verified=1 where id=?", (a["id"],)); www.mark_flags(); assert acct(e)["is_test"] == 1
+    assert o.post(f"/v1/admin/accounts/{a['id']}/test", json={"is_test": False}, headers=CS).status_code == 200
+    www.mark_flags(); engine.recompute_test(a["id"]); assert acct(e)["is_test"] == 0

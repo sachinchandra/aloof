@@ -76,6 +76,7 @@ def delete_account(account_id, actor=None, reason="", force=False, require_empty
         if c: q(f"delete from {t} where account_id=?", (account_id,)); out["deleted_rows"][t] = c
     q("delete from sessions where impersonated_by=?", (account_id,))
     for h in hs: q("delete from kv where acct=?", (h,))
+    q("delete from kv where kind='is_test_pin' and k=?", (str(account_id),))
     if a.get("email"): q("delete from magic_links where lower(email)=?", (a["email"].lower(),))
     q("update invoices set billing_name=null, gstin=null where account_id=?", (account_id,))
     q("delete from apps where account_id=?", (account_id,)); out["deleted_rows"]["apps"] = len(apps)
