@@ -591,10 +591,10 @@ def auth_magic(m: MagicReq, request: Request):
     except auth.MailError: raise HTTPException(503, "email sign-in is temporarily unavailable; log in with your password or try again later")
     return {"ok": True, "detail": "If the address is valid, a sign-in link is on its way (valid 15 minutes)."}
 @app.get("/auth/magic")
-def auth_magic_finish(token: str):
+def auth_magic_finish(token: str, request: Request):
     from .db import kv_get as _kg, kv_del as _kd
     pend = _kg("ml_pending", auth.sha256(token or ""))
-    try: a = auth.finish_magic(token)
+    try: a = auth.finish_magic(token, session_token=request.cookies.get(auth.COOKIE))
     except PermissionError:
         from . import www
         body = www.shell("Sign in", "This sign-in link doesn't work anymore",
@@ -734,7 +734,7 @@ def auth_sessions_revoke_others(request: Request, a=Depends(acct)):
 @app.get("/v1/auth/me")
 def auth_me(a=Depends(acct)):
     return {"id": a["id"], "email": a["email"], "name": a.get("billing_name"), "created": a.get("created"), "tier": a.get("tier") or "free",
-            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")), "email_optout": bool(a.get("email_optout")),
+            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")), "email_optout": bool(a.get("email_optout")), "new_api_key": auth.take_key_reveal(a["id"]),
             "api_key_prefix": key_hint(a.get("api_key_prefix")), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}

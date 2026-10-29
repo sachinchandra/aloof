@@ -629,12 +629,14 @@ UNDELIVERABLE_PATTERNS = ("%@example.com", "%@example.org", "%@example.net", "%.
 INTERNAL_DOMAINS = ("aloof.si", "enigmaticitsolutions.com")
 TEST_EMAIL_PATTERNS = UNDELIVERABLE_PATTERNS + tuple(f"%@{d}" for d in INTERNAL_DOMAINS)   # SQL LIKE; also used by www.mark_flags
 # Staff mailboxes on internal domains: can't be claimed by password/API signup (no proof of ownership).
-RESERVED_LOCAL_PARTS = frozenset("support admin billing legal privacy security sales abuse postmaster noreply hello sachin".split())
+RESERVED_LOCAL_PARTS = frozenset("support admin billing legal privacy security sales abuse postmaster noreply hello sachin team info ops".split())
 def _e(email): return (email or "").strip().lower()
 def undeliverable_email(email): return any(_e(email).endswith(p[1:]) for p in UNDELIVERABLE_PATTERNS)
 def internal_email(email): return _e(email).rpartition("@")[2] in INTERNAL_DOMAINS
 def reserved_staff_email(email):
-    local, _, dom = _e(email).rpartition("@"); return dom in INTERNAL_DOMAINS and local.split("+")[0] in RESERVED_LOCAL_PARTS
+    """Ignores dots and +tags in the local-part (sup.port+x@ = support@) and a trailing dot on the domain."""
+    local, _, dom = _e(email).rpartition("@")
+    return dom.rstrip(".") in INTERNAL_DOMAINS and local.split("+")[0].replace(".", "") in RESERVED_LOCAL_PARTS
 def is_test_email(email, verified=False):
     """is_test drives analytics/metrics only (never transactional mail). Internal domains count only when verified."""
     return undeliverable_email(email) or (bool(verified) and internal_email(email))

@@ -3,7 +3,7 @@ spam protection (per-IP rate limit + honeypot), tokenized unsubscribe, test-entr
 import os, re, time, json, hmac, hashlib, html, csv, io, logging, threading
 from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Request, Depends
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, PlainTextResponse
 from pydantic import BaseModel
 from .db import q, kv_put, kv_get
 from . import auth, site
@@ -97,7 +97,7 @@ def send_emails(entry_id):
     r = q("select * from waitlist where id=?", (entry_id,), one=True)
     if not r: return
     subj, text, htm, link = confirmation(r)
-    try: _record(entry_id, "mail_user", "sent:" + auth.send_mail(r["email"], subj, text, html=htm, headers={"List-Unsubscribe": f"<{link}>"}))
+    try: _record(entry_id, "mail_user", "sent:" + auth.send_mail(r["email"], subj, text, html=htm, headers={"List-Unsubscribe": f"<{link}>", "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"}))
     except Exception as e: _record(entry_id, "mail_user", f"failed: {e}")
     to = notify_recipients()
     if not to:
@@ -110,24 +110,30 @@ def send_emails(entry_id):
     _record(entry_id, "mail_admin", ("failed: " if any("failed" in x for x in res) else "sent: ") + ", ".join(res))
 
 # ---------- unsubscribe ----------
-def _page(h1, inner):
-    return HTMLResponse(site.page(f"{h1} · Aloof", f"<section class=s><div class=wrap style='max-width:560px;padding:64px 0'><h1>{h1}</h1>{inner}</div></section>"), headers={"X-Robots-Tag": "noindex"})
+def _page(h1, inner, status=200):   # token page: never cached, no analytics
+    return HTMLResponse(site.page(f"{h1} · Aloof", f"<section class=s><div class=wrap style='max-width:560px;padding:64px 0'><h1>{h1}</h1>{inner}</div></section>", analytics=False), status, headers={"X-Robots-Tag": "noindex", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 def _check(id, t):
     r = q("select * from waitlist where id=?", (id,), one=True)
     ok = r and hmac.compare_digest(token(r["id"], r["email"]), t or "")
     return r if ok else None
 @R.get("/waitlist/unsubscribe", response_class=HTMLResponse, include_in_schema=False)
-def unsub_page(id: int = 0, t: str = ""):
+def unsub_page(request: Request, id: int = 0, t: str = ""):
+    from .netaddr import limit; limit("unsub", request)
     r = _check(id, t)
-    if not r: return _page("Link not valid", "<p class=muted>This removal link is invalid, or the entry was already removed. Nothing else to do.</p><p><a href='/'>Back to Aloof</a></p>")
+    if not r: return _page("Link not valid", "<p class=muted>This removal link is invalid, or the entry was already removed. Nothing else to do.</p><p><a href='/'>Back to Aloof</a></p>", 400)
     return _page("Remove me from the waitlist", f"""<p>This removes <b>{html.escape(r['email'])}</b> from {html.escape(_what(r))}. We won't email you about it again.</p>
 <form method=post action="/waitlist/unsubscribe"><input type=hidden name=id value="{r['id']}"><input type=hidden name=t value="{html.escape(t)}"><button class="btn pri">Remove me</button></form>""")
 @R.post("/waitlist/unsubscribe", response_class=HTMLResponse, include_in_schema=False)
 async def unsub_do(request: Request):
-    f = await request.form()
-    try: r = _check(int(f.get("id") or 0), f.get("t") or "")
+    """Form POST or RFC 8058 one-click (List-Unsubscribe=One-Click, id and t in the query)."""
+    from .netaddr import limit; limit("unsub", request)
+    f = await request.form(); qp = request.query_params
+    try: r = _check(int(f.get("id") or qp.get("id") or 0), f.get("t") or qp.get("t") or "")
     except ValueError: r = None
-    if r: q("delete from waitlist where id=?", (r["id"],)); log.info("waitlist unsubscribe id=%s kind=%s", r["id"], r["kind"])
+    one = f.get("List-Unsubscribe") == "One-Click"
+    if not r: return PlainTextResponse("invalid", 400, headers={"Cache-Control": "no-store"}) if one else _page("Link not valid", "<p class=muted>This removal link isn't valid, or the entry was already removed.</p>", 400)
+    q("delete from waitlist where id=?", (r["id"],)); log.info("waitlist unsubscribe id=%s kind=%s", r["id"], r["kind"])
+    if one: return PlainTextResponse("ok", headers={"Cache-Control": "no-store"})
     return _page("You've been removed", "<p>Your address is off the list and we've deleted the entry. You won't hear from us about it.</p><p><a href='/'>Back to Aloof</a></p>")
 
 # ---------- admin ----------

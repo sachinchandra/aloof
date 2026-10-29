@@ -32,7 +32,7 @@ def test_signup_duplicate_emails_and_unsubscribe(monkeypatch):
     url = W.unsub_url(row["id"], e); path = url.split("aloof.si", 1)[1]
     assert e in c.get(path).text and c.get(path.replace("t=", "t=x")).text.count("not valid") >= 1
     t = re.search(r"t=([0-9a-f]+)", url).group(1)
-    assert c.post("/waitlist/unsubscribe", data={"id": str(row["id"]), "t": "bad"}).status_code == 200 and q("select 1 from waitlist where id=?", (row["id"],), one=True)
+    assert c.post("/waitlist/unsubscribe", data={"id": str(row["id"]), "t": "bad"}).status_code == 400 and q("select 1 from waitlist where id=?", (row["id"],), one=True)
     assert "removed" in c.post("/waitlist/unsubscribe", data={"id": str(row["id"]), "t": t}).text and not q("select 1 from waitlist where id=?", (row["id"],), one=True)
 def test_other_kinds_and_validation():
     _reset(); e = f"r{time.time_ns()}@acme.dev"

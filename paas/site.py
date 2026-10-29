@@ -73,9 +73,9 @@ def analytics_hosts():
     """Only platform hosts load analytics (never <app>.<domain> user apps): base, www and api for the base + alt domains."""
     ds = [d.strip() for d in (os.environ.get("PAAS_BASE_DOMAIN", "aloof.si") + "," + os.environ.get("PAAS_ALT_DOMAINS", "")).split(",") if d.strip()]
     return sorted({h for d in ds for h in (d, "www." + d, "api." + d)})
-def page(title, body, brand="Aloof", desc=None):
+def page(title, body, brand="Aloof", desc=None, analytics=True):
     d = desc or f"{brand}: cheap backends in the EU, billed per second in USD (GPUs coming soon). Deploy Docker images or git repos; scale to zero; MCP for AI assistants."
-    return _contact(f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag()}</body></html>""")
+    return _contact(f"""{head(title, d)}<body>{nav(brand)}<main id=main>{body}</main>{footer(brand)}{COMMON_JS}{analytics_tag() if analytics else ""}</body></html>""")
 def _gb(mb): g = mb / 1024; return f"{g:g}" if g < 1 or g == int(g) else str(round(g))
 def _money(v, unit=""):
     return (f"${v:,.2f}" if v < 100 or v != int(v) else f"${v:,.0f}") + unit
@@ -480,7 +480,7 @@ MCP tools: add_domain, verify_domain, remove_domain, list(kind=&quot;domains&quo
 <li><b>Mistakes and surprises</b>: if you created resources by mistake, or a large bill came from something you didn't intend (for example an attack or runaway traffic), contact <a href="/docs/support">support</a>. We'll review it and, where it's fair, refund or credit the difference.</li>
 <li><b>Billing errors</b>: if we charged you incorrectly (a duplicate payment, wrong amount or a metering bug), we'll correct it, refunding to the original payment method or crediting your balance, whichever you prefer. Please tell us within 60 days of the charge.</li>
 <li>Card refunds go back to the card through Stripe and usually show up within 5–10 business days.</li></ul>
-<h2 id=delete>Deleting your account</h2><p>Self-service deletion isn't in the dashboard yet. Request it through <a href="/docs/support">support</a> from the email address on the account, so we can confirm it's you. Before we delete it, cancel any card subscription and export what you want to keep. When the account is deleted, its apps, databases, volumes, backups, API keys and sessions are removed, and any remaining credit is forfeited. Invoices and payment records are kept as long as tax and accounting law requires.</p>
+<h2 id=delete>Deleting your account</h2><p>Self-service deletion isn't in the dashboard yet. Email <a href="mailto:privacy@aloof.si">privacy@aloof.si</a> from the email address on the account, so we can confirm it's you. Before we delete it, cancel any card subscription and export what you want to keep. When the account is deleted, its apps, databases, volumes, backups, API keys and sessions are removed, and any remaining credit is forfeited. Invoices and payment records are kept as long as tax and accounting law requires.</p>
 <h2>What is metered</h2><p>Per second, in cents: compute while an instance runs (plan $/hr ÷ 3600), volumes per provisioned GB-month ($0.22, attached or not), backups and snapshots per GB-month ($0.22), and egress at $0.06/GB. Usage up to your plan's included amount (Free $1, Hobby $5, Pro $20) isn't deducted from your balance. Stopped and scaled-to-zero apps cost nothing; volumes are still billed.</p>
 <p>See this month's breakdown in Dashboard → Billing &amp; usage. When a paid account's credit runs out, its apps are suspended, and they resume automatically after a top-up.</p>
 <p><b>Invoices and tax</b>: Stripe issues an invoice for every payment, and you can download past invoices and receipts from the Billing portal. Prices are in US dollars; taxes may apply where required.</p>
@@ -549,6 +549,7 @@ aloof self-heal my-app on       # turn it back on</pre>
 "sign-in": f"""<h1>Sign-in methods</h1><p>You can sign in to {brand} with an email sign-in link, a password{SOCIAL_NOW}. All of them open the same {brand} account, and an emailed sign-in link always works, so removing a social login can't lock you out.{SOCIAL_SOON}</p>
 {SOCIAL_HOW}
 {SOCIAL_X}
+<h2 id=email-down>When email delivery is down</h2><p>Sign-in links are sent right away and are never queued. If our email provider is unavailable, asking for a link returns an error ("email sign-in is temporarily unavailable", HTTP 503) instead of a link that might arrive late. Sign in with your password or GitHub, Google or X, or try again in a few minutes.</p>
 <h2>Connecting and disconnecting</h2><p>In the dashboard, open <b>Account</b> and find the <b>Sign-in methods</b> card. It lists each provider with <b>Connect</b> or <b>Disconnect</b>. Connect takes you to the provider to approve, then back to the card. Each provider can be connected to one {brand} account at a time.</p>
 <p>The same is available over the API with a full-access key:</p>
 <pre>curl {api}/v1/auth/identities -H "Authorization: Bearer $ALOOF_KEY"            # what's connected, and which providers are on

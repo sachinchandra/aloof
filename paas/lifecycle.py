@@ -123,21 +123,23 @@ def _ok(a, t):
     try: a = int(a)
     except (TypeError, ValueError): return None
     return a if hmac.compare_digest(token(a), t or "") and q("select 1 from accounts where id=?", (a,), one=True) else None
-def _page(h1, inner):
+def _page(h1, inner, status=200):   # token page: never cached, no analytics
     from . import site
-    return HTMLResponse(site.page(f"{h1} · Aloof", f"<section class=s><div class=wrap style='max-width:560px;padding:64px 0'><h1>{h1}</h1>{inner}</div></section>"), headers={"X-Robots-Tag": "noindex"})
+    return HTMLResponse(site.page(f"{h1} · Aloof", f"<section class=s><div class=wrap style='max-width:560px;padding:64px 0'><h1>{h1}</h1>{inner}</div></section>", analytics=False), status, headers={"X-Robots-Tag": "noindex", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 @R.get("/email/unsubscribe", response_class=HTMLResponse, include_in_schema=False)
-def unsub_page(a: str = "", t: str = ""):
-    if not _ok(a, t): return _page("Link not valid", "<p class=muted>This unsubscribe link isn't valid. You can turn onboarding emails off in Dashboard → Settings.</p>")
+def unsub_page(request: Request, a: str = "", t: str = ""):
+    from .netaddr import limit; limit("unsub", request)
+    if not _ok(a, t): return _page("Link not valid", "<p class=muted>This unsubscribe link isn't valid. You can turn onboarding emails off in Dashboard → Settings.</p>", 400)
     import html
     return _page("Unsubscribe from onboarding emails", f"""<p>Stop onboarding and tips emails to this account. Sign-in links, receipts and balance alerts still arrive.</p>
 <form method=post action="/email/unsubscribe"><input type=hidden name=a value="{html.escape(a)}"><input type=hidden name=t value="{html.escape(t)}"><button class="btn pri">Unsubscribe</button></form>""")
 @R.post("/email/unsubscribe", include_in_schema=False)
 async def unsub_do(request: Request):
     """One-click (RFC 8058): mail clients POST List-Unsubscribe=One-Click to the List-Unsubscribe URL (a, t in the query)."""
+    from .netaddr import limit; limit("unsub", request)
     f = await request.form(); qp = request.query_params
     aid = _ok(f.get("a") or qp.get("a"), f.get("t") or qp.get("t"))
     if aid: set_optout(aid, True); log.info("lifecycle unsubscribe account=%s", aid)
-    if f.get("List-Unsubscribe") == "One-Click": return PlainTextResponse("ok" if aid else "invalid", 200 if aid else 400)
+    if f.get("List-Unsubscribe") == "One-Click": return PlainTextResponse("ok" if aid else "invalid", 200 if aid else 400, headers={"Cache-Control": "no-store"})
     return _page("You're unsubscribed", "<p>You won't get onboarding or tips emails from us. You can turn them back on in Dashboard → Settings.</p>") if aid else \
-        _page("Link not valid", "<p class=muted>This unsubscribe link isn't valid.</p>")
+        _page("Link not valid", "<p class=muted>This unsubscribe link isn't valid.</p>", 400)

@@ -27,3 +27,15 @@ def rate_key(ip):
     m = getattr(a, "ipv4_mapped", None)
     if m: return str(m)
     return str(ipaddress.ip_network(f"{a}/64", strict=False)) if a.version == 6 else str(a)
+
+import threading as _th, time as _t
+_lim = {}; _lim_lock = _th.Lock()
+def limit(bucket, request, n=30, window=600, now=None):
+    """Shared per-IP sliding-window limiter (IPv6 per /64). Raises HTTP 429 with Retry-After when over n hits per window."""
+    from fastapi import HTTPException
+    now = now or _t.time(); k = (bucket, rate_key(client_ip(request)))
+    with _lim_lock:
+        if len(_lim) > 50000: _lim.clear()
+        h = [x for x in _lim.get(k, []) if now - x < window]
+        if len(h) >= n: raise HTTPException(429, "Too many requests. Try again in a few minutes.", headers={"Retry-After": str(int(window - (now - h[0])) + 1)})
+        h.append(now); _lim[k] = h
