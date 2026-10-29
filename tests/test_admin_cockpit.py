@@ -9,6 +9,10 @@ c = TestClient(api.app, base_url="http://api.aloof.test")
 CS = {"X-Aloof-CSRF": "1"}
 def _reg(email):
     cl = TestClient(api.app, base_url="http://api.aloof.test")
+    from paas import engine as _en, auth as _au
+    if _en.reserved_staff_email(email):   # staff addresses can't password-register (oct29 F2): seed as a verified account, then log in
+        if not q("select 1 from accounts where lower(email)=?", (email.lower(),), one=True): _en.create_account(email, _au.hash_password("correct horse 1"), verified=True)
+        assert cl.post("/v1/auth/login", json={"email": email, "password": "correct horse 1"}).status_code == 200; return cl
     assert cl.post("/v1/auth/register", json={"email": email, "password": "correct horse 1"}).status_code == 200; return cl
 def owner():
     e = www.ADMIN_EMAIL

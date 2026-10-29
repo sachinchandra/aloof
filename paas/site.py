@@ -68,7 +68,7 @@ def posthog_host(): return (os.environ.get("POSTHOG_HOST") or POSTHOG_DEFAULT_HO
 def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
-    return f'<script>window.ALOOF_PH={json.dumps({"key": k, "host": posthog_host(), "hosts": analytics_hosts()})}</script><script src="/static/analytics.js?v=8" defer></script>' if k else ""
+    return f'<script>window.ALOOF_PH={json.dumps({"key": k, "host": posthog_host(), "hosts": analytics_hosts()})}</script><script src="/static/analytics.js?v=9" defer></script>' if k else ""
 def analytics_hosts():
     """Only platform hosts load analytics (never <app>.<domain> user apps): base, www and api for the base + alt domains."""
     ds = [d.strip() for d in (os.environ.get("PAAS_BASE_DOMAIN", "aloof.si") + "," + os.environ.get("PAAS_ALT_DOMAINS", "")).split(",") if d.strip()]

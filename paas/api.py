@@ -133,6 +133,7 @@ def signup(s: Signup):
     """API-only signup (CLI/MCP): returns an API key once. Web users register with a password or magic link."""
     try: e = auth._check_email(s.email)
     except ValueError as x: raise HTTPException(400, str(x))
+    if engine.reserved_staff_email(e): raise HTTPException(400, "this address is reserved for Aloof staff; sign in with an email link instead")
     if q("select 1 from accounts where email=?", (e,), one=True): raise HTTPException(409, "exists")
     a = engine.create_account(e); analytics.capture(a["id"], "signup_completed", {"method": "api"} | analytics.attribution(s))
     from . import lifecycle; lifecycle.welcome(a["id"])   # no-op while LIFECYCLE_EMAILS_ENABLED=0

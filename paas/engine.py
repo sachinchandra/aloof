@@ -623,16 +623,37 @@ def usage(account_id):
     for t in tot.values(): t["hours"]=round(t["hours"],4); t["cost_usd"]=round(t["cost_usd"],2)
     return {"apps": tot, "total_usd": round(sum(t["cost_usd"] for t in tot.values()),2)}
 def new_api_key(): return "pk_" + secrets.token_urlsafe(24)
-TEST_EMAIL_PATTERNS = ("%@example.com", "%@example.org", "%@example.net", "%.test", "%.invalid", "%@localhost",
-                       "%@aloof.si", "%@enigmaticitsolutions.com")   # last two: our own (internal) domains, incl. plus addresses   # SQL LIKE; also used by www.mark_flags
-def is_test_email(email):
-    e = (email or "").strip().lower()
-    return any(e.endswith(p[1:]) for p in TEST_EMAIL_PATTERNS)
+# Reserved, non-deliverable domains (RFC 2606/6761): always test accounts, and no mail is ever sent there (it can only bounce).
+UNDELIVERABLE_PATTERNS = ("%@example.com", "%@example.org", "%@example.net", "%.test", "%.invalid", "%@localhost")
+# Our own domains: test (analytics/metrics only) once the address is verified (magic link, or OAuth with a verified email).
+INTERNAL_DOMAINS = ("aloof.si", "enigmaticitsolutions.com")
+TEST_EMAIL_PATTERNS = UNDELIVERABLE_PATTERNS + tuple(f"%@{d}" for d in INTERNAL_DOMAINS)   # SQL LIKE; also used by www.mark_flags
+# Staff mailboxes on internal domains: can't be claimed by password/API signup (no proof of ownership).
+RESERVED_LOCAL_PARTS = frozenset("support admin billing legal privacy security sales abuse postmaster noreply hello sachin".split())
+def _e(email): return (email or "").strip().lower()
+def undeliverable_email(email): return any(_e(email).endswith(p[1:]) for p in UNDELIVERABLE_PATTERNS)
+def internal_email(email): return _e(email).rpartition("@")[2] in INTERNAL_DOMAINS
+def reserved_staff_email(email):
+    local, _, dom = _e(email).rpartition("@"); return dom in INTERNAL_DOMAINS and local.split("+")[0] in RESERVED_LOCAL_PARTS
+def is_test_email(email, verified=False):
+    """is_test drives analytics/metrics only (never transactional mail). Internal domains count only when verified."""
+    return undeliverable_email(email) or (bool(verified) and internal_email(email))
+def recompute_test(account_id):
+    """Re-derive is_test for internal-domain/undeliverable accounts after verification changes; syncs PostHog when it flips."""
+    a = q("select id, email, email_verified, is_test from accounts where id=?", (account_id,), one=True)
+    if not a or not (internal_email(a["email"]) or undeliverable_email(a["email"])): return False
+    v = int(is_test_email(a["email"], a.get("email_verified")))
+    if v == int(a.get("is_test") or 0): return False
+    q("update accounts set is_test=? where id=?", (v, account_id))
+    try:
+        from . import analytics; analytics.identify(account_id)
+    except Exception: pass
+    return True
 def create_account(email, password_hash=None, verified=False):
     """API keys are stored only as SHA-256 hashes; the plaintext key is returned once. Reserved test domains get is_test=1 at creation."""
     key = new_api_key()
     q("insert into accounts(email,api_key_hash,api_key_prefix,password_hash,email_verified,created,is_test) values(?,?,?,?,?,?,?)",
-      (email.lower(), sha256(key), key[:10], password_hash, int(verified), time.time(), int(is_test_email(email))))
+      (email.lower(), sha256(key), key[:10], password_hash, int(verified), time.time(), int(is_test_email(email, verified))))
     a = q("select * from accounts where email=?", (email.lower(),), one=True); a["api_key"] = key; return a
 def rotate_api_key(account_id):
     key = new_api_key(); q("update accounts set api_key_hash=?, api_key_prefix=? where id=?", (sha256(key), key[:10], account_id)); return key

@@ -7,9 +7,11 @@ JS = open(os.path.join(os.path.dirname(api.__file__), "static", "analytics.js"))
 def test_js_autocapture_and_ctas():
     assert "send('$autocapture',{$event_type:'click',$elements_chain:" in JS and "send('cta_clicked',{cta:" in JS and "cta_click'" not in JS
     assert ".value" not in JS.split("function esc")[1]                     # never captures input values
-    assert "aloof_test|is_test" in JS and "T?{is_test:true}:{}" in JS and "st={is_test:!!isTest||T}" in JS
+    assert "aloof_test|is_test" not in JS and "location.search))sessionStorage.setItem('aloof_is_test'" not in JS   # F3: no URL opt-in
+    assert "T?{is_test:true}:{}" in JS and "T=!!isTest;var st={is_test:T}" in JS
+    assert "$current_url:cu(location.href)" in JS and "location.href," not in JS and "$referrer:document.referrer?cu(" in JS   # F4
     assert "first_promo" in JS and "+'_claim'" in JS and "subscribe_card" in JS
-    assert "analytics.js?v=8" in site.analytics_tag() or not site.analytics_tag()
+    assert "analytics.js?v=9" in site.analytics_tag() or not site.analytics_tag()
 def test_cta_markup():
     d = open(os.path.join(os.path.dirname(api.__file__), "..", "dashboard", "index.html")).read()
     assert "data-cta=deploy_app" in d and "data-cta=subscribe_card" in d

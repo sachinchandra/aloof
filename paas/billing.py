@@ -148,7 +148,8 @@ def check_low_balance(now=None):
     from .auth import send_mail
     sent_n = 0
     for a in q("select id, email, lowbal_sent, lowbal_alerts, is_test from accounts where (tier is not null and tier != ?) or credit_cents <= 0", ("free",)):
-        if a.get("is_test") and not E("PAAS_LOWBAL_TEST_ACCOUNTS"): continue   # reserved test domains never get mail
+        from .engine import undeliverable_email
+        if undeliverable_email(a.get("email")): continue   # example.com, .test, ... can't receive mail (is_test never blocks account mail)
         try:
             rw = runway(a["id"], now)
             if rw["level"] == "free": continue

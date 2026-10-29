@@ -46,6 +46,10 @@ def test_status_probe_and_page(monkeypatch):
     h = c.get("/status").text; assert "Some systems are not operational" in h and "90-day history" in h
 def _login(email):
     cl = TestClient(api.app, base_url="http://api.aloof.test")
+    from paas import engine as _en, auth as _au
+    if _en.reserved_staff_email(email):   # staff addresses can't password-register (oct29 F2): seed as a verified account, then log in
+        if not q("select 1 from accounts where lower(email)=?", (email.lower(),), one=True): _en.create_account(email, _au.hash_password("correct horse 1"), verified=True)
+        assert cl.post("/v1/auth/login", json={"email": email, "password": "correct horse 1"}).status_code == 200; return cl
     assert cl.post("/v1/auth/register", json={"email": email, "password": "correct horse 1"}).status_code == 200; return cl
 def test_admin_access_control_and_metrics():
     owner = www.ADMIN_EMAIL
@@ -201,11 +205,11 @@ def test_deployments_split_customers_vs_all():
 
 def test_internal_domains_are_test_and_flags_sync_to_posthog(monkeypatch):
     from paas import engine, analytics
-    for e in ("sachin+qa1@aloof.si", "X@Aloof.si", "a@enigmaticitsolutions.com"): assert engine.is_test_email(e), e
+    for e in ("sachin+qa1@aloof.si", "X@Aloof.si", "a@enigmaticitsolutions.com"): assert engine.is_test_email(e, verified=True) and not engine.is_test_email(e), e
     for e in ("a@aloof.si.evil.com", "a@notaloof.sii", "a@realco.io"): assert not engine.is_test_email(e), e
     sent = []; monkeypatch.setattr(analytics, "identify", lambda i: sent.append(i) or True)
     k = time.time_ns(); a = engine.create_account(f"u{k}@realco.io")
-    q("update accounts set email=? where id=?", (f"sachin+t{k}@aloof.si", a["id"])); q("update accounts set is_test=0 where id=?", (a["id"],))
+    q("update accounts set email=?, email_verified=1 where id=?", (f"sachin+t{k}@aloof.si", a["id"])); q("update accounts set is_test=0 where id=?", (a["id"],))
     assert a["id"] in www.mark_flags() and a["id"] in sent
     assert q("select is_test from accounts where id=?", (a["id"],), one=True)["is_test"] == 1
     from test_admin_cockpit import owner

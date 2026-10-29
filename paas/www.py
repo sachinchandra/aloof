@@ -201,12 +201,14 @@ from .engine import TEST_EMAIL_PATTERNS
 def mark_flags():
     q("update accounts set is_admin=1 where lower(email)=?", (ADMIN_EMAIL,))
     q("update accounts set is_admin=0 where lower(email)!=? and is_admin=1", (ADMIN_EMAIL,))
-    newly = []
+    from .engine import is_test_email
+    changed = []   # internal domains: test only when verified; undeliverable: always. Other accounts (admin flag) untouched.
     for pat in TEST_EMAIL_PATTERNS:
-        newly += [r["id"] for r in q("select id from accounts where lower(email) like ? and (is_test is null or is_test=0)", (pat,))]
-        q("update accounts set is_test=1 where lower(email) like ? and (is_test is null or is_test=0)", (pat,))
-    sync_test_flags(newly)
-    return newly
+        for r in q("select id, email, email_verified, is_test from accounts where lower(email) like ?", (pat,)):
+            v = int(is_test_email(r["email"], r.get("email_verified")))
+            if v != int(r.get("is_test") or 0): q("update accounts set is_test=? where id=?", (v, r["id"])); changed.append(r["id"])
+    sync_test_flags(changed)
+    return changed
 def sync_test_flags(ids):
     """Push accounts.is_test to the PostHog person ($identify $set is_test) so dashboards filtering is_test stay right. Never raises."""
     from . import analytics

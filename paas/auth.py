@@ -46,9 +46,10 @@ def _check_email(email):
 def register(email, password):
     email = _check_email(email)
     if len(password or "") < 10: raise ValueError("password must be at least 10 characters")
+    if engine.reserved_staff_email(email): raise ValueError("this address is reserved for Aloof staff; sign in with an email link instead")
     if q("select 1 from accounts where email=?", (email,), one=True): raise PermissionError("account exists; log in or use a magic link")
     a = engine.create_account(email, hash_password(password))
-    if engine.is_test_email(email): return a   # reserved test domains (example.com, .test, ...) never get mail
+    if engine.undeliverable_email(email): return a   # example.com, .test, ... can't receive mail (is_test never blocks mail)
     from . import lifecycle
     if lifecycle.enabled(): lifecycle.welcome(a["id"], a["api_key"]); return a   # onboarding welcome with the key block (one welcome only)
     try:
@@ -72,8 +73,7 @@ def start_magic(email, base_url, attribution=None, pending=None):
     if attribution:
         if len(_magic_attr) > 5000: _magic_attr.clear()
         _magic_attr[sha256(tok)] = attribution
-    if engine.is_test_email(email) or (q("select is_test from accounts where email=?", (email,), one=True) or {}).get("is_test"):
-        return True  # reserved test domains / test accounts never get mail (same generic answer)
+    if engine.undeliverable_email(email): return True   # example.com, .test, ... can't receive mail; is_test never blocks sign-in mail
     from . import emailkit; subj, txt, htm = emailkit.magic_link(f"{base_url.rstrip('/')}/auth/magic?token={tok}", MAGIC_TTL // 60)
     send_mail(email, subj, txt, html=htm)
     return True
@@ -84,6 +84,7 @@ def finish_magic(tok):
     created = not a; attr = _magic_attr.pop(sha256(tok or ""), None)
     if not a: a = engine.create_account(email, None, verified=True)
     else: q("update accounts set email_verified=1 where id=?", (a["id"],))
+    engine.recompute_test(a["id"])   # internal-domain addresses become test only once verified
     a = q("select * from accounts where email=?", (email,), one=True)
     if created: a["_created"] = True; a["_attribution"] = attr
     return a
