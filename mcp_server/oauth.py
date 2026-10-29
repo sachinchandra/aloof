@@ -52,10 +52,10 @@ def password_login(email, password):
     with httpx.Client(timeout=10) as c:
         r = c.post(f"{API}/v1/auth/login", json={"email": email, "password": password})
         if r.status_code != 200: return None
-        sess = r.cookies.get("aloof_session")   # Secure cookie: pass explicitly on this internal (plain-http) hop
+        name = next((n for n in ("__Host-aloof_session", "aloof_session") if r.cookies.get(n)), None); sess = r.cookies.get(name) if name else None   # Secure cookie: pass explicitly on this internal (plain-http) hop
         if not sess: return None
-        k = c.post(f"{API}/v1/auth/mcp-key", headers={"X-Aloof-CSRF": "1", "Cookie": f"aloof_session={sess}"})
-        c.post(f"{API}/v1/auth/logout", headers={"X-Aloof-CSRF": "1", "Cookie": f"aloof_session={sess}"})   # don't leave the session lying around
+        k = c.post(f"{API}/v1/auth/mcp-key", headers={"X-Aloof-CSRF": "1", "Cookie": f"{name}={sess}"})
+        c.post(f"{API}/v1/auth/logout", headers={"X-Aloof-CSRF": "1", "Cookie": f"{name}={sess}"})   # don't leave the session lying around
         return k.json().get("api_key") if k.status_code == 200 else None
 log = logging.getLogger("mcp.oauth")
 # ---------- Client ID Metadata Documents ----------

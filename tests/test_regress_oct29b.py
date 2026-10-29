@@ -24,12 +24,12 @@ def test_preaccount_takeover_attacker_loses_everything(mail):
     with pytest.raises(PermissionError): auth.login(e, "attacker-pw-1")
     me = vic.get("/v1/auth/me").json(); assert me["new_api_key"].startswith("pk_") and vic.get("/v1/auth/me").json()["new_api_key"] is None
     assert engine.account_by_key(me["new_api_key"])["id"] == a["id"]
-def test_same_session_verify_keeps_password_rotates_key(mail):
+def test_same_session_verify_clears_password_rotates_key(mail):
     e = f"own{_n()}@realco.io"; c = TestClient(api.app)
     key = c.post("/v1/auth/register", json={"email": e, "password": "my-own-pw-1"}).json().get("api_key")
     mail.clear(); auth.start_magic(e, "http://testserver"); c.get(f"/auth/magic?token={_link(mail)}", follow_redirects=False)
-    a = q("select * from accounts where email=?", (e,), one=True); assert a["email_verified"] == 1 and a["password_hash"]
-    auth.login(e, "my-own-pw-1"); nk = c.get("/v1/auth/me").json()["new_api_key"]
+    a = q("select * from accounts where email=?", (e,), one=True); assert a["email_verified"] == 1 and a["password_hash"] is None   # F8a: no same-session exception
+    nk = c.get("/v1/auth/me").json()["new_api_key"]
     assert nk and (key is None or engine.account_by_key(key) is None)
 def test_verified_account_magic_login_changes_nothing(mail):
     e = f"v{_n()}@realco.io"; a = engine.create_account(e, auth.hash_password("pw-pw-pw-pw-1"), verified=True)

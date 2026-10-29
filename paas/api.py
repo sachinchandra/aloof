@@ -50,6 +50,17 @@ async def _security_headers(request: Request, call_next):
     else: r.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
     return r
 SECURE_COOKIES = PUBLIC_API_URL.startswith("https://") and os.environ.get("PAAS_INSECURE_COOKIES") != "1"
+# F8a: __Host- cookies must be Secure, Path=/, no Domain, so a tenant app on <app>.BASE_DOMAIN can't set or overwrite them.
+if SECURE_COOKIES: auth.COOKIE = "__Host-aloof_session"
+@app.middleware("http")
+async def _strip_legacy_session(request: Request, call_next):
+    """The old aloof_session cookie is never accepted (a tossed one is indistinguishable from ours): a one-time logout.
+    Expire it host-only and at Domain=BASE_DOMAIN, which also removes one a tenant subdomain may have set."""
+    r = await call_next(request)
+    if auth.COOKIE != auth.LEGACY_COOKIE and auth.LEGACY_COOKIE in request.cookies:
+        for extra in ("", f"; Domain={BASE_DOMAIN}"):
+            r.headers.append("set-cookie", f"{auth.LEGACY_COOKIE}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Lax{extra}")
+    return r
 SUSPENDED_MSG = "this account is suspended; email support@aloof.si"
 def acct(request: Request, authorization: str = Header(None)):
     """Bearer API key (CLI/MCP/automation) or session cookie (dashboard). Cookie-authenticated writes need the
@@ -651,6 +662,7 @@ def social_connect(p: str, request: Request):
     if request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
     cur = auth.session_account(request.cookies.get(auth.COOKIE))
     if not cur: raise HTTPException(401, "sign in first")
+    if not cur.get("email_verified"): raise HTTPException(403, "verify your email first: sign in with the emailed link, then connect a social account")
     if p not in oauth_login.PROVIDERS or not oauth_login.enabled(p): raise HTTPException(404, "provider not available")
     _rate_check(("oauth-ip:" + _ipk(request),))
     url, st = oauth_login.start(p, "/dashboard#account", link_account=cur["id"])
@@ -1216,6 +1228,15 @@ except Exception as _e: logging.getLogger('paas').error('waitlist kv migration f
 from . import lb
 proxy = FastAPI(); _rr = {}; client = httpx.AsyncClient(timeout=60)
 EGRESS = billing.EGRESS   # app -> bytes sent to clients since last meter tick
+def tenant_cookie_ok(v):
+    """F8a cookie tossing: a tenant app may not set the platform session cookie name or a cookie scoped to the platform
+    domain (Domain=BASE_DOMAIN, which www/api would receive)."""
+    name = v.split("=", 1)[0].strip().lower()
+    if name.lstrip("_").replace("host-", "", 1).replace("secure-", "", 1) == "aloof_session" or name in ("__host-aloof_session", "aloof_session"): return False
+    for part in v.split(";")[1:]:
+        k, _, d = part.partition("=")
+        if k.strip().lower() == "domain" and d.strip().lstrip(".").lower().rstrip(".") == BASE_DOMAIN.lower(): return False
+    return True
 HOP = {"connection","keep-alive","transfer-encoding","te","trailer","upgrade","proxy-authorization","proxy-authenticate","host","content-length"}
 def resolve_app(host, path):
     if _app_of(host): return _app_of(host), path
@@ -1298,8 +1319,11 @@ async def edge(path: str, request: Request):
             finally: release()
     gen = body(); weakref.finalize(gen, release)   # body never iterated (client gone before streaming): release on GC
     from starlette.background import BackgroundTask
-    return StreamingResponse(gen, status_code=r.status_code, background=BackgroundTask(release),
-                             headers={k:v for k,v in r.headers.items() if k.lower() not in HOP} | {"x-paas-instance": str(i["port"])})
+    resp = StreamingResponse(gen, status_code=r.status_code, background=BackgroundTask(release),
+                             headers={k:v for k,v in r.headers.items() if k.lower() not in HOP and k.lower() != "set-cookie"} | {"x-paas-instance": str(i["port"])})
+    for v in (r.headers.get_list("set-cookie") if hasattr(r.headers, "get_list") else [v for k, v in r.headers.items() if k.lower() == "set-cookie"]):   # every cookie kept (the dict above used to collapse them); platform-targeting ones dropped
+        if tenant_cookie_ok(v): resp.raw_headers.append((b"set-cookie", v.encode("latin-1")))
+    return resp
 
 # Branded 404 for browsers; API/JSON clients keep {"detail": ...}
 from starlette.exceptions import HTTPException as _StarHTTP

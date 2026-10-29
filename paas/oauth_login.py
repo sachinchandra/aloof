@@ -120,6 +120,8 @@ def profile(p, tok, nonce):
 # ---- identities ----
 def identity(p, sub): return q("select * from provider_identities where provider=? and subject=?", (p, sub), one=True)
 def link(account_id, p, prof):
+    acct = q("select email_verified from accounts where id=?", (account_id,), one=True)
+    if not acct or not acct.get("email_verified"): raise AuthError("state_invalid", "verify the account email before connecting a social login")
     ex = identity(p, prof["sub"])
     if ex and ex["account_id"] != account_id: raise AuthError("already_linked")
     if q("select 1 from provider_identities where account_id=? and provider=? and subject!=?", (account_id, p, prof["sub"]), one=True):

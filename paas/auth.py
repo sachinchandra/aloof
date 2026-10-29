@@ -7,7 +7,8 @@ from .crypto import sha256, hash_password, check_password
 from . import engine
 E = lambda k, d=None: os.environ.get(k, d)
 SESSION_TTL = 14 * 86400; MAGIC_TTL = 15 * 60
-COOKIE = "aloof_session"
+LEGACY_COOKIE = "aloof_session"   # pre-F8a name; a tenant subdomain could toss a Domain=aloof.si cookie with this name
+COOKIE = LEGACY_COOKIE             # api.py switches this to "__Host-aloof_session" whenever cookies are Secure (https)
 OUTBOX = os.environ.get("PAAS_OUTBOX") or os.path.join(os.path.dirname(__file__), "..", "data", "outbox.log")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 log = logging.getLogger("paas.mail")
@@ -85,16 +86,21 @@ def start_magic(email, base_url, attribution=None, pending=None):
     return True
 def secure_first_verification(account_id, same_session=False):
     """F8 pre-account takeover: the first time an unverified account proves its address, nothing created before that proof
-    survives unless it came from the session that signed up. Always: rotate the primary API key, delete extra API keys
-    (incl. MCP OAuth keys) and deploy tokens, end every session. Unless same_session: also clear the password (the
-    verifier can set a new one). The new key is shown once on the dashboard (kv key_reveal, 24h) - never emailed."""
-    from .db import kv_put
-    key = engine.rotate_api_key(account_id)
-    q("delete from api_keys where account_id=?", (account_id,)); q("delete from deploy_tokens where account_id=?", (account_id,))
-    q("delete from sessions where account_id=?", (account_id,))
-    if not same_session: q("update accounts set password_hash=null where id=?", (account_id,))
+    survives. In ONE transaction, in this order: clear the password, rotate the primary API key, delete extra API keys (incl.
+    MCP OAuth keys), deploy tokens and social identities linked while unverified, mark verified, and end every session LAST,
+    so a login racing this either fails (password already gone) or creates a session that is then deleted. `same_session`
+    is accepted for compatibility and ignored (cookie tossing made it unsafe). The new key is shown once on the dashboard
+    (kv key_reveal, 24h) - never emailed."""
+    from .db import kv_put, tx
+    with tx():
+        q("update accounts set password_hash=null where id=?", (account_id,))
+        key = engine.rotate_api_key(account_id)
+        q("delete from api_keys where account_id=?", (account_id,)); q("delete from deploy_tokens where account_id=?", (account_id,))
+        n_id = len(q("delete from provider_identities where account_id=? returning id", (account_id,)))
+        q("update accounts set email_verified=1 where id=?", (account_id,))
+        q("delete from sessions where account_id=?", (account_id,))
     kv_put("key_reveal", str(account_id), key, ttl=86400)
-    log.warning("first verification of pre-existing account %s: keys rotated, sessions ended%s", account_id, "" if same_session else ", password cleared")
+    log.warning("first verification of pre-existing account %s: password cleared, keys rotated, %d identities removed, sessions ended", account_id, n_id)
     return key
 def take_key_reveal(account_id):
     from .db import kv_get, kv_del
@@ -109,8 +115,7 @@ def finish_magic(tok, session_token=None):
     if not a: a = engine.create_account(email, None, verified=True)
     else:
         if not a.get("email_verified"):
-            s = session_account(session_token) if session_token else None
-            secure_first_verification(a["id"], same_session=bool(s and s["id"] == a["id"]))
+            secure_first_verification(a["id"])
         q("update accounts set email_verified=1 where id=?", (a["id"],))
     engine.recompute_test(a["id"])   # internal-domain addresses become test only once verified
     a = q("select * from accounts where email=?", (email,), one=True)
