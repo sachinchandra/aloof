@@ -120,9 +120,9 @@ def imp_exit(request: Request):
     auth.end_session(request.cookies.get(auth.COOKIE)); audit(cur["impersonated_by"], None, "admin.impersonate_exit", f"account={cur['id']} email={cur['email']}")
     back = request.cookies.get(BACK); o = auth.session_account(back)
     from .api import SECURE_COOKIES
-    r = JSONResponse({"ok": True, "url": "/admin" if www.is_owner(o) else "/login"}); r.delete_cookie(BACK, path="/")
+    r = JSONResponse({"ok": True, "url": "/admin" if www.is_owner(o) else "/login"}); r.delete_cookie(BACK, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax")
     if www.is_owner(o): r.set_cookie(auth.COOKIE, back, max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
-    else: r.delete_cookie(auth.COOKIE, path="/")
+    else: r.delete_cookie(auth.COOKIE, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax")
     return r
 def imp_banner(a):
     return ("<div role=status style=\"position:sticky;top:0;z-index:9999;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;"

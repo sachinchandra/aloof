@@ -52,6 +52,12 @@ async def _security_headers(request: Request, call_next):
 SECURE_COOKIES = PUBLIC_API_URL.startswith("https://") and os.environ.get("PAAS_INSECURE_COOKIES") != "1"
 # F8a: __Host- cookies must be Secure, Path=/, no Domain, so a tenant app on <app>.BASE_DOMAIN can't set or overwrite them.
 if SECURE_COOKIES: auth.COOKIE = "__Host-aloof_session"
+# F9: every platform cookie is __Host- in prod. Tenant JS on <app>.BASE_DOMAIN can plant Domain=BASE_DOMAIN cookies under any
+# other name, so old names are never read. No platform cookie is shared across subdomains (each is read on the host that set it).
+def _ck(name): return "__Host-" + name if SECURE_COOKIES else name
+from . import oauth_login as _ol_ck; _ol_ck.STATE_COOKIE = _ck("aloof_oauth_state"); PENDING_COOKIE = _ck("aloof_oauth_pending"); ATTR_COOKIE = _ck("aloof_attr")
+from . import admin_ops as _admin_ops_ck; _admin_ops_ck.BACK = _ck("aloof_admin_back")
+def _del_cookie(r, name): r.delete_cookie(name, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax")
 @app.middleware("http")
 async def _strip_legacy_session(request: Request, call_next):
     """The old aloof_session cookie is never accepted (a tossed one is indistinguishable from ours): a one-time logout.
@@ -555,7 +561,7 @@ class Creds(BaseModel): email: str; password: str
 class RegisterReq(Attribution, Creds): attribution: dict | None = None
 class MagicReq(Attribution): email: str; attribution: dict | None = None
 def _login_response(a, body=None):
-    r = JSONResponse(body or {"ok": True, "email": a["email"]}); r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
+    r = JSONResponse(body or {"ok": True, "email": a["email"]}); r.set_cookie(auth.COOKIE, a.get("_session") or auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
 ATTR_KEYS = ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "referrer", "landing")
 def _save_attribution(account_id, attr):
@@ -589,7 +595,7 @@ def _rate_check(keys, now=None):
 @app.post("/v1/auth/login")
 def auth_login(c: Creds, request: Request):
     _rate_check(("ip:" + _ipk(request), "email:" + (c.email or "").strip().lower()))
-    try: a = auth.login(c.email, c.password)
+    try: a = auth.login(c.email, c.password, session=True)
     except PermissionError as e: raise HTTPException(401, str(e))
     analytics.identify(a["id"]); return _login_response(a)
 @app.post("/v1/auth/magic")
@@ -629,8 +635,8 @@ from . import oauth_login
 import urllib.parse as _up
 def _auth_err(code, p, nxt):
     r = RedirectResponse("/login?" + _up.urlencode({"auth_error": code, "provider": p, "next": nxt}), 303)
-    r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); return r
-def _cookie_kw(age): return {"max_age": age, "httponly": True, "samesite": "lax", "secure": SECURE_COOKIES, "path": "/auth/"}
+    _del_cookie(r, oauth_login.STATE_COOKIE); return r
+def _cookie_kw(age): return {"max_age": age, "httponly": True, "samesite": "lax", "secure": SECURE_COOKIES, "path": "/"}
 @app.get("/v1/auth/providers")
 def auth_providers(): return {"providers": oauth_login.providers(), "magic_link": True}
 @app.get("/auth/{p}/start")
@@ -652,7 +658,6 @@ def social_start(p: str, request: Request, next: str | None = None):
     attr = {k: str(v)[:300] for k, v in request.query_params.items() if k in ATTR_KEYS and v}   # first-touch UTM from the login page, for signup_completed
     if attr: r.set_cookie(ATTR_COOKIE, _up.urlencode(attr), **_cookie_kw(oauth_login.STATE_TTL))
     return r
-ATTR_COOKIE = "aloof_attr"
 def _cookie_attr(request):
     try: return {k: v[:300] for k, v in _up.parse_qsl(request.cookies.get(ATTR_COOKIE) or "") if k in ATTR_KEYS and v}
     except Exception: return {}
@@ -688,20 +693,20 @@ def social_callback(p: str, request: Request, code: str | None = None, state: st
         return _auth_err("provider_error", p, nxt)
     if pid:
         r = RedirectResponse("/auth/x/email?" + _up.urlencode({"next": nxt}), 303)
-        r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); r.set_cookie("aloof_oauth_pending", pid, **_cookie_kw(oauth_login.PENDING_TTL)); return r
+        _del_cookie(r, oauth_login.STATE_COOKIE); r.set_cookie(PENDING_COOKIE, pid, **_cookie_kw(oauth_login.PENDING_TTL)); return r
     if created:
         at = _cookie_attr(request); _save_attribution(a["id"], at)
         analytics.capture(a["id"], "signup_completed", {"method": p} | analytics.attribution(at))
         from . import lifecycle; lifecycle.welcome(a["id"])   # no-op while LIFECYCLE_EMAILS_ENABLED=0
     else: analytics.identify(a["id"])
     _audit(a["id"], None, "auth.identity_connect" if s.get("link") else "auth.login", p, _ip(request))
-    r = RedirectResponse(nxt, 303); r.delete_cookie(oauth_login.STATE_COOKIE, path="/auth/"); r.delete_cookie(ATTR_COOKIE, path="/auth/")
+    r = RedirectResponse(nxt, 303); _del_cookie(r, oauth_login.STATE_COOKIE); _del_cookie(r, ATTR_COOKIE)
     if not s.get("link"): r.set_cookie(auth.COOKIE, auth.new_session(a["id"]), max_age=auth.SESSION_TTL, httponly=True, samesite="lax", secure=SECURE_COOKIES, path="/")
     return r
 @app.get("/auth/x/email", response_class=HTMLResponse)
 def x_email_form(request: Request, next: str | None = None):
     nxt = auth.safe_next(next, "/dashboard")
-    if not oauth_login.pending(request.cookies.get("aloof_oauth_pending")): return _auth_err("state_invalid", "x", nxt)
+    if not oauth_login.pending(request.cookies.get(PENDING_COOKIE)): return _auth_err("state_invalid", "x", nxt)
     from . import site
     return www.at("/auth/x/email", "default", site.x_email, BRAND)
 class XEmailReq(BaseModel): email: str
@@ -709,7 +714,7 @@ class XEmailReq(BaseModel): email: str
 def x_email_submit(b: XEmailReq, request: Request):
     """JSON {email} + X-Aloof-CSRF: 1 (sent by site.x_email). Needs the parked X identity (pending cookie from the callback)."""
     if request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
-    pid = request.cookies.get("aloof_oauth_pending")
+    pid = request.cookies.get(PENDING_COOKIE)
     if not oauth_login.pending(pid): raise HTTPException(400, "Your X sign-in expired. Start again with Sign in with X.")
     em = (b.email or "").strip().lower()
     _rate_check(("ip:" + _ipk(request), "email:" + em))
@@ -725,7 +730,7 @@ def identities_unlink(p: str, request: Request, a=Depends(acct)):
     return {"ok": True, "note": "you can still sign in with an email link" + (" or your password" if a.get("password_hash") else "")}
 @app.post("/v1/auth/logout")
 def auth_logout(request: Request):
-    auth.end_session(request.cookies.get(auth.COOKIE)); r = JSONResponse({"ok": True}); r.delete_cookie(auth.COOKIE, path="/"); return r
+    auth.end_session(request.cookies.get(auth.COOKIE)); r = JSONResponse({"ok": True}); r.delete_cookie(auth.COOKIE, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax"); return r
 class NameReq(BaseModel): name: str | None = None
 @app.put("/v1/auth/profile")
 def auth_profile(p: NameReq, a=Depends(acct)):

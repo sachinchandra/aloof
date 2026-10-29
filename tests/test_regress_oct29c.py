@@ -32,7 +32,7 @@ def test_single_transaction_rolls_back_and_ends_sessions_last(monkeypatch, mail)
     def spy(sql, *a_, **k):
         order.append(sql.split()[0] + " " + sql.split()[1] + " " + sql.split()[2]); return real_q(sql, *a_, **k)
     monkeypatch.setattr(auth, "q", spy); auth.secure_first_verification(a["id"]); monkeypatch.setattr(auth, "q", real_q)
-    assert order[0] == "update accounts set"   # password cleared first
+    assert order[0] == "select id from" and order[1] == "update accounts set"   # row lock, then password cleared first
     assert order[-1] == "delete from sessions" and order.index("delete from provider_identities") < order.index("delete from sessions")
     assert auth.session_account(s) is None
     b = engine.create_account(f"r{_n()}@realco.io", auth.hash_password("pw-pw-pw-pw-1"), verified=False)

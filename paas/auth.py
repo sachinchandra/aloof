@@ -64,10 +64,16 @@ def register(email, password):
         send_mail(email, subj, txt, html=htm)
     except MailError: pass   # already logged; the key is also returned in the register response
     return a
-def login(email, password):
-    a = q("select * from accounts where email=?", ((email or "").strip().lower(),), one=True)
-    if not a or not a.get("password_hash") or not check_password(password or "", a["password_hash"]):
-        check_password("x", "scrypt$16384$8$1$00$00"); raise PermissionError("invalid email or password")   # equalize timing
+def _lock(): from .db import PG; return " for update" if PG else ""   # row lock on Postgres; sqlite tx() is already serialised
+def login(email, password, session=False):
+    """F8c: reads the account under a row lock (Postgres SELECT ... FOR UPDATE), the same lock first verification takes, so a
+    login can't use a password that verification is clearing. session=True also creates the session inside that transaction."""
+    from .db import tx
+    with tx():
+        a = q("select * from accounts where email=?" + _lock(), ((email or "").strip().lower(),), one=True)
+        if not a or not a.get("password_hash") or not check_password(password or "", a["password_hash"]):
+            check_password("x", "scrypt$16384$8$1$00$00"); raise PermissionError("invalid email or password")   # equalize timing
+        if session: a["_session"] = new_session(a["id"])
     return a
 _magic_attr = {}   # token hash -> first-touch attribution for a magic-link signup (in-memory, best effort, bounded)
 def start_magic(email, base_url, attribution=None, pending=None):
@@ -93,6 +99,7 @@ def secure_first_verification(account_id, same_session=False):
     (kv key_reveal, 24h) - never emailed."""
     from .db import kv_put, tx
     with tx():
+        q("select id from accounts where id=?" + _lock(), (account_id,), one=True)
         q("update accounts set password_hash=null where id=?", (account_id,))
         key = engine.rotate_api_key(account_id)
         q("delete from api_keys where account_id=?", (account_id,)); q("delete from deploy_tokens where account_id=?", (account_id,))
