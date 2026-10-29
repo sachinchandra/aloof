@@ -1227,6 +1227,7 @@ from . import templating as _tpl; app.include_router(_tpl.R)
 from . import waitlist as _wl; app.include_router(_wl.R)
 from . import lifecycle as _lcm; app.include_router(_lcm.R)
 from . import admin_ops as _aops; app.include_router(_aops.R)
+from . import account_delete as _adel; app.include_router(_adel.R)
 try: _wl.migrate_kv()
 except Exception as _e: logging.getLogger('paas').error('waitlist kv migration failed: %s', _e)
 # ---------------- edge proxy (port 8080): <app>.BASE_DOMAIN or /_app/<app>/ ----------------
