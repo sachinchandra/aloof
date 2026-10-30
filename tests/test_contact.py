@@ -5,8 +5,9 @@ from paas.contact import CONTACT_EMAIL
 def test_pages_use_single_contact():
     for fn in (lambda: site.legal("privacy", "Aloof"), lambda: site.legal("terms", "Aloof")):
         h = fn()
-        assert h and not re.search(r"(privacy|legal|security|sales|hello)@aloof\.si", h)
+        assert h and not re.search(r"(legal|security|sales|hello)@aloof\.si", h)
         assert CONTACT_EMAIL in h
+        assert "privacy@aloof.si" in h   # shown as written (owner decision Oct 30)
 
 def test_reply_to(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "OUTBOX", str(tmp_path / "o.log")); monkeypatch.delenv("SMTP_HOST", raising=False)

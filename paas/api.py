@@ -59,6 +59,30 @@ from . import oauth_login as _ol_ck; _ol_ck.STATE_COOKIE = _ck("aloof_oauth_stat
 from . import admin_ops as _admin_ops_ck; _admin_ops_ck.BACK = _ck("aloof_admin_back")
 def _del_cookie(r, name): r.delete_cookie(name, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax")
 @app.middleware("http")
+async def _impersonation_mask(request: Request, call_next):
+    """Admin read-only view: refuse reveal/copy paths, mask secrets in every JSON body (paas/imp_mask.py)."""
+    tok = request.cookies.get(auth.COOKIE)
+    if not tok or request.headers.get("authorization") or not (request.url.path.startswith("/v1/") or request.url.path.startswith("/mcp")):
+        return await call_next(request)
+    s = await asyncio.to_thread(auth.session_account, tok)
+    if not s or not s.get("impersonated_by"): return await call_next(request)
+    from . import imp_mask
+    if imp_mask.blocked(request.url.path, request.query_params.multi_items()):
+        return JSONResponse({"detail": "secrets are hidden while viewing as user"}, status_code=403, headers={imp_mask.HEADER: "1"})
+    r = await call_next(request)
+    ct = r.headers.get("content-type", "")
+    if ct.startswith("text/plain"):   # logs and similar: mask key-shaped strings and URL credentials
+        body = b"".join([c async for c in r.body_iterator])
+        h = {k: v for k, v in r.headers.items() if k.lower() != "content-length"}; h[imp_mask.HEADER] = "1"
+        return Response(imp_mask._s(body.decode(errors="replace")).encode(), status_code=r.status_code, headers=h)
+    if not ct.startswith("application/json"):
+        r.headers[imp_mask.HEADER] = "1"; return r
+    body = b"".join([c async for c in r.body_iterator])
+    out = imp_mask.mask_bytes(body)
+    if out is None: out = b'{"detail": "response hidden while viewing as user"}'
+    h = {k: v for k, v in r.headers.items() if k.lower() not in ("content-length",)}; h[imp_mask.HEADER] = "1"
+    return Response(out, status_code=r.status_code, headers=h, media_type="application/json")
+@app.middleware("http")
 async def _strip_legacy_session(request: Request, call_next):
     """The old aloof_session cookie is never accepted (a tossed one is indistinguishable from ours): a one-time logout.
     Expire it host-only and at Domain=BASE_DOMAIN, which also removes one a tenant subdomain may have set."""
@@ -751,7 +775,7 @@ def auth_sessions_revoke_others(request: Request, a=Depends(acct)):
 @app.get("/v1/auth/me")
 def auth_me(a=Depends(acct)):
     return {"id": a["id"], "email": a["email"], "name": a.get("billing_name"), "created": a.get("created"), "tier": a.get("tier") or "free",
-            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")), "email_optout": bool(a.get("email_optout")), "new_api_key": auth.take_key_reveal(a["id"]),
+            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")), "email_optout": bool(a.get("email_optout")), "new_api_key": None if a.get("impersonated_by") else auth.take_key_reveal(a["id"]),   # never consumed by the admin view
             "api_key_prefix": key_hint(a.get("api_key_prefix")), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}
