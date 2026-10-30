@@ -60,28 +60,41 @@ from . import admin_ops as _admin_ops_ck; _admin_ops_ck.BACK = _ck("aloof_admin_
 def _del_cookie(r, name): r.delete_cookie(name, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax")
 @app.middleware("http")
 async def _impersonation_mask(request: Request, call_next):
-    """Admin read-only view: refuse reveal/copy paths, mask secrets in every JSON body (paas/imp_mask.py)."""
+    """Admin read-only view (paas/imp_mask.py): deny by default (route and content-type allowlists), refuse reveal/copy,
+    hide free-text output (logs, events, releases, deploy, diagnose), mask secrets in every JSON and text body."""
     tok = request.cookies.get(auth.COOKIE)
-    if not tok or request.headers.get("authorization") or not (request.url.path.startswith("/v1/") or request.url.path.startswith("/mcp")):
-        return await call_next(request)
+    if not tok or request.headers.get("authorization"): return await call_next(request)
     s = await asyncio.to_thread(auth.session_account, tok)
     if not s or not s.get("impersonated_by"): return await call_next(request)
     from . import imp_mask
-    if imp_mask.blocked(request.url.path, request.query_params.multi_items()):
-        return JSONResponse({"detail": "secrets are hidden while viewing as user"}, status_code=403, headers={imp_mask.HEADER: "1"})
+    path = request.url.path; H = {imp_mask.HEADER: "1", "Cache-Control": "no-store", "Vary": "Cookie"}
+    if imp_mask.blocked(path, request.query_params.multi_items()):
+        return JSONResponse({"detail": "secrets are hidden while viewing as user"}, status_code=403, headers=H)
+    if not imp_mask.allowed_route(request.method, path):
+        return JSONResponse({"detail": "not available while viewing as user"}, status_code=403, headers=H)
     r = await call_next(request)
+    if request.method == "POST" or (300 <= r.status_code < 400): r.headers.update(H); return r
     ct = r.headers.get("content-type", "")
-    if ct.startswith("text/plain"):   # logs and similar: mask key-shaped strings and URL credentials
-        body = b"".join([c async for c in r.body_iterator])
-        h = {k: v for k, v in r.headers.items() if k.lower() != "content-length"}; h[imp_mask.HEADER] = "1"
-        return Response(imp_mask._s(body.decode(errors="replace")).encode(), status_code=r.status_code, headers=h)
-    if not ct.startswith("application/json"):
-        r.headers[imp_mask.HEADER] = "1"; return r
+    if not imp_mask.allowed_type(path, ct):
+        return JSONResponse({"detail": "not available while viewing as user"}, status_code=403, headers=H)
+    if not path.startswith("/v1/"): r.headers.update(H); return r
     body = b"".join([c async for c in r.body_iterator])
-    out = imp_mask.mask_bytes(body)
-    if out is None: out = b'{"detail": "response hidden while viewing as user"}'
-    h = {k: v for k, v in r.headers.items() if k.lower() not in ("content-length",)}; h[imp_mask.HEADER] = "1"
-    return Response(out, status_code=r.status_code, headers=h, media_type="application/json")
+    h = {k: v for k, v in r.headers.items() if k.lower() != "content-length"}; h.update(H)
+    text_route = bool(imp_mask.TEXT_ROUTES.match(path))
+    if ct.startswith("text/plain"):   # runtime/build logs: hidden entirely; other text masked
+        out = imp_mask.HIDDEN if text_route else imp_mask._s(body.decode(errors="replace"))
+        return Response(out.encode(), status_code=r.status_code, headers=h, media_type="text/plain")
+    try: o = json.loads(body)
+    except Exception: return Response(b'{"detail": "response hidden while viewing as user"}', status_code=r.status_code, headers=h, media_type="application/json")
+    if text_route: o = imp_mask.hide_text(o)
+    return Response(json.dumps(imp_mask.mask(o)).encode(), status_code=r.status_code, headers=h, media_type="application/json")
+@app.middleware("http")
+async def _no_store_authenticated(request: Request, call_next):
+    """L3: authenticated /v1 responses are never cached by browsers or proxies."""
+    r = await call_next(request)
+    if request.url.path.startswith("/v1/") and (request.headers.get("authorization") or request.cookies.get(auth.COOKIE)):
+        r.headers["Cache-Control"] = "no-store"; r.headers["Vary"] = "Authorization, Cookie"
+    return r
 @app.middleware("http")
 async def _strip_legacy_session(request: Request, call_next):
     """The old aloof_session cookie is never accepted (a tossed one is indistinguishable from ours): a one-time logout.
@@ -754,7 +767,10 @@ def identities_unlink(p: str, request: Request, a=Depends(acct)):
     return {"ok": True, "note": "you can still sign in with an email link" + (" or your password" if a.get("password_hash") else "")}
 @app.post("/v1/auth/logout")
 def auth_logout(request: Request):
-    auth.end_session(request.cookies.get(auth.COOKIE)); r = JSONResponse({"ok": True}); r.delete_cookie(auth.COOKIE, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax"); return r
+    tok = request.cookies.get(auth.COOKIE); cur = auth.session_account(tok); auth.end_session(tok)
+    if cur:   # L1: close this session's console/proxy sockets now, not at the next watchdog pass
+        from . import ws_registry; ws_registry.revalidate(cur["id"], "signed out")
+    r = JSONResponse({"ok": True}); r.delete_cookie(auth.COOKIE, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax"); return r
 class NameReq(BaseModel): name: str | None = None
 @app.put("/v1/auth/profile")
 def auth_profile(p: NameReq, a=Depends(acct)):

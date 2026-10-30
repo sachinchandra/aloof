@@ -116,7 +116,7 @@ def test_read_only_view_blocks_writes_and_exits():
     assert o.get("/v1/apps").status_code == 200
     assert o.post("/v1/apps", json={"name": "x" + str(time.time_ns())[-6:], "image": "nginx"}, headers=CS).status_code == 403
     h = o.get("/dashboard"); assert "Read-only view of" in h.text and u["email"] in h.text
-    assert o.get("/admin").status_code == 404   # the admin dashboard isn't reachable from inside the view
+    assert o.get("/admin").status_code in (403, 404)   # L2 deny-by-default (403); the admin dashboard isn't reachable from inside the view
     e = o.post("/v1/admin/impersonate/exit", headers=CS); assert e.status_code == 200 and e.json()["url"] == "/admin"
     assert o.get("/v1/admin/dashboard").status_code == 200
     assert {"admin.impersonate", "admin.impersonate_exit"} <= {x["action"] for x in q("select action from audit where detail like ?", (f"account={u['id']} %",))}

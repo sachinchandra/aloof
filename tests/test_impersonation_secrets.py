@@ -49,3 +49,49 @@ def test_normal_session_unmasked():
     q("insert into sessions(token_hash,account_id,expires,created) values(?,?,?,?)", (sha256(tok), a["id"], now + 600, now))
     c = TestClient(app); c.cookies.set(auth.COOKIE, tok)
     r = c.get("/v1/auth/me"); assert r.status_code == 200 and imp_mask.HEADER not in r.headers
+
+# --- QA retest 4 (Oct 30): M1 free text, L1 logout sockets, L2 deny-by-default, L3 no-store ---
+def test_text_masking_unit():
+    t = imp_mask._s("run --password QACANARY_cmd --token=QAC2 -p 80 pw=hunter2xyz DB_PASSWORD: 's3cr3t'\nAuthorization: Bearer abc.def\nport=80")
+    for c in ("QACANARY_cmd", "QAC2", "hunter2xyz", "s3cr3t", "abc.def"): assert c not in t
+    assert "port=80" in t and "-p 80" in t and "hidden while viewing as user while" not in t
+    assert imp_mask._s("command: run --x y\n") == f"command: {imp_mask.HIDDEN}\n"
+    assert imp_mask.mask({"spec": {"command": "run --password X", "args": ["--password", "X"], "port": 80}})["spec"] == {"command": imp_mask.HIDDEN, "args": [imp_mask.HIDDEN, imp_mask.HIDDEN], "port": 80}
+
+def test_free_text_hidden_routes():
+    c, a = _imp(); i = a["id"]; now = time.time(); n = f"ft{time.time_ns()}"
+    q("insert into apps(name,account_id,status,spec,created,updated) values(?,?,?,?,?,?)",
+      (n, i, "running", dump_spec({"name": n, "image": "nginx", "plan": "shared-1x-256mb", "port": 80, "instances": 1, "command": "run --password QACANARY_cmd"}), now, now))
+    q("insert into events(app,ts,msg) values(?,?,?)", (n, now, "build said secretword QACANARY_evt"))
+    for u in ("/v1/apps", f"/v1/apps/{n}", f"/v1/apps/{n}?format=yaml"):
+        r = c.get(u); assert r.status_code == 200 and "QACANARY_cmd" not in r.text, u
+    r = c.get(f"/v1/apps/{n}/events"); assert r.status_code == 200 and "QACANARY_evt" not in r.text and r.json()[0]["msg"] == imp_mask.HIDDEN
+    for u in ("releases", "deploy", "diagnose", "logs/history"):
+        r = c.get(f"/v1/apps/{n}/{u}"); assert r.status_code in (200, 404) and "QACANARY" not in r.text, u
+    r = c.get(f"/v1/apps/{n}/logs")
+    assert r.status_code != 200 or r.text == imp_mask.HIDDEN
+
+def test_deny_by_default_and_no_store():
+    c, a = _imp()
+    for u in ("/v1/admin/export.csv", "/v1/admin/waitlist.csv", "/v1/nodes/agent.py", "/v1/github/repos", "/mcp", "/cli/aloof", "/admin", "/v1/some/future"):
+        r = c.get(u); assert r.status_code == 403, u
+    assert c.post("/v1/apps", json={}, headers={"X-Aloof-CSRF": "1"}).status_code == 403
+    r = c.get("/v1/auth/me"); assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    assert c.get("/dashboard").status_code == 200
+
+def test_no_store_on_normal_authenticated_v1():
+    from test_admin_cockpit import _reg
+    e = f"ns{time.time_ns()}@example.com"; _reg(e); a = acct(e); tok = S.token_urlsafe(24); now = time.time()
+    q("insert into sessions(token_hash,account_id,expires,created) values(?,?,?,?)", (sha256(tok), a["id"], now + 600, now))
+    c = TestClient(app); c.cookies.set(auth.COOKIE, tok)
+    r = c.get("/v1/auth/me"); assert r.status_code == 200 and r.headers["cache-control"] == "no-store" and "Cookie" in r.headers["vary"]
+
+def test_logout_and_exit_revalidate_sockets(monkeypatch):
+    from paas import ws_registry
+    calls = []; monkeypatch.setattr(ws_registry, "revalidate", lambda i, reason="": calls.append((i, reason)) or 0)
+    e = f"lo{time.time_ns()}@example.com"; _reg(e); a = acct(e); tok = S.token_urlsafe(24); now = time.time()
+    q("insert into sessions(token_hash,account_id,expires,created) values(?,?,?,?)", (sha256(tok), a["id"], now + 600, now))
+    c = TestClient(app); c.cookies.set(auth.COOKIE, tok)
+    assert c.post("/v1/auth/logout", headers={"X-Aloof-CSRF": "1"}).status_code == 200 and calls == [(a["id"], "signed out")]
+    c2, b = _imp(); calls.clear()
+    assert c2.post("/v1/admin/impersonate/exit", headers={"X-Aloof-CSRF": "1"}).status_code == 200 and calls[0][0] == b["id"]

@@ -119,7 +119,9 @@ def imp_exit(request: Request):
     if request.headers.get("x-aloof-csrf") != "1": raise HTTPException(403, "missing X-Aloof-CSRF header")
     cur = auth.session_account(request.cookies.get(auth.COOKIE))
     if not cur or not cur.get("impersonated_by"): raise HTTPException(400, "not in a read-only view")
-    auth.end_session(request.cookies.get(auth.COOKIE)); audit(cur["impersonated_by"], None, "admin.impersonate_exit", f"account={cur['id']} email={cur['email']}")
+    auth.end_session(request.cookies.get(auth.COOKIE))
+    from . import ws_registry; ws_registry.revalidate(cur["id"], "view as user ended")
+    audit(cur["impersonated_by"], None, "admin.impersonate_exit", f"account={cur['id']} email={cur['email']}")
     back = request.cookies.get(BACK); o = auth.session_account(back)
     from .api import SECURE_COOKIES
     r = JSONResponse({"ok": True, "url": "/admin" if www.is_owner(o) else "/login"}); r.delete_cookie(BACK, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax")
