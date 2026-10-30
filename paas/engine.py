@@ -88,11 +88,18 @@ def wait_ready(host, port, path=None, timeout=None, tcp=False):
         except Exception: pass
         time.sleep(0.2)
     return False
-def _start(name, drv, image, spec):
+def _start_allowed(name, spec):
+    """N3: no new container for an app whose row is gone, or whose owner (by app row or by the paas.account label the
+    container would carry) is missing or being deleted."""
+    from .drivers.local_docker import _acct_label
     ow = q("select account_id from apps where name=?", (name,), one=True)
-    if ow and ow.get("account_id") is not None:
-        st = q("select deleting from accounts where id=?", (ow["account_id"],), one=True)
+    if not ow: raise PermissionError(f"app {name} no longer exists: not starting instances")
+    ids = {ow.get("account_id")} | {int(x) for x in _acct_label(spec or {}).values()}
+    for i in ids - {None}:
+        st = q("select deleting from accounts where id=?", (i,), one=True)
         if not st or st.get("deleting"): raise PermissionError("account deleted or being deleted: not starting instances")
+def _start(name, drv, image, spec):
+    _start_allowed(name, spec)
     idx = f"{int(time.time()*1000)%10**8}"
     try: inst = drv.start_instance(name, image, spec, idx)
     except Exception as e:

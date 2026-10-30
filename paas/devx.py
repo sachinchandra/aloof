@@ -287,6 +287,8 @@ async def proxy_ws(ws: WebSocket, name: str, port: int, instance: str|None=None)
             await ws.send_bytes(d)
         await ws.close()
     t = asyncio.create_task(up())
+    from . import ws_registry
+    wtok = ws_registry.register(a["id"], ws, writer.close); wd = asyncio.create_task(ws_registry.watchdog(a["id"], ws, writer.close))
     try:
         while True:
             m = await ws.receive()
@@ -295,7 +297,7 @@ async def proxy_ws(ws: WebSocket, name: str, port: int, instance: str|None=None)
             writer.write(d); await writer.drain()
     except Exception: pass
     finally:
-        t.cancel(); writer.close()
+        t.cancel(); wd.cancel(); ws_registry.unregister(a["id"], wtok); writer.close()
 # ---------------- previews (any git host; GitHub does it automatically per PR) ----------------
 class PreviewReq(BaseModel): pr: int|str; ref: str; git: str|None=None
 @R.post("/v1/apps/{name}/previews")

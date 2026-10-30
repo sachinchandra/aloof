@@ -1100,12 +1100,14 @@ _SITE_ORIGINS = None
 def _ws_account(ws: WebSocket):
     """Bearer API key (CLI), or the session cookie + an Origin on one of our own hosts (blocks cross-site WebSocket hijacking)."""
     key = (ws.headers.get("authorization") or "").removeprefix("Bearer ").strip()
-    if key: return engine.account_by_key(key)
+    if key:   # N1: same refusals as the cookie path and the REST 403: suspended/deleting accounts get no sockets
+        a = engine.account_by_key(key)
+        return None if not a or a.get("suspended") or a.get("deleting") else a
     origin = (ws.headers.get("origin") or "").lower(); host = origin.split("://", 1)[-1].split(":")[0]
     ok_hosts = SYSTEM_HOSTS | {"localhost", "127.0.0.1"} | {h.split("://", 1)[-1].split("/")[0] for h in (PUBLIC_API_URL, PUBLIC_PROXY, os.environ.get("PAAS_SITE_URL", ""))}
     if host not in ok_hosts: return None
     a = auth.session_account(ws.cookies.get(auth.COOKIE))
-    return None if a and (a.get("impersonated_by") or a.get("suspended")) else a   # no consoles/streams in the admin's read-only view
+    return None if a and (a.get("impersonated_by") or a.get("suspended") or a.get("deleting")) else a   # no consoles/streams in the admin's read-only view
 @app.websocket("/v1/apps/{name}/console")
 async def app_console(ws: WebSocket, name: str, instance: str|None=None):
     """Interactive shell in a running instance. Binary frames carry terminal bytes both ways; a text frame {"resize":[rows,cols]} resizes.
@@ -1144,6 +1146,11 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
             await ws.send_bytes(data)
         await ws.close()
     task = asyncio.create_task(pump()); line = bytearray(); n = 0
+    from . import ws_registry
+    def _kill():
+        try: sock.shutdown(socket.SHUT_RDWR)
+        except Exception: pass
+    wtok = ws_registry.register(a["id"], ws, _kill); wd = asyncio.create_task(ws_registry.watchdog(a["id"], ws, _kill))
     try:
         while True:
             m = await ws.receive()
@@ -1163,7 +1170,7 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
                 elif ch >= 32: line.append(ch)
     except Exception: pass
     finally:
-        task.cancel()
+        task.cancel(); wd.cancel(); ws_registry.unregister(a["id"], wtok)
         try: sock.shutdown(socket.SHUT_RDWR)   # wakes the reader thread blocked in recv()
         except Exception: pass
         try: sock.close()

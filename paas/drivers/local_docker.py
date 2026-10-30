@@ -7,6 +7,9 @@ def _docker_ts(v):
     m = _re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.\d+)?(Z|[+-]\d\d:\d\d)?$", v or "")
     if not m: return None
     return _dt.datetime.fromisoformat(m.group(1) + ("+00:00" if m.group(2) in (None, "Z") else m.group(2))).timestamp()
+def account_sweep_targets(account_id):
+    """The filters every driver (local docker SDK, remote agent CLI) uses to find one account's containers."""
+    i = int(account_id); return {"label": f"paas.account={i}", "network": f"aloof-acct-{i}", "id": str(i)}
 def _acct_label(spec):
     """paas.account=<id> from the account's private network name (aloof-acct-<id>), so deletes can sweep by account."""
     for n in spec.get("networks") or []:
@@ -241,14 +244,14 @@ class LocalDockerDriver(Driver):
         return n
     def remove_account_containers(self, account_id):
         """D1: every container of one account, by label, plus anything still attached to its private network."""
-        n = 0; seen = set(); net = f"aloof-acct-{int(account_id)}"
-        cs = list(self.c.containers.list(all=True, filters={"label": f"paas.account={int(account_id)}"}))
+        t = account_sweep_targets(account_id); n = 0; seen = set(); net = t["network"]
+        cs = list(self.c.containers.list(all=True, filters={"label": t["label"]}))
         try: cs += list(self.c.containers.list(all=True, filters={"network": net}))
         except docker.errors.APIError: pass
         for c in cs:
             if c.id in seen: continue
             seen.add(c.id)
-            if (c.labels or {}).get("paas.account", str(int(account_id))) != str(int(account_id)): continue   # never another account's
+            if (c.labels or {}).get("paas.account", t["id"]) != t["id"]: continue   # never another account's
             try: c.remove(force=True, v=True); n += 1
             except docker.errors.NotFound: pass
         try: self.c.networks.get(net).remove()

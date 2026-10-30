@@ -9,11 +9,12 @@ API (Authorization: Bearer <agent_token>):
   DELETE /v1/containers/<id>
   GET  /v1/containers/<id>/logs?tail=N
   GET  /v1/containers/<id>/stats       -> {cpu_percent}
+  DELETE /v1/accounts/<id>/containers  -> {removed}   (label paas.account=<id> or network aloof-acct-<id>; volumes -v)
 """
 import json, os, sys, subprocess, socket, hmac, time, urllib.request, urllib.parse, re, threading, platform
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 CONF = os.environ.get("ALOOF_AGENT_CONF", "/etc/aloof/agent.json")
-VERSION = "0.4"
+VERSION = "0.5"
 def sh(*args, check=True, timeout=600):
     p = subprocess.run(list(args), capture_output=True, text=True, timeout=timeout)
     if check and p.returncode: raise RuntimeError((p.stderr or p.stdout).strip()[-800:])
@@ -80,6 +81,7 @@ def run_once(cfg, b):
     image = b["image"]; name = f"aloof-run-{int(time.time()*1000)%10**10}"
     sh("docker", "pull", image, check=False)
     args = ["docker", "create", "--name", name, "--label", "aloof.oneoff=1", "-e", f"PORT={int(b.get('port', 8080))}"] + _net_args(b)
+    for k, v in (b.get("labels") or {}).items(): args += ["--label", f"{k}={v}"]
     if b.get("cpus"): args += ["--cpus", str(b["cpus"])]
     if b.get("mem_mb"): args += ["--memory", f"{int(b['mem_mb'])}m"]
     for v in b.get("volumes") or []:
@@ -104,6 +106,19 @@ def host_port(cid, port=None):
     for line in out.splitlines():
         if port is None or line.startswith(f"{port}/tcp"): return int(line.rsplit(":", 1)[1])
     return None
+def sweep_account(account_id):
+    """Same targets as the control plane's account_sweep_targets(): label paas.account=<id>, network aloof-acct-<id>."""
+    i = int(account_id); net = f"aloof-acct-{i}"; ids = set()
+    for f in (f"label=paas.account={i}", f"network={net}"):
+        ids |= set(sh("docker", "ps", "-aq", "--filter", f, check=False).split())
+    keep = set()
+    for c in ids:   # a container labelled for another account is never touched, even if attached to this network
+        lab = sh("docker", "inspect", "-f", '{{index .Config.Labels "paas.account"}}', c, check=False).strip()
+        if lab and lab != str(i): keep.add(c)
+    gone = sorted(ids - keep)
+    for c in gone: subprocess.run(["docker", "rm", "-f", "-v", c], capture_output=True)
+    subprocess.run(["docker", "network", "rm", net], capture_output=True)
+    return {"removed": len(gone)}
 def cid_ok(cid): return re.match(r"^[a-f0-9]{12,64}$", cid) is not None
 class H(BaseHTTPRequestHandler):
     server_version = f"aloof-agent/{VERSION}"
@@ -135,7 +150,7 @@ class H(BaseHTTPRequestHandler):
                     st = sh("docker", "inspect", "-f", "{{.State.Status}}", cid, check=False) or "gone"
                     return self._send(200, {"status": st, "host_port": host_port(cid) if st == "running" else None, "host": bind_ip(self.server.cfg)})
                 if len(parts) == 3 and method == "DELETE":
-                    subprocess.run(["docker", "rm", "-f", cid], capture_output=True); return self._send(200, {"ok": True})
+                    subprocess.run(["docker", "rm", "-f", "-v", cid], capture_output=True); return self._send(200, {"ok": True})
                 if parts[3:] == ["logs"]:
                     tail = str(int(qs.get("tail", ["200"])[0]))
                     p = subprocess.run(["docker", "logs", "--timestamps", "--tail", tail, cid], capture_output=True, text=True)
@@ -143,6 +158,9 @@ class H(BaseHTTPRequestHandler):
                 if parts[3:] == ["stats"]:
                     out = sh("docker", "stats", "--no-stream", "--format", "{{.CPUPerc}}", cid, check=False).strip().rstrip("%")
                     return self._send(200, {"cpu_percent": float(out or 0)})
+            if len(parts) == 4 and parts[:2] == ["v1", "accounts"] and parts[3] == "containers" and method == "DELETE":
+                if not parts[2].isdigit(): return self._send(400, {"error": "bad id"})
+                return self._send(200, sweep_account(parts[2]))
             if parts == ["v1", "volumes"] and method == "DELETE":
                 name = qs.get("name", [""])[0]
                 if NAME_OK.match(name): subprocess.run(["docker", "volume", "rm", "-f", f"aloof-vol-{name}"], capture_output=True)

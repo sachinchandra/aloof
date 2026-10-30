@@ -175,6 +175,7 @@ def _nets(spec):
     """Private networks on the node: <app>.internal resolves between one account's apps placed on the same node."""
     al = spec.get("net_aliases") or {}
     return [{"name": n, "aliases": al.get(n) or ([spec["net_alias"]] if spec.get("net_alias") else [])} for n in spec.get("networks") or []]
+from .local_docker import account_sweep_targets, _acct_label   # one code path for local + remote sweeps
 class RemoteDriver(Driver):
     """Driver for one node pool (provider). App.provider == pool name."""
     def __init__(self, pool):
@@ -208,13 +209,22 @@ class RemoteDriver(Driver):
         db, _ = _db(); plan = PLANS[spec["plan"]]; node = place(self.name, spec["plan"], app, spec)
         body = {"name": f"aloof-{app}-{index}", "image": image, "env": spec.get("env", {}), "port": int(spec.get("port", 8080)),
                 "cpus": plan["vcpu"], "mem_mb": plan["memory_mb"], "gpu": 1 if plan["kind"] == "gpu" else 0,
-                "volumes": spec.get("volumes") or [], "command": spec.get("command"), "labels": {"aloof.app": app}, "networks": _nets(spec)}
+                "volumes": spec.get("volumes") or [], "command": spec.get("command"), "labels": {"aloof.app": app, **_acct_label(spec)}, "networks": _nets(spec)}
         r = agent(node, "POST", "/v1/containers", json=body, timeout=900)
         for v in spec.get("volumes") or []: db.q("update volumes set node_id=? where name=? and node_id is null", (node["id"], v["name"]))
         return Instance(id=f"{node['id']}.{r['id']}", host=r.get("host") or node["wg_ip"], port=int(r["host_port"]))
+    def remove_account_containers(self, account_id):
+        """D2 remote: same sweep as the local driver (paas.account label + the account's private network), run by each
+        ready node's agent. An agent too old for the endpoint raises, so the delete reports it instead of skipping silently."""
+        db, _ = _db(); n = 0; errs = []
+        for node in db.q("select * from nodes where provider=? and status='ready'", (self.name,)):
+            try: n += int((agent(node, "DELETE", f"/v1/accounts/{int(account_id)}/containers", timeout=120) or {}).get("removed") or 0)
+            except Exception as e: errs.append(f"node {node['id']}: {e}")
+        if errs: raise RuntimeError("; ".join(errs)[:500])
+        return n
     def run_once(self, app, image, spec, command, timeout=900):
         plan = PLANS[spec["plan"]]; node = place(self.name, spec["plan"], app, spec)
-        r = agent(node, "POST", "/v1/run", timeout=timeout + 120, json={"image": image, "env": spec.get("env", {}), "command": command, "port": int(spec.get("port", 8080)),
+        r = agent(node, "POST", "/v1/run", timeout=timeout + 120, json={"image": image, "labels": _acct_label(spec), "env": spec.get("env", {}), "command": command, "port": int(spec.get("port", 8080)),
                   "cpus": plan["vcpu"], "mem_mb": plan["memory_mb"], "volumes": spec.get("volumes") or [], "networks": _nets(spec), "timeout": timeout})
         return int(r["exit_code"]), r.get("output", "")
     def _split(self, iid):

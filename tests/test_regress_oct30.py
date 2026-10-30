@@ -93,3 +93,66 @@ def test_d2_driver_removes_anonymous_volumes():
     import re; assert not re.search(r"\.remove\(force=True\)", src.replace("volumes.get(self.volume_ref(name)).remove(force=True)", ""))
     from paas.drivers.local_docker import _acct_label
     assert _acct_label({"networks": ["aloof-acct-42", "x"]}) == {"paas.account": "42"} and _acct_label({}) == {}
+
+# ---- round 2: N1-N4 + D2 remote ----
+import asyncio
+from paas import api, ws_registry, admin_ops
+
+class _WS:
+    def __init__(self, key): self.headers = {"authorization": f"Bearer {key}"}; self.cookies = {}; self.closed = None
+    async def close(self, code=1000, reason=""): self.closed = (code, reason)
+
+def _key_for(i):
+    import secrets as s; k = "ak_" + s.token_hex(16); q("update accounts set api_key_hash=? where id=?", (engine.sha256(k), i)); return k
+
+def test_n1_api_key_ws_rejects_suspended_and_deleting():
+    a = _victim(); i = a["id"]; k = _key_for(i)
+    assert api._ws_account(_WS(k))["id"] == i
+    q("update accounts set suspended=1 where id=?", (i,)); assert api._ws_account(_WS(k)) is None
+    q("update accounts set suspended=0, deleting=1 where id=?", (i,)); assert api._ws_account(_WS(k)) is None
+
+def test_n2_registry_close_and_watchdog():
+    a = _victim(); i = a["id"]
+    async def run():
+        ws = _WS("x"); killed = []
+        tok = ws_registry.register(i, ws, lambda: killed.append(1)); assert ws_registry.count(i) == 1
+        await asyncio.to_thread(ws_registry.close_account, i, "account suspended"); await asyncio.sleep(0.05)
+        assert ws.closed and ws.closed[0] == 4403 and killed; ws_registry.unregister(i, tok); assert ws_registry.count(i) == 0
+        ws2 = _WS("y"); q("update accounts set suspended=1 where id=?", (i,))
+        await asyncio.wait_for(ws_registry.watchdog(i, ws2, every=0.01), 2); assert ws2.closed
+    asyncio.run(run())
+
+def test_n2_suspend_route_closes_sockets(monkeypatch):
+    a = _victim(); i = a["id"]; seen = []
+    monkeypatch.setattr(ws_registry, "close_account", lambda acc, reason="": seen.append(acc) or 0)
+    from test_admin_stages import owner2fa
+    from test_account_delete import CS
+    o = owner2fa(); r = o.post(f"/v1/admin/accounts/{i}/suspend", json={"suspended": True, "confirm": a["email"], "reason": "test n2"}, headers=CS)
+    assert r.status_code == 200, r.text; assert seen == [i]
+
+def test_n3_start_refused_without_row_or_deleting_label():
+    a = _victim(); i = a["id"]
+    with pytest.raises(PermissionError): engine._start_allowed("no-such-app-xyz", {})
+    now = time.time(); q("insert into apps(name,account_id,status,created,updated) values(?,?,?,?,?)", (f"n3{i}", None, "queued", now, now))
+    engine._start_allowed(f"n3{i}", {})   # platform app, no owner: allowed
+    q("update accounts set deleting=1 where id=?", (i,))
+    with pytest.raises(PermissionError): engine._start_allowed(f"n3{i}", {"networks": [f"aloof-acct-{i}"]})
+
+def test_n4_profile_flags_and_ui_warning():
+    a = _victim(); i = a["id"]; q("update accounts set deleting=1 where id=?", (i,))
+    p = admin_ops.detail(i)["profile"]; assert p["deleting"] == 1 and p["destroyed_apps"] == 1
+    assert "deleting=1" in open("dashboard/admin.html").read()
+
+def test_d2_remote_sweep_same_targets(monkeypatch):
+    from paas.drivers import remote, local_docker
+    assert local_docker.account_sweep_targets(7) == {"label": "paas.account=7", "network": "aloof-acct-7", "id": "7"}
+    calls_ = []
+    monkeypatch.setattr(remote, "agent", lambda node, m, path, **k: calls_.append((m, path)) or {"removed": 2})
+    d = remote.RemoteDriver.__new__(remote.RemoteDriver); d.name = "selfhosted-t"
+    now = time.time()
+    q("insert into nodes(id,provider,status,created) values(?,?,?,?)", ("nd-t1", "selfhosted-t", "ready", now))
+    assert d.remove_account_containers(7) == 2 and calls_ == [("DELETE", "/v1/accounts/7/containers")]
+    monkeypatch.setattr(remote, "agent", lambda *x, **k: (_ for _ in ()).throw(RuntimeError("404")))
+    with pytest.raises(RuntimeError): d.remove_account_containers(7)
+    src = open("paas/agent/agent.py").read()
+    assert '"rm", "-f", "-v"' in src and "label=paas.account=" in src and "network={net}" in src

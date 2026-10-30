@@ -30,7 +30,8 @@ def detail(account_id: int, _=Depends(www.require_admin)):
     rel = [r for r in q("select app, version, status, reason, created from releases order by created desc limit 2000") if r["app"] in names][:25]
     ss = q("select id, kind, tier, status, amount_cents, created, updated from stripe_sessions where account_id=? order by created desc limit 50", (account_id,))
     for s in ss: s["refundable_cents"] = _refundable(s)
-    return {"profile": {k: a.get(k) for k in ("id", "email", "created", "tier", "is_test", "is_admin", "suspended", "email_verified", "country", "billing_name", "stripe_subscription")}
+    return {"profile": {k: a.get(k) for k in ("id", "email", "created", "tier", "is_test", "is_admin", "suspended", "email_verified", "country", "billing_name", "stripe_subscription", "deleting")}
+                       | {"destroyed_apps": sum(1 for x in apps if x["status"] == "destroyed")}
                        | {"credit_usd": round((a.get("credit_cents") or 0) / 100, 2), "totp": bool(a.get("totp_enabled"))},
             "apps": apps, "deploys": rel, "stripe": ss,
             "razorpay": q("select order_id, amount_paise, credit_inr, status, created from payments where account_id=? order by created desc limit 20", (account_id,)),
@@ -45,6 +46,7 @@ def suspend(account_id: int, b: Suspend, ctx=Depends(www.require_owner_2fa)):
     from . import engine, billing
     if b.suspended:
         q("update accounts set suspended=1 where id=?", (account_id,)); q("delete from sessions where account_id=?", (account_id,))
+        from . import ws_registry; ws_registry.close_account(account_id, "account suspended")
         for x in q("select name from apps where account_id=? and status in ('running','idle')", (account_id,)):
             try: engine.scale(x["name"], 0, reason="account suspended")
             except Exception: pass

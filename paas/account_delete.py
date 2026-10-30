@@ -52,6 +52,7 @@ def _begin(account_id):
             if _has_table(t): q(f"delete from {t} where account_id=?", (account_id,))
         q("delete from sessions where impersonated_by=?", (account_id,))
         for h in hs: q("delete from kv where acct=?", (h,))   # OAuth/MCP tokens bound to the account's keys
+    from . import ws_registry; ws_registry.close_account(account_id, "account deleted")   # N2: open consoles/proxies
     return a, hs
 def _destroy_infra(account_id, out):
     from . import engine, parity
