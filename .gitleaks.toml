@@ -10,4 +10,6 @@ paths = [
     # test_analytics.py: fake sk_live token in a test referrer URL ("sk_live_abcdefghijk")
     # to verify analytics strips secrets from URLs.
     '''tests/test_analytics\.py''',
+    # test_view_as_masking.py: fake DB password and pk_ key to verify the admin read-only view masks them.
+    '''tests/test_view_as_masking\.py''',
 ]
