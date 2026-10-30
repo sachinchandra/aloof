@@ -7,12 +7,12 @@ HIDDEN = "hidden while viewing as user"
 HEADER = "X-Aloof-Secrets-Hidden"
 _KEY = re.compile(r"(^|_)(env|environment|secrets?|password|passwd|pass|pw|token|tokens|api_?key|new_api_key|key|keys|secret_key|"
                   r"private_key|database_url|db_url|dsn|connection(_string|_url)?|conn|url_with_password|auth|authorization|"
-                  r"credentials?|digest|command|cmd|args|entrypoint|release_command|webhook_secret|signing_secret|totp|otp|recovery|cookie|session)($|_)", re.I)
+                  r"credentials?|digest|command|cmd|args|entrypoint|release_command|processes|process|procfile|health_?check|health_?cmd|cron|crons|schedule_command|webhook_secret|signing_secret|totp|otp|recovery|cookie|session)($|_)", re.I)
 _SAFE_KEYS = {"key_prefix", "api_key_prefix", "token_id", "has_password", "tokens_count", "access_tokens", "refresh_tokens", "keys_count"}
 _VAL = [re.compile(p) for p in (r"\b(?:pk|ak|sk|rk|dt|ghp|gho|ghs|github_pat|xox[abpr]|whsec|mcp)_[A-Za-z0-9_\-]{8,}",
                                 r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
                                 r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{5,}")]
-_URL_CRED = re.compile(r"([a-z][a-z0-9+.\-]*://)([^/\s:@]+):([^@\s/]+)@", re.I)
+_URL_CRED = re.compile(r"([a-z][a-z0-9+.\-]*://)([^/\s:@]+):([^\s\"'<>]+)@", re.I)   # greedy: up to the last @ (passwords may hold / or @)
 # reveal/copy endpoints and parameters: refused outright in the read-only view
 _BLOCK_PATHS = [re.compile(p) for p in (r"/reveal\b", r"/copy\b", r"/credentials?/[^/]+/(value|secret)", r"/export(\.|/|$)")]
 _BLOCK_QS = {"reveal", "show", "show_secrets", "plaintext", "decrypt"}
@@ -23,7 +23,9 @@ def blocked(path, query):
 _SECRETISH = r"[A-Za-z0-9_.\-]*(?:pass(?:word|wd|phrase)?|pwd?|secret|token|api[_\-]?key|apikey|access[_\-]?key|private[_\-]?key|auth|credential|dsn|database[_\-]?url|db[_\-]?url|cookie|session)[A-Za-z0-9_.\-]*"
 _TXT = [(re.compile(r"(?i)\b((?:proxy-)?authorization|x-api-key|cookie|set-cookie)(\s*[:=]\s*)[^\r\n]+"), lambda m: f"{m[1]}{m[2]}{HIDDEN}"),
         (re.compile(r"(?i)(\s|^|[\"'\[,])(--?" + _SECRETISH + r")(=|\s+)(\"[^\"]*\"|'[^']*'|[^\s\"',\]]+)"), lambda m: f"{m[1]}{m[2]}{m[3]}{HIDDEN}"),
-        (re.compile(r"(?i)\b(" + _SECRETISH + r")(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|[^\s\"',;&]+)"), lambda m: f"{m[1]}{m[2]}{HIDDEN}"),
+        (re.compile(r"(?i)\b(bearer|basic)(\s+)[A-Za-z0-9._~+/\-=]{6,}"), lambda m: f"{m[1]}{m[2]}{HIDDEN}"),
+        (re.compile(r"(\s|^|[\"'\[,])(-p)(=|\s+)(?!\d+\b)(?!hidden\b)([^\s\"',\]]+)"), lambda m: f"{m[1]}{m[2]}{m[3] or ''}{HIDDEN}"),
+        (re.compile(r"(?i)\b(" + _SECRETISH + r")([\"']?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|[^\s\"',;&]+)"), lambda m: f"{m[1]}{m[2]}{HIDDEN}"),
         (re.compile(r"(?im)^(\s*-?\s*(?:command|cmd|args|entrypoint|release_command)\s*:\s*)\S.*$"), lambda m: f"{m[1]}{HIDDEN}")]
 _DUP = re.compile(re.escape(HIDDEN) + r"(?: while viewing as user)+")
 def _s(v):
@@ -50,6 +52,7 @@ def mask_bytes(body):
     except Exception: return None
 
 # M1: free-text output (logs, events, release reasons, deploy logs, diagnose) is hidden entirely in this view
+APP_ROUTES = re.compile(r"^/v1/(apps(/.*)?|status)$")
 TEXT_ROUTES = re.compile(r"^/v1/apps/[^/]+/(logs(/history)?|events|releases|deploy|diagnose)/?$")
 _TEXT_KEYS = re.compile(r"(?i)^(reason|log|logs|log_tail|last_log|tail|lines?|message|msg|messages|output|stdout|stderr|error|errors|detail|details|"
                         r"text|hint|hints|summary|diagnosis|evidence|cause|build_log|deploy_log|excerpt|events|steps|checks|notes?)$")

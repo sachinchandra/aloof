@@ -95,3 +95,21 @@ def test_logout_and_exit_revalidate_sockets(monkeypatch):
     assert c.post("/v1/auth/logout", headers={"X-Aloof-CSRF": "1"}).status_code == 200 and calls == [(a["id"], "signed out")]
     c2, b = _imp(); calls.clear()
     assert c2.post("/v1/admin/impersonate/exit", headers={"X-Aloof-CSRF": "1"}).status_code == 200 and calls[0][0] == b["id"]
+
+# --- QA retest 5 (Oct 30): N-M1 app/status free text, N-L1 pattern gaps ---
+def test_masking_gaps_unit():
+    t = imp_mask._s('db postgres://u:pa/ss@h/db cfg {"pass":"QAX1"} hdr Bearer QAX2tokenvalue mysql -p QAX3 -p 8080:80 -port 80')
+    for c in ("pa/ss", "QAX1", "QAX2", "QAX3"): assert c not in t, t
+    assert "-p 8080:80" in t and "-port 80" in t and "u:" in t
+    m = imp_mask.mask({"processes": {"web": "run --x QAX4", "worker": "w"}, "health_check": "curl -H x QAX5", "cron": [{"schedule": "* * * * *", "command": "job QAX6"}]})
+    assert "QAX" not in str(m) and set(m["processes"]) == {"web", "worker"}
+
+def test_app_and_status_free_text_hidden():
+    c, a = _imp(); i = a["id"]; now = time.time(); n = f"nm{time.time_ns()}"
+    q("insert into apps(name,account_id,status,spec,created,updated,error) values(?,?,?,?,?,?,?)",
+      (n, i, "failed", dump_spec({"name": n, "image": "nginx", "plan": "shared-1x-256mb", "port": 80, "instances": 1, "processes": {"web": "run QANM_proc"}}), now, now, "build failed: QANM_err"))
+    q("insert into releases(app,version,created,status,reason) values(?,?,?,?,?)", (n, 1, now, "failed", "deploy said QANM_rel"))
+    for u in ("/v1/apps", f"/v1/apps/{n}", f"/v1/apps/{n}/status"):
+        r = c.get(u); assert r.status_code in (200, 404) and "QANM" not in r.text, (u, r.text[:300])
+    assert imp_mask.hide_text({"x": [{"last_release": {"reason": "r", "log": ["l"], "msg": "m"}, "error": "e"}]}) == \
+        {"x": [{"last_release": {"reason": imp_mask.HIDDEN, "log": imp_mask.HIDDEN, "msg": imp_mask.HIDDEN}, "error": imp_mask.HIDDEN}]}

@@ -80,7 +80,7 @@ async def _impersonation_mask(request: Request, call_next):
     if not path.startswith("/v1/"): r.headers.update(H); return r
     body = b"".join([c async for c in r.body_iterator])
     h = {k: v for k, v in r.headers.items() if k.lower() != "content-length"}; h.update(H)
-    text_route = bool(imp_mask.TEXT_ROUTES.match(path))
+    text_route = bool(imp_mask.TEXT_ROUTES.match(path) or imp_mask.APP_ROUTES.match(path))   # N-M1: every /v1/apps* body
     if ct.startswith("text/plain"):   # runtime/build logs: hidden entirely; other text masked
         out = imp_mask.HIDDEN if text_route else imp_mask._s(body.decode(errors="replace"))
         return Response(out.encode(), status_code=r.status_code, headers=h, media_type="text/plain")
