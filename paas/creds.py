@@ -230,7 +230,7 @@ def clone(app, source, dest, log, account_id=None):
         shutil.rmtree(os.path.join(dest, ".git"), ignore_errors=True)
         log(f"cloned {url}@{ref} -> {sha[:12]} ({how})"); return sha
     except RuntimeError as e:
-        if how == "deploy key": hint = f" (is the deploy key added to this repo with read access? `aloof git list` shows its public key)"
+        if how == "deploy key": hint = " (is the deploy key added to this repo with read access? `aloof git list` shows its public key)"
         elif how != "public": hint = ""
         elif mode == "https" and _git_cred(account_id, app, host, "ssh"):
             hint = (f" (you added a deploy key for {host}, but deploy keys only work over SSH: use the git@ URL, e.g. "
