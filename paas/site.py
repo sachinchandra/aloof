@@ -46,10 +46,13 @@ def nav(brand):
 <span class=sp></span><button class=icon-btn onclick="toggleTheme()" aria-label="Toggle dark/light theme">{svg("sun")}</button>
 <a href="/login" class=hide-sm data-cta=login data-cta-loc=nav>Log in</a><a class="btn pri sm" href="/login#register" data-cta=deploy_free data-cta-loc=nav>Start free</a>
 <button class="icon-btn menu-btn" aria-label="Menu" onclick="document.getElementById('nl').classList.toggle('open')">{svg("menu")}</button></div></header>"""
+def _changelog_link():
+    from . import www_changelog
+    return '<a href="/changelog">Changelog</a>' if www_changelog.PUBLISHED else ""
 def footer(brand):
     return f"""<footer class=f><div class=wrap><div class=cols><div><a class=logo href="/"><i></i>{brand}</a><p class=muted style="max-width:300px;margin-top:12px">The cloud for apps your AI ships.</p></div>
 <div><h5>Product</h5><a href="/#features">Features</a><a href="/pricing">Pricing</a><a href="/regions">Regions</a><a href="/examples">Example architectures</a><a href="/pricing#gpus">GPUs (soon)</a></div>
-<div><h5>Developers</h5><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/docs/cli">CLI</a><a href="/api/docs">API reference</a><a href="/docs/mcp">MCP</a><a href="/llms.txt">llms.txt</a><a href="/rss.xml">RSS</a></div>
+<div><h5>Developers</h5><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a><a href="/docs/cli">CLI</a><a href="/api/docs">API reference</a><a href="/docs/mcp">MCP</a>{_changelog_link()}<a href="/llms.txt">llms.txt</a><a href="/rss.xml">RSS</a></div>
 <div><h5>Company</h5><a href="/about">About</a><a href="/security">Security</a><a href="/status">Status</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
 <div><h5>Account</h5><a href="/login" data-cta=login data-cta-loc=footer>Log in</a><a href="/login#register" data-cta=deploy_free data-cta-loc=footer_links>Sign up</a><a href="/dashboard">Dashboard</a></div></div>
 <div class=base><span>© 2026 {brand}</span></div></div></footer>"""

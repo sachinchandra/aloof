@@ -217,7 +217,8 @@ class RemoteDriver(Driver):
         """D2 remote: same sweep as the local driver (paas.account label + the account's private network), run by each
         ready node's agent. An agent too old for the endpoint raises, so the delete reports it instead of skipping silently."""
         db, _ = _db(); n = 0; errs = []
-        for node in db.q("select * from nodes where provider=? and status='ready'", (self.name,)):
+        for node in db.q("select * from nodes where provider=? and coalesce(status,'') not in ('destroyed','pending')", (self.name,)):
+            if node["status"] != "ready": errs.append(f"node {node['id']} is {node['status']}: its containers can't be swept until it is ready or removed"); continue
             try: n += int((agent(node, "DELETE", f"/v1/accounts/{int(account_id)}/containers", timeout=120) or {}).get("removed") or 0)
             except Exception as e: errs.append(f"node {node['id']}: {e}")
         if errs: raise RuntimeError("; ".join(errs)[:500])

@@ -103,6 +103,7 @@ def secure_first_verification(account_id, same_session=False):
         q("update accounts set password_hash=null where id=?", (account_id,))
         key = engine.rotate_api_key(account_id)
         q("delete from api_keys where account_id=?", (account_id,)); q("delete from deploy_tokens where account_id=?", (account_id,))
+        from . import ws_registry; ws_registry.revalidate(account_id, "credentials reset")
         n_id = len(q("delete from provider_identities where account_id=? returning id", (account_id,)))
         q("update accounts set email_verified=1 where id=?", (account_id,))
         q("delete from sessions where account_id=?", (account_id,))

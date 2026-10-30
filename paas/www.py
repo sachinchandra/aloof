@@ -164,6 +164,8 @@ def status_page():
 def robots(): return f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /dashboard\nDisallow: /v1/\nSitemap: {SITE}/sitemap.xml\n"
 def urls():
     u = ["/", "/pricing", "/docs", "/blog", "/guides", "/examples", "/regions", "/about", "/security", "/status", "/privacy", "/terms", "/compare/fly", "/compare/render"]
+    from . import www_changelog
+    if www_changelog.PUBLISHED: u.append("/changelog")
     u += [f"/blog/{p['slug']}" for p in POSTS] + [f"/guides/{k}" for k in GUIDES]
     u += [f"/docs/{k}" for k in ("quickstart", "self-driving", "templates", "self-healing", "cli", "deploy", "config", "private", "github", "ci", "sign-in", "processes", "networking", "mcp")]
     return u

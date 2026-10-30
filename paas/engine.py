@@ -685,7 +685,8 @@ def create_account(email, password_hash=None, verified=False):
       (email.lower(), sha256(key), key[:10], password_hash, int(verified), time.time(), int(is_test_email(email, verified))))
     a = q("select * from accounts where email=?", (email.lower(),), one=True); a["api_key"] = key; return a
 def rotate_api_key(account_id):
-    key = new_api_key(); q("update accounts set api_key_hash=?, api_key_prefix=? where id=?", (sha256(key), key[:10], account_id)); return key
+    key = new_api_key(); q("update accounts set api_key_hash=?, api_key_prefix=? where id=?", (sha256(key), key[:10], account_id))
+    from . import ws_registry; ws_registry.revalidate(account_id, "API key rotated"); return key
 def account_by_key(key):
     if not key: return None
     h = sha256(key); a = q("select * from accounts where api_key_hash=?", (h,), one=True)
@@ -703,6 +704,8 @@ def account_by_key(key):
 def create_named_key(account_id, label, replace=True):
     """Extra keys (MCP connector, CI) that don't revoke the primary CLI key. replace=True rotates the key with the same label."""
     if replace: q("delete from api_keys where account_id=? and label=?", (account_id, label))
+    if replace:
+        from . import ws_registry; ws_registry.revalidate(account_id, "API key replaced")
     key = "pk_" + secrets.token_urlsafe(24)
     q("insert into api_keys(id,account_id,key_hash,prefix,label,created) values(?,?,?,?,?,?)", ("k_"+secrets.token_hex(6), account_id, sha256(key), key[:10], label, time.time()))
     return key

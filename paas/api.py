@@ -784,7 +784,8 @@ def connected_app_revoke(client_id: str, request: Request, a=Depends(acct)):
 @app.delete("/v1/auth/keys/{kid}")
 def auth_key_revoke(kid: str, request: Request, a=Depends(acct)):
     if kid == "primary": raise HTTPException(400, "the default key can be rotated, not revoked")
-    q("delete from api_keys where id=? and account_id=?", (kid, a["id"])); _audit(a["id"], None, "key.revoke", kid, _ip(request)); return {"ok": True}
+    q("delete from api_keys where id=? and account_id=?", (kid, a["id"])); _audit(a["id"], None, "key.revoke", kid, _ip(request))
+    _wsreg.revalidate(a["id"]); return {"ok": True}
 @app.post("/v1/auth/mcp-key")
 def auth_mcp_key(a=Depends(acct)):
     """Key bound to the MCP OAuth connector; doesn't revoke the CLI key. Re-login rotates only this one."""
@@ -1097,18 +1098,30 @@ def app_exec(name: str, b: ExecReq, request: Request, a=Depends(acct)):
     except NotImplementedError as e: raise HTTPException(501, str(e))
     except ValueError as e: raise HTTPException(409, str(e))
 _SITE_ORIGINS = None
+from . import ws_registry as _wsreg
 def _ws_account(ws: WebSocket):
     """Bearer API key (CLI), or the session cookie + an Origin on one of our own hosts (blocks cross-site WebSocket hijacking)."""
     key = (ws.headers.get("authorization") or "").removeprefix("Bearer ").strip()
     if key:   # N1: same refusals as the cookie path and the REST 403: suspended/deleting accounts get no sockets
         a = engine.account_by_key(key)
-        return None if not a or a.get("suspended") or a.get("deleting") else a
+        a = None if not a or a.get("suspended") or a.get("deleting") else a
+        return _ws_track(ws, a, ("key", engine.sha256(key)))
     origin = (ws.headers.get("origin") or "").lower(); host = origin.split("://", 1)[-1].split(":")[0]
     ok_hosts = SYSTEM_HOSTS | {"localhost", "127.0.0.1"} | {h.split("://", 1)[-1].split("/")[0] for h in (PUBLIC_API_URL, PUBLIC_PROXY, os.environ.get("PAAS_SITE_URL", ""))}
     if host not in ok_hosts: return None
-    a = auth.session_account(ws.cookies.get(auth.COOKIE))
-    return None if a and (a.get("impersonated_by") or a.get("suspended") or a.get("deleting")) else a   # no consoles/streams in the admin's read-only view
+    tok = ws.cookies.get(auth.COOKIE); a = auth.session_account(tok)
+    a = None if a and (a.get("impersonated_by") or a.get("suspended") or a.get("deleting")) else a   # no consoles/streams in the admin's read-only view
+    return _ws_track(ws, a, ("session", auth.sha256(tok)) if tok else None)
+def _ws_track(ws, a, cred):
+    """R1: register before any await, then re-check now that a concurrent suspend/revoke would see this socket."""
+    if not a: return None
+    from . import ws_registry
+    try: asyncio.get_running_loop()
+    except RuntimeError: return a   # called outside a socket's event loop (tests)
+    ws_registry.register(a["id"], ws, cred)
+    return a if ws_registry.valid(a["id"], cred) else None
 @app.websocket("/v1/apps/{name}/console")
+@_wsreg.tracked
 async def app_console(ws: WebSocket, name: str, instance: str|None=None):
     """Interactive shell in a running instance. Binary frames carry terminal bytes both ways; a text frame {"resize":[rows,cols]} resizes.
     Session open/close and each entered line are written to the audit log."""
@@ -1146,11 +1159,10 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
             await ws.send_bytes(data)
         await ws.close()
     task = asyncio.create_task(pump()); line = bytearray(); n = 0
-    from . import ws_registry
     def _kill():
         try: sock.shutdown(socket.SHUT_RDWR)
         except Exception: pass
-    wtok = ws_registry.register(a["id"], ws, _kill); wd = asyncio.create_task(ws_registry.watchdog(a["id"], ws, _kill))
+    _wsreg.set_kill(ws, _kill)
     try:
         while True:
             m = await ws.receive()
@@ -1170,7 +1182,7 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
                 elif ch >= 32: line.append(ch)
     except Exception: pass
     finally:
-        task.cancel(); wd.cancel(); ws_registry.unregister(a["id"], wtok)
+        task.cancel()
         try: sock.shutdown(socket.SHUT_RDWR)   # wakes the reader thread blocked in recv()
         except Exception: pass
         try: sock.close()
@@ -1228,6 +1240,7 @@ def admin_backups_run(verify: bool=False):
     return r
 from . import devx
 app.include_router(devx.R)
+from . import www_changelog as _chl; app.include_router(_chl.R)   # before www.R: its catch-all serves the homepage
 app.include_router(www.R)
 from . import www_compare as _cmp; app.include_router(_cmp.R)
 from . import templating as _tpl; app.include_router(_tpl.R)

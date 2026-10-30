@@ -82,4 +82,5 @@ def revoke(account_id, client_id):
     from .db import q
     rows = q("select id from deploy_tokens where account_id=? and oauth_client=?", (account_id, client_id))
     q("delete from deploy_tokens where account_id=? and oauth_client=?", (account_id, client_id)); n["deploy_tokens"] = len(rows)
+    from . import ws_registry; ws_registry.revalidate(account_id)
     return n

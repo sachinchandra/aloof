@@ -111,16 +111,70 @@ def test_n1_api_key_ws_rejects_suspended_and_deleting():
     q("update accounts set suspended=1 where id=?", (i,)); assert api._ws_account(_WS(k)) is None
     q("update accounts set suspended=0, deleting=1 where id=?", (i,)); assert api._ws_account(_WS(k)) is None
 
+class _St: pass
+class _WS2(_WS):
+    def __init__(self, key="x"): super().__init__(key); self.state = _St()
+
 def test_n2_registry_close_and_watchdog():
-    a = _victim(); i = a["id"]
+    a = _victim(); i = a["id"]; k = _key_for(i); cred = ("key", engine.sha256(k))
     async def run():
-        ws = _WS("x"); killed = []
-        tok = ws_registry.register(i, ws, lambda: killed.append(1)); assert ws_registry.count(i) == 1
+        ws = _WS2(); killed = []
+        ws_registry.register(i, ws, cred); ws_registry.set_kill(ws, lambda: killed.append(1)); assert ws_registry.count(i) == 1
         await asyncio.to_thread(ws_registry.close_account, i, "account suspended"); await asyncio.sleep(0.05)
-        assert ws.closed and ws.closed[0] == 4403 and killed; ws_registry.unregister(i, tok); assert ws_registry.count(i) == 0
-        ws2 = _WS("y"); q("update accounts set suspended=1 where id=?", (i,))
-        await asyncio.wait_for(ws_registry.watchdog(i, ws2, every=0.01), 2); assert ws2.closed
+        assert ws.closed and ws.closed[0] == 4403 and killed; ws_registry.release(ws); assert ws_registry.count(i) == 0
+        ws2 = _WS2(); h = ws_registry.Handle(i, ws2, cred, asyncio.get_running_loop()); q("update accounts set suspended=1 where id=?", (i,))
+        await asyncio.wait_for(ws_registry.watchdog(h, every=0.01), 2); assert ws2.closed
     asyncio.run(run())
+
+def test_r1_registered_at_auth_and_rechecked(monkeypatch):
+    a = _victim(); i = a["id"]; k = _key_for(i)
+    async def run():
+        ws = _WS2(k); got = api._ws_account(ws); assert got["id"] == i and ws_registry.count(i) == 1
+        ws_registry.release(ws); assert ws_registry.count(i) == 0
+        # suspended between auth lookup and registration: the re-check after register refuses it
+        real = ws_registry.register
+        def reg(acc, w, cred): q("update accounts set suspended=1 where id=?", (acc,)); return real(acc, w, cred)
+        monkeypatch.setattr(ws_registry, "register", reg)
+        ws3 = _WS2(k); assert api._ws_account(ws3) is None; ws_registry.release(ws3)
+    asyncio.run(run())
+
+def test_r2_key_revoke_closes_only_that_keys_sockets():
+    a = _victim(); i = a["id"]; k1 = _key_for(i); now = time.time()
+    import secrets as s; k2 = "ak_" + s.token_hex(16)
+    q("insert into api_keys(id,account_id,key_hash,created) values(?,?,?,?)", (f"r2{i}", i, engine.sha256(k2), now))
+    async def run():
+        w1, w2 = _WS2(k1), _WS2(k2)
+        assert api._ws_account(w1) and api._ws_account(w2)
+        q("delete from api_keys where id=?", (f"r2{i}",))
+        assert await asyncio.to_thread(ws_registry.revalidate, i) == 1; await asyncio.sleep(0.05)
+        assert w2.closed and not w1.closed
+        await asyncio.to_thread(engine.rotate_api_key, i)
+        await asyncio.to_thread(ws_registry.revalidate, i); await asyncio.sleep(0.05); assert w1.closed
+        ws_registry.release(w1); ws_registry.release(w2)
+    asyncio.run(run())
+
+def test_r4_watchdog_fails_closed_after_retry(monkeypatch):
+    a = _victim(); i = a["id"]; n = []
+    def boom(*x): n.append(1); raise RuntimeError("db down")
+    monkeypatch.setattr(ws_registry, "valid", boom)
+    async def run():
+        ws = _WS2(); h = ws_registry.Handle(i, ws, None, asyncio.get_running_loop())
+        orig = asyncio.sleep
+        async def fast(t): await orig(0)
+        monkeypatch.setattr(asyncio, "sleep", fast)
+        await asyncio.wait_for(ws_registry.watchdog(h, every=0.01), 2); assert ws.closed and len(n) == 2
+    asyncio.run(run())
+
+def test_r4_remote_sweep_errors_on_unready_nodes(monkeypatch):
+    from paas.drivers import remote
+    monkeypatch.setattr(remote, "agent", lambda *x, **k: {"removed": 1})
+    d = remote.RemoteDriver.__new__(remote.RemoteDriver); d.name = "selfhosted-r4"; now = time.time()
+    q("insert into nodes(id,provider,status,created) values(?,?,?,?)", ("nd-r4a", "selfhosted-r4", "ready", now))
+    q("insert into nodes(id,provider,status,created) values(?,?,?,?)", ("nd-r4b", "selfhosted-r4", "destroyed", now))
+    assert d.remove_account_containers(9) == 1
+    q("insert into nodes(id,provider,status,created) values(?,?,?,?)", ("nd-r4c", "selfhosted-r4", "lost", now))
+    with pytest.raises(RuntimeError) as e: d.remove_account_containers(9)
+    assert "nd-r4c" in str(e.value)
 
 def test_n2_suspend_route_closes_sockets(monkeypatch):
     a = _victim(); i = a["id"]; seen = []

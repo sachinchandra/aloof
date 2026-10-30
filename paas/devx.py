@@ -147,7 +147,8 @@ def token_list(a=Depends(acct)):
             for r in q("select * from deploy_tokens where account_id=? order by created desc", (a["id"],))]
 @R.delete("/v1/tokens/{tid}")
 def token_revoke(tid: str, request: Request, a=Depends(acct)):
-    q("delete from deploy_tokens where id=? and account_id=?", (tid, a["id"])); _audit(a["id"], None, "token.revoke", tid, _ip(request)); return {"ok": True}
+    q("delete from deploy_tokens where id=? and account_id=?", (tid, a["id"])); _audit(a["id"], None, "token.revoke", tid, _ip(request))
+    from . import ws_registry; ws_registry.revalidate(a["id"]); return {"ok": True}
 # ---------------- secrets (flyctl-style, optionally staged) ----------------
 def _staged(app):
     raw = kv_get("staged_secrets", app); return crypto.dec_json(raw) if raw else {"set": {}, "unset": []}
@@ -267,6 +268,7 @@ def _private_ip(i):
     except Exception: return None
 # ---------------- proxy: port-forward to a private port of an instance ----------------
 @R.websocket("/v1/apps/{name}/proxy")
+@__import__("paas.ws_registry", fromlist=["tracked"]).tracked
 async def proxy_ws(ws: WebSocket, name: str, port: int, instance: str|None=None):
     """Binary frames = raw TCP bytes to <instance>:<port> on the app's private network (any port, e.g. a database or admin UI)."""
     api = _api(); a = api._ws_account(ws); ap = engine.get_app(name)
@@ -287,8 +289,7 @@ async def proxy_ws(ws: WebSocket, name: str, port: int, instance: str|None=None)
             await ws.send_bytes(d)
         await ws.close()
     t = asyncio.create_task(up())
-    from . import ws_registry
-    wtok = ws_registry.register(a["id"], ws, writer.close); wd = asyncio.create_task(ws_registry.watchdog(a["id"], ws, writer.close))
+    from . import ws_registry; ws_registry.set_kill(ws, writer.close)
     try:
         while True:
             m = await ws.receive()
@@ -297,7 +298,7 @@ async def proxy_ws(ws: WebSocket, name: str, port: int, instance: str|None=None)
             writer.write(d); await writer.drain()
     except Exception: pass
     finally:
-        t.cancel(); wd.cancel(); ws_registry.unregister(a["id"], wtok); writer.close()
+        t.cancel(); writer.close()
 # ---------------- previews (any git host; GitHub does it automatically per PR) ----------------
 class PreviewReq(BaseModel): pr: int|str; ref: str; git: str|None=None
 @R.post("/v1/apps/{name}/previews")
