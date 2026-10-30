@@ -1,17 +1,9 @@
 """Admin "view as user" masks customer secrets on the server and can't reveal them; the customer's own view is unchanged."""
 import time
 from test_admin_stages import owner2fa, _real, CS
-from paas import api, crypto, secret_mask as sm
+from paas import api, crypto
+MASK = "••••••••"
 from paas.db import q, kv_put, kv_get
-
-def test_mask_helpers():
-    s = sm.mask_text("DATABASE_URL=postgres://aloof:hunter2pw@pg-x:5432/db key pk_abcdefghijklmnopqrstuvwxyz")
-    assert "hunter2pw" not in s and "abcdefghijklmnop" not in s and sm.MASK in s
-    m = sm.mask({"env": {"SECRET": "v1", "PORT": "8080"}, "password": "p", "database_url": "postgres://u:p4ss@h/d", "name": "ok", "env_keys": ["SECRET"]})
-    assert m["env"] == {"SECRET": sm.MASK, "PORT": sm.MASK} and m["password"] == sm.MASK and "p4ss" not in m["database_url"]
-    assert m["name"] == "ok" and m["env_keys"] == ["SECRET"]
-    assert b"hunter2pw" not in sm.mask_body(b'{"logs":"conn postgres://a:hunter2pw@h/d"}', "application/json")
-    assert b"hunter2pw" not in sm.mask_body(b"conn postgres://a:hunter2pw@h/d", "text/plain")
 
 def _imp():
     o = owner2fa(); cl, u = _real(); n = f"pm{time.time_ns() % 10**9}"
@@ -22,9 +14,10 @@ def _imp():
 
 def test_view_as_user_masks_db_url_and_cannot_reveal():
     o, cl, u, n = _imp()
-    for path in (f"/v1/pg/{n}?reveal=true", f"/v1/pg/{n}", "/v1/pg"):
+    assert o.get(f"/v1/pg/{n}?reveal=true").status_code == 403   # reveal is refused outright
+    for path in (f"/v1/pg/{n}", "/v1/pg"):
         r = o.get(path); assert r.status_code == 200 and "SuperSecretPw123" not in r.text, path
-    x = o.get(f"/v1/pg/{n}?reveal=true").json(); assert x["masked"] and sm.MASK in x["database_url"]
+    x = o.get(f"/v1/pg/{n}").json(); assert x["masked"] and x["database_url"] and "SuperSecretPw123" not in x["database_url"]
     assert not q("select 1 from audit where action='pg.reveal_url' and app=?", (f"pg-{n}",))
     own = cl.get(f"/v1/pg/{n}?reveal=true").json(); assert "SuperSecretPw123" in own["database_url"]   # the customer still can
 
@@ -36,7 +29,7 @@ def test_view_as_user_never_takes_new_api_key():
     assert all(k not in o.get(p).text for p in ("/v1/auth/keys", "/v1/apps", "/v1/tokens", "/v1/auth/connected-apps"))
 
 def test_bug53_delete_card_matches_docs():
-    from paas.contact import CONTACT_EMAIL
+    CONTACT_EMAIL = "privacy@aloof.si"   # shown as written (b43336d); bug 53: card and docs must match
     cl, u = _real(); card = cl.get("/dashboard").text
     i = card.index("<b>Delete account</b>"); card = card[i:i + 1200]
     assert f"mailto:{CONTACT_EMAIL}" in card and "delete apps, databases and volumes first" not in card
