@@ -89,6 +89,10 @@ def wait_ready(host, port, path=None, timeout=None, tcp=False):
         time.sleep(0.2)
     return False
 def _start(name, drv, image, spec):
+    ow = q("select account_id from apps where name=?", (name,), one=True)
+    if ow and ow.get("account_id") is not None:
+        st = q("select deleting from accounts where id=?", (ow["account_id"],), one=True)
+        if not st or st.get("deleting"): raise PermissionError("account deleted or being deleted: not starting instances")
     idx = f"{int(time.time()*1000)%10**8}"
     try: inst = drv.start_instance(name, image, spec, idx)
     except Exception as e:
@@ -170,7 +174,13 @@ def _set_region(spec, ex, account_id=None):
     for v in spec.get("volumes") or []:
         vr = q("select region from volumes where name=?", (v["name"],), one=True)
         if vr: R.same_region("volume", v["name"], vr.get("region"), spec["name"], want)
+def account_active(account_id):
+    """False for a missing, suspended or being-deleted account (D1). None = platform-internal caller (no account)."""
+    if account_id is None: return True
+    a = q("select suspended, deleting from accounts where id=?", (account_id,), one=True)
+    return bool(a) and not a.get("suspended") and not a.get("deleting")
 def deploy(account_id, spec):
+    if not account_active(account_id): raise PermissionError("this account is suspended or being deleted; deploys are disabled")
     if not spec.get("plan"): spec.pop("plan", None)   # empty/None = "not given": redeploys keep their plan, new apps get default_plan()
     ex = q("select * from apps where name=?", (spec.get("name"),), one=True)
     if ex and ex["account_id"] == account_id and ex["status"] != "destroyed":   # redeploy: keep attached state
@@ -451,6 +461,7 @@ def set_autoscale(name, cfg):
     return update_spec(name, f)
 # ---- volumes ----
 def create_volume(account_id, name, size_gb, region=None):
+    if not account_active(account_id): raise PermissionError("this account is suspended or being deleted")
     from . import regions as R
     if not NAME_RE.match(name): raise ValueError("bad volume name")
     region = R.require_live(region or R.home())
@@ -506,6 +517,13 @@ def _sweep_containers(name):
                 n = f(name)
                 if n: event(name, f"removed {n} leftover container(s)")
             except Exception as e: event(name, f"container sweep: {e}")
+def sweep_account_containers(account_id):
+    """Remove every container labelled paas.account=<id> or attached to the account's private network (older containers)."""
+    n = 0
+    for d in get_drivers().values():
+        f = getattr(d, "remove_account_containers", None)
+        if f: n += f(account_id)
+    return n
 def reap_destroyed():
     """Periodic safety net: remove containers whose app is destroyed. Only status='destroyed' apps; never unknown ones."""
     for d in get_drivers().values():

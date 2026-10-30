@@ -50,7 +50,7 @@ def suspend(account_id: int, b: Suspend, ctx=Depends(www.require_owner_2fa)):
             except Exception: pass
             q("update apps set status='suspended' where name=?", (x["name"],))
     else:
-        q("update accounts set suspended=0 where id=?", (account_id,)); billing.resume_suspended(account_id)
+        q("update accounts set suspended=0, deleting=0 where id=?", (account_id,)); billing.resume_suspended(account_id)
     audit(_who(ctx), None, "admin.suspend" if b.suspended else "admin.unsuspend", f"account={account_id} email={a['email']} reason={why}")
     return {"ok": True, "suspended": b.suspended}
 class Credit(BaseModel): amount_usd: float = Field(allow_inf_nan=False, ge=-1000, le=1000); confirm: str; reason: str = ""

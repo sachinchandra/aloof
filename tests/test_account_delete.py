@@ -12,6 +12,7 @@ def calls(monkeypatch):
     def fake_destroy(name, with_volumes=False):
         c["destroy"].append((name, with_volumes)); q("update apps set status='destroyed' where name=?", (name,)); q("delete from domains where app=?", (name,))
     monkeypatch.setattr(engine, "destroy_app", fake_destroy); monkeypatch.setattr(engine, "_sweep_containers", lambda n: c["sweep"].append(n))
+    monkeypatch.setattr(engine, "sweep_account_containers", lambda i: c.setdefault("acct_sweep", []).append(i) or 0)
     monkeypatch.setattr(engine, "delete_volume", lambda v: q("delete from volumes where name=?", (v,))); return c
 def _victim():
     while True:   # a fresh test DB hands out ids 1 and 2 first, and those are protected
@@ -30,11 +31,11 @@ def _victim():
 def test_protected_ids_and_owner_never_deleted(calls):
     for i in (1, 2):
         if q("select 1 from accounts where id=?", (i,), one=True):
-            with pytest.raises(HTTPException) as e: ad.delete_account(i, force=True)
+            with pytest.raises(HTTPException) as e: ad.delete_account(i, allow_payments=True)
             assert e.value.status_code == 400
     o = q("select id from accounts where lower(email)=?", (www.ADMIN_EMAIL,), one=True)
     if o:
-        with pytest.raises(HTTPException): ad.delete_account(o["id"], force=True)
+        with pytest.raises(HTTPException): ad.delete_account(o["id"], allow_payments=True)
 
 def test_delete_cleans_everything_and_keeps_money(calls):
     a = _victim(); i = a["id"]
@@ -53,8 +54,8 @@ def test_payments_need_force_and_require_empty(calls):
     assert e.value.status_code == 409
     q("insert into stripe_sessions(id,account_id,kind,amount_cents,status,created,updated) values(?,?,?,?,?,?,?)", (f"s{time.time_ns()}", i, "topup", 500, "paid", now, now))
     with pytest.raises(HTTPException) as e: ad.delete_account(i)
-    assert "force" in e.value.detail
-    assert ad.delete_account(i, force=True)["ok"]
+    assert "allow_payments" in e.value.detail
+    assert ad.delete_account(i, allow_payments=True)["ok"]
     assert q("select count(*) n from stripe_sessions where account_id=?", (i,), one=True)["n"] == 1
 
 def test_admin_endpoint_needs_typed_email(calls):

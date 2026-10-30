@@ -7,6 +7,11 @@ def _docker_ts(v):
     m = _re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.\d+)?(Z|[+-]\d\d:\d\d)?$", v or "")
     if not m: return None
     return _dt.datetime.fromisoformat(m.group(1) + ("+00:00" if m.group(2) in (None, "Z") else m.group(2))).timestamp()
+def _acct_label(spec):
+    """paas.account=<id> from the account's private network name (aloof-acct-<id>), so deletes can sweep by account."""
+    for n in spec.get("networks") or []:
+        if n.startswith("aloof-acct-") and n[11:].isdigit(): return {"paas.account": n[11:]}
+    return {}
 class LocalDockerDriver(Driver):
     name = "local-docker"; regions = ["local"]
     def __init__(self): self._c = None; self.err = None; self._connect()
@@ -65,7 +70,7 @@ class LocalDockerDriver(Driver):
         plan = PLANS[spec["plan"]]; nets = list(spec.get("networks") or [])
         for n in nets: self._ensure_network(n)
         kw = dict(name=f"paas-{app}-run-{int(time.time()*1000)%10**8}", environment={**spec.get("env", {}), "PORT": str(spec.get("port", 8080))},
-                  labels={"paas.app": app, "paas.oneoff": "1"}, nano_cpus=int(plan["vcpu"]*1e9), mem_limit=f"{plan['memory_mb']}m",
+                  labels={"paas.app": app, "paas.oneoff": "1", **_acct_label(spec)}, nano_cpus=int(plan["vcpu"]*1e9), mem_limit=f"{plan['memory_mb']}m",
                   command=command if isinstance(command, list) else ["sh", "-c", command])
         if nets: kw["network"] = nets[0]
         if spec.get("volumes"): kw["volumes"] = {self.volume_ref(v["name"]): {"bind": v["path"], "mode": "rw"} for v in spec["volumes"]}
@@ -78,13 +83,13 @@ class LocalDockerDriver(Driver):
             out = ct.logs().decode(errors="replace")
             return code, out
         finally:
-            try: ct.remove(force=True)
+            try: ct.remove(force=True, v=True)
             except Exception: pass
     def start_instance(self, app, image, spec, index):
         plan = PLANS[spec["plan"]]; port = int(spec.get("port", 8080))
         from .. import capacity; capacity.admit(spec["plan"], 1)   # memory admission: refuse instead of overcommitting the host
         kw = dict(detach=True, name=f"paas-{app}-{index}", environment={**spec.get("env",{}), "PORT":str(port)},
-                  ports={f"{port}/tcp": ("127.0.0.1", None)}, labels={"paas.app":app},
+                  ports={f"{port}/tcp": ("127.0.0.1", None)}, labels={"paas.app":app, **_acct_label(spec)},
                   nano_cpus=int(plan["vcpu"]*1e9), mem_limit=f"{plan['memory_mb']}m", restart_policy={"Name":"unless-stopped"})
         if spec.get("command"): kw["command"] = spec["command"]
         nets = list(spec.get("networks") or [])
@@ -95,7 +100,7 @@ class LocalDockerDriver(Driver):
         if plan["kind"] == "gpu":
             if not self.supports_gpu: raise RuntimeError("no NVIDIA runtime on this host; GPU plans need a GPU provider driver")
             kw["device_requests"] = [docker.types.DeviceRequest(count=1, capabilities=[["gpu"]])]
-        try: self.c.containers.get(kw["name"]).remove(force=True)
+        try: self.c.containers.get(kw["name"]).remove(force=True, v=True)
         except docker.errors.NotFound: pass
         ct = self.c.containers.run(image, **kw)
         for n in nets: self._join(ct, n, (spec.get("net_aliases") or {}).get(n) or spec.get("net_alias"), first=(n == nets[0]))
@@ -105,7 +110,7 @@ class LocalDockerDriver(Driver):
             tail = ""
             try: tail = ct.logs(tail=5).decode(errors="replace").strip().replace("\n", " | ")[-300:]
             except Exception: pass
-            try: ct.remove(force=True)
+            try: ct.remove(force=True, v=True)
             except Exception: pass
             raise RuntimeError(f"container exited at start ({ct.status})" + (f": {tail}" if tail else ""))
         return Instance(id=ct.id[:12], host="127.0.0.1", port=hp)
@@ -229,15 +234,30 @@ class LocalDockerDriver(Driver):
         n = 0
         for c in self.c.containers.list(all=True, filters={"label": f"paas.app={app}"}):
             if (c.labels or {}).get("paas.app") != app: continue
-            try: c.remove(force=True); n += 1
+            try: c.remove(force=True, v=True); n += 1
             except docker.errors.NotFound: pass
             except docker.errors.APIError as e:
                 if "already in progress" not in str(e): raise
         return n
+    def remove_account_containers(self, account_id):
+        """D1: every container of one account, by label, plus anything still attached to its private network."""
+        n = 0; seen = set(); net = f"aloof-acct-{int(account_id)}"
+        cs = list(self.c.containers.list(all=True, filters={"label": f"paas.account={int(account_id)}"}))
+        try: cs += list(self.c.containers.list(all=True, filters={"network": net}))
+        except docker.errors.APIError: pass
+        for c in cs:
+            if c.id in seen: continue
+            seen.add(c.id)
+            if (c.labels or {}).get("paas.account", str(int(account_id))) != str(int(account_id)): continue   # never another account's
+            try: c.remove(force=True, v=True); n += 1
+            except docker.errors.NotFound: pass
+        try: self.c.networks.get(net).remove()
+        except Exception: pass
+        return n
     def app_labels(self):
         return [(c.labels or {}).get("paas.app") for c in self.c.containers.list(all=True, filters={"label": "paas.app"}) if (c.labels or {}).get("paas.app")]
     def stop_instance(self, iid):
-        try: self.c.containers.get(iid).remove(force=True)
+        try: self.c.containers.get(iid).remove(force=True, v=True)
         except docker.errors.NotFound: pass
         except docker.errors.APIError as e:
             if "already in progress" not in str(e): raise   # concurrent stop of the same container

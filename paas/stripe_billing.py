@@ -120,6 +120,13 @@ def fulfill_topup(s):
     row = q("select * from stripe_sessions where id=?", (s["id"],), one=True)
     if not row or row["kind"] != "topup": return {"ok": False, "error": "unknown session"}
     if s.get("amount_subtotal") is not None and int(s["amount_subtotal"]) != int(row["amount_cents"]): return {"ok": False, "error": "amount mismatch"}
+    acc = q("select deleting from accounts where id=?", (row["account_id"],), one=True)
+    if not acc or acc.get("deleting"):   # D5: paid after (or during) account delete: never credit, flag for a manual refund
+        q("update stripe_sessions set status='refund_review', payment_intent=?, updated=? where id=? and status not in ('paid','refund_review')",
+          (s.get("payment_intent"), time.time(), s["id"]))
+        log.error("stripe top-up %s paid for deleted account %s: not credited, flagged refund_review", s["id"], row["account_id"])
+        from .db import audit; audit(None, None, "billing.refund_review", f"session={s['id']} account={row['account_id']} amount_cents={row['amount_cents']}")
+        return {"ok": False, "error": "account deleted", "refund_review": True}
     with tx():   # status flip + wallet credit commit together; a failure rolls both back so Stripe's retry credits it
         won = q("update stripe_sessions set status='paid', payment_intent=?, invoice_id=?, updated=? where id=? and status!='paid' returning id",
                 (s.get("payment_intent"), s.get("invoice"), time.time(), s["id"]))
@@ -131,6 +138,8 @@ def fulfill_topup(s):
 def set_tier(acct, tier, sub_id=None, why="stripe"):
     from .plans import TIERS
     if tier not in TIERS: return
+    acc = q("select deleting from accounts where id=?", (acct,), one=True)
+    if not acc or acc.get("deleting"): log.error("set_tier for deleted account %s ignored", acct); return
     q("update accounts set tier=?, stripe_subscription=?, month_key=? where id=?", (tier, sub_id, billing.month_key(), acct))
     q("insert into ledger(account_id,ts,amount_cents,kind,ref) values(?,?,?,?,?)", (acct, time.time(), 0, "plan", f"{tier} via {why}" + (f" {sub_id}" if sub_id else "")))
     if TIERS[tier].get("hard_cap"):     # dropped to Free: bigger apps can't keep running for free

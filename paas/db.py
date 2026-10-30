@@ -180,6 +180,10 @@ alter table accounts add column if not exists email_optout_at REAL;
 create table if not exists lifecycle_mail(account_id bigint not null, kind TEXT not null, sent_at REAL, status TEXT, primary key(account_id, kind));
 create index if not exists lifecycle_mail_sent on lifecycle_mail(account_id, sent_at);
 """)
+    # v22: account delete in progress (D1): set first and committed, so deploys/top-ups refuse while infra is torn down
+    ,(22, """
+alter table accounts add column if not exists deleting INTEGER default 0;
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
