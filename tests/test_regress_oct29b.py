@@ -72,5 +72,5 @@ def test_email_unsubscribe_same_behaviour(monkeypatch):
 def test_docs():
     t = TestClient(api.app)
     from paas.contact import CONTACT_EMAIL   # site copy says privacy@aloof.si; contact.apply maps role addresses to the one contact mailbox
-    b = t.get("/docs/billing").text; assert f'Email <a href="mailto:{CONTACT_EMAIL}">' in b and "Request it through <a href=\"/docs/support\">support</a>" not in t.get("/docs/billing").text
+    b = t.get("/docs/billing").text; assert f'email <a href="mailto:{CONTACT_EMAIL}">' in b and "Request it through <a href=\"/docs/support\">support</a>" not in t.get("/docs/billing").text
     assert "never queued" in t.get("/docs/sign-in").text

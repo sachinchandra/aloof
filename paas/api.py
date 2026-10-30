@@ -67,6 +67,19 @@ async def _strip_legacy_session(request: Request, call_next):
         for extra in ("", f"; Domain={BASE_DOMAIN}"):
             r.headers.append("set-cookie", f"{auth.LEGACY_COOKIE}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Lax{extra}")
     return r
+@app.middleware("http")
+async def _mask_secrets_in_admin_view(request: Request, call_next):
+    """Admin read-only view: mask every secret in /v1 responses (see secret_mask). Responses to anyone else pass through untouched."""
+    r = await call_next(request)
+    if not request.url.path.startswith("/v1/") or not request.cookies.get(auth.COOKIE): return r
+    ct = r.headers.get("content-type", "")
+    if not ("json" in ct or ct.startswith("text/")) or "event-stream" in ct: return r
+    a = auth.session_account(request.cookies.get(auth.COOKIE))
+    if not a or not a.get("impersonated_by"): return r
+    from . import secret_mask
+    body = b"".join([c async for c in r.body_iterator]); body = secret_mask.mask_body(body, ct)
+    h = {k: v for k, v in r.headers.items() if k.lower() != "content-length"}
+    return Response(content=body, status_code=r.status_code, headers=h)
 SUSPENDED_MSG = "this account is suspended; email support@aloof.si"
 def acct(request: Request, authorization: str = Header(None)):
     """Bearer API key (CLI/MCP/automation) or session cookie (dashboard). Cookie-authenticated writes need the
@@ -751,7 +764,7 @@ def auth_sessions_revoke_others(request: Request, a=Depends(acct)):
 @app.get("/v1/auth/me")
 def auth_me(a=Depends(acct)):
     return {"id": a["id"], "email": a["email"], "name": a.get("billing_name"), "created": a.get("created"), "tier": a.get("tier") or "free",
-            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")), "email_optout": bool(a.get("email_optout")), "new_api_key": auth.take_key_reveal(a["id"]),
+            "email_verified": bool(a["email_verified"]), "has_password": bool(a.get("password_hash")), "is_test": bool(a.get("is_test")), "email_optout": bool(a.get("email_optout")), "new_api_key": None if a.get("impersonated_by") else auth.take_key_reveal(a["id"]),
             "api_key_prefix": key_hint(a.get("api_key_prefix")), **_wallet(a)}
 @app.post("/v1/auth/api-key")
 def auth_rotate(a=Depends(acct)): return {"api_key": engine.rotate_api_key(a["id"]), "detail": "previous key revoked; shown once"}
@@ -976,7 +989,7 @@ def api_docs():
 def dash(request: Request):
     a = auth.session_account(request.cookies.get(auth.COOKIE))
     if not a: return RedirectResponse("/login?next=/dashboard", 303)
-    h = open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND).replace("<!--ANALYTICS-->", "" if a.get("impersonated_by") else site.analytics_tag())
+    h = open(os.path.join(ROOT,"dashboard","index.html")).read().replace("{{BRAND}}", BRAND).replace("{{CONTACT_EMAIL}}", __import__("paas.contact", fromlist=["x"]).CONTACT_EMAIL).replace("<!--ANALYTICS-->", "" if a.get("impersonated_by") else site.analytics_tag())
     if a.get("impersonated_by"): from .admin_ops import imp_banner; h = h.replace("<body>", "<body>" + imp_banner(a), 1)
     return HTMLResponse(h, headers={"X-Robots-Tag": "noindex, nofollow"})
 DASH_TABS = {"apps", "volumes", "pg", "postgres", "keys", "billing", "account", "settings", "audit"}
@@ -1038,6 +1051,9 @@ def pg_list(a=Depends(acct)): return [parity.pg_view(d) for d in q("select * fro
 @app.get("/v1/pg/{name}")
 def pg_get(name: str, reveal: bool=False, request: Request=None, a=Depends(acct)):
     d = own_pg(name, a)
+    if a.get("impersonated_by"):   # admin read-only view: the connection string is shown masked and can't be revealed
+        from .secret_mask import MASK; v = parity.pg_view(d, False)
+        v["database_url"] = f"postgres://{v['user']}:{MASK}@{v['host']}:{v['port']}/{v['database']}"; v["masked"] = True; return v
     if reveal: _audit(a["id"], d["app"], "pg.reveal_url", "", _ip(request))
     return parity.pg_view(d, reveal)
 class PgAttach(BaseModel): app: str; var: str="DATABASE_URL"

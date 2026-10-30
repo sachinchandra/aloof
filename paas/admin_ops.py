@@ -127,7 +127,7 @@ def imp_exit(request: Request):
     else: r.delete_cookie(auth.COOKIE, path="/", secure=SECURE_COOKIES, httponly=True, samesite="lax")
     return r
 def imp_banner(a):
-    return ("<div role=status style=\"position:sticky;top:0;z-index:9999;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;"
+    return ("<script>window.ALOOF_READONLY=1</script><div role=status style=\"position:sticky;top:0;z-index:9999;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;"
             "padding:8px 14px;background:#f59e0b;color:#1c1206;font:600 14px/1.3 system-ui,sans-serif\">"
             f"<span>Read-only view of {html.escape(a['email'] or '')}. Changes are disabled.</span>"
             "<button type=button onclick=\"fetch('/v1/admin/impersonate/exit',{method:'POST',headers:{'X-Aloof-CSRF':'1'}}).then(r=>r.json()).then(j=>location=j.url||'/admin')\" "
