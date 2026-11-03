@@ -585,6 +585,34 @@ def prune_networks(now=None):
             if rm(n): gone.append(n)
     if gone: event("system", f"pruned {len(gone)} empty network(s): {gone[:20]}")
     return gone
+IN_PROGRESS = ("queued", "building", "starting")
+INTERRUPTED = "interrupted by platform restart; retry the deploy"
+def deploy_running(name):
+    """True only when a deploy thread in this process holds the app's lock (the lock is per process, so after a restart it's free)."""
+    return _lock(name).locked()
+def recover_interrupted(build_tmp=None):
+    """Startup (pre-launch P1): deploy threads don't survive a restart. Releases left 'deploying' and apps left queued/building/
+    starting are marked failed, and leftover build dirs are removed. An app whose previous release is still serving stays running."""
+    import glob, os, tempfile, shutil as _sh
+    n = 0
+    for ap in q("select name, status from apps where status in ('queued','building','starting')"):
+        name = ap["name"]
+        if deploy_running(name): continue
+        rel = q("select version from releases where app=? and status='deploying' order by version desc", (name,), one=True)
+        if rel:
+            _set_release(name, rel["version"], "failed")
+            q("update releases set error=? where app=? and version=?", (INTERRUPTED, name, rel["version"]))
+        prev = q("select version, spec from releases where app=? and status='active' order by version desc", (name,), one=True)
+        alive = q("select 1 from instances where app=? and status='running'", (name,), one=True)
+        v = f"v{rel['version']} " if rel else ""
+        if prev and alive:
+            q("update apps set spec=?, status='running', error=? where name=?", (prev["spec"], f"{v}{INTERRUPTED}; still serving v{prev['version']}", name))
+        else: q("update apps set status='failed', error=? where name=?", (f"{v}{INTERRUPTED}".strip(), name))
+        event(name, f"ERROR: {v}{INTERRUPTED}"); n += 1
+    q("update releases set status='failed', error=coalesce(error, ?) where status='deploying'", (INTERRUPTED,))
+    for d in glob.glob(os.path.join(build_tmp or tempfile.gettempdir(), "aloof-build-*")):
+        _sh.rmtree(d, ignore_errors=True)
+    return n
 def destroy_app(name, with_volumes=False):
     """User-facing delete: destroy the app, then remove what its template created (volumes, Postgres). Volumes the user
     attached separately are detached and kept unless with_volumes. Returns what was deleted and kept."""
@@ -601,6 +629,13 @@ def destroy_app(name, with_volumes=False):
         try: q("update volumes set app=null, mount_path=null where name=?", (v,)); delete_volume(v); out["deleted"]["volumes"].append(v)
         except Exception as e: out["errors"].append(f"volume {v}: {e}")
     if not with_volumes: out["kept"]["volumes"] = other_vols
+    if with_volumes:   # pre-launch P2: the built release images go too (paas/<app>:r*)
+        imgs = set()
+        for d in get_drivers().values():
+            if hasattr(d, "remove_app_images"):
+                try: imgs |= set(d.remove_app_images(name))
+                except Exception as e: out["errors"].append(f"images: {e}")
+        out["deleted"]["images"] = sorted(imgs)
     if not out["errors"]: out.pop("errors")
     event(name, f"deleted with app: volumes={out['deleted']['volumes']} postgres={out['deleted']['postgres']} kept={out['kept']['volumes']}")
     return out

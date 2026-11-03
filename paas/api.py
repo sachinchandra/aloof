@@ -308,7 +308,9 @@ def app_events(name: str, after: int = 0, limit: int = 200, a=Depends(acct)):
 def app_retry(name: str, request: Request, a=Depends(acct)):
     """Run the last deploy again from the same source (rebuilds; env, plan, volumes and scale are kept)."""
     ap = own(name, a)
-    if ap["status"] in ("queued", "building", "starting"): raise HTTPException(409, "a deploy is already in progress")
+    if ap["status"] in engine.IN_PROGRESS:
+        if engine.deploy_running(name): raise HTTPException(409, "a deploy is already in progress")
+        _audit(a["id"], name, "deploy.retry_stale", f"status={ap['status']}", _ip(request))   # stale: no deploy thread holds the lock
     spec = {"name": name, "source": (ap.get("spec") or {}).get("source") or {}}
     if not spec["source"]: raise HTTPException(400, "this app has no source to redeploy")
     try: r = engine.deploy(a["id"], spec)
@@ -489,11 +491,11 @@ def _wallet(a): return {"credit_cents": round(a.get("credit_cents") or 0, 4), "c
 @app.get("/v1/usage")
 def usage(a=Depends(acct)): return engine.usage(a["id"]) | _wallet(a) | {"month": billing.month_summary(a["id"])}
 # ---- Stripe (primary) ----
-class CheckoutReq(BaseModel): credit_usd: float
+class CheckoutReq(BaseModel): credit_usd: float | str
 @app.post("/v1/billing/checkout")
 def billing_checkout(o: CheckoutReq, a=Depends(acct)):
     """Stripe Checkout for a prepaid USD top-up ($10–$5,000). Returns {url}; the wallet is credited by the webhook."""
-    try: stripe_billing.require_payments_open(); return stripe_billing.create_topup_session(a, o.credit_usd)
+    try: stripe_billing.topup_cents(o.credit_usd); stripe_billing.require_payments_open(); return stripe_billing.create_topup_session(a, o.credit_usd)
     except ValueError as e: raise HTTPException(400, str(e))
     except RuntimeError as e: raise HTTPException(503, str(e))
 class SubReq(BaseModel): tier: str
@@ -695,6 +697,7 @@ def auth_providers(): return {"providers": oauth_login.providers(), "magic_link"
 @app.get("/auth/{p}/start")
 def social_start(p: str, request: Request, next: str | None = None):
     """Login/signup only: always a plain sign-in. Connecting to the current account is POST /auth/{p}/connect (CSRF header)."""
+    if p not in oauth_login.PROVIDERS: raise HTTPException(404, "unknown sign-in provider")   # pre-launch P5
     nxt = auth.safe_next(next, "/dashboard")
     qk = [k for k, _ in request.query_params.multi_items()]
     if "intent" in qk or len(qk) != len(set(qk)): return _auth_err("state_invalid", p[:20], nxt)   # no GET connect; no duplicate keys

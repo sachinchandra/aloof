@@ -33,7 +33,8 @@ def test_failed_build_has_excerpt_and_retry_guard(monkeypatch):
     called = {}
     monkeypatch.setattr(engine, "deploy", lambda acc, spec: called.update(spec=spec) or {"name": n, "status": "queued"})
     r = c.post(f"/v1/apps/{n}/retry"); assert r.status_code == 200 and called["spec"] == {"name": n, "source": {"image": "nginx:alpine"}}
-    q("update apps set status='building' where name=?", (n,)); assert c.post(f"/v1/apps/{n}/retry").status_code == 409
+    q("update apps set status='building' where name=?", (n,))
+    with engine._lock(n): assert c.post(f"/v1/apps/{n}/retry").status_code == 409   # a live deploy holds the lock (stale ones are taken over)
     other, _ = _user(); assert other.get(f"/v1/apps/{n}/deploy").status_code == 404 and other.post(f"/v1/apps/{n}/retry").status_code == 404
 def test_failed_with_previous_still_serving():
     c, aid = _user(); n = f"dk{time.time_ns() % 10**8}"

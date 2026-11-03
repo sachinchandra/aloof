@@ -70,8 +70,17 @@ def ensure_customer(a, client=None):
 def _tax(d):
     if tax_enabled(): d |= {"automatic_tax": {"enabled": True}, "tax_id_collection": {"enabled": True}, "customer_update": {"address": "auto", "name": "auto"}}
     return d
+def topup_cents(credit_usd):
+    """Pre-launch P3: a finite dollar amount with at most 2 decimals, else a clean ValueError (400)."""
+    import math
+    from decimal import Decimal, InvalidOperation
+    try: d = Decimal(str(credit_usd).strip())
+    except (InvalidOperation, ValueError, TypeError): raise ValueError("credit_usd must be a dollar amount, e.g. 25 or 25.50")
+    if not d.is_finite() or not math.isfinite(float(d)): raise ValueError("credit_usd must be a dollar amount, e.g. 25 or 25.50")
+    if d != d.quantize(Decimal("0.01")): raise ValueError("credit_usd can have at most 2 decimal places (whole cents)")
+    return int(d * 100)
 def create_topup_session(a, credit_usd, client=None):
-    cents = int(round(float(credit_usd) * 100))
+    cents = topup_cents(credit_usd)
     if cents < MIN_TOPUP * 100 or cents > MAX_TOPUP * 100: raise ValueError(f"top-up must be between ${MIN_TOPUP} and ${MAX_TOPUP:,}")
     ok, cancel = _urls()
     d = _tax({"mode": "payment", "customer": ensure_customer(a, client), "client_reference_id": a["id"], "success_url": ok, "cancel_url": cancel,

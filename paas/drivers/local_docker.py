@@ -1,3 +1,4 @@
+from paas.buildcfg import BUILD_TIMEOUT_S
 import docker, subprocess, shutil, os, re, time
 from .base import Driver, Instance
 from ..plans import PLANS
@@ -63,7 +64,7 @@ class LocalDockerDriver(Driver):
                     args = ["docker", "build", "-t", tag, ctx]
                 for k, v in (source.get("build_args") or {}).items(): args[2:2] = ["--build-arg", f"{k}={v}"]
                 log("docker build")
-                p = subprocess.run(args, capture_output=True, text=True, env=env, timeout=3600)
+                p = subprocess.run(args, capture_output=True, text=True, env=env, timeout=BUILD_TIMEOUT_S)
             for line in (p.stdout+p.stderr).splitlines()[-40:]: log(line)
             if p.returncode: raise RuntimeError("build failed")
             return tag
@@ -154,6 +155,15 @@ class LocalDockerDriver(Driver):
         return out
     def remove_image(self, ref):
         if ref.startswith("paas/"): self.c.images.remove(ref, noprune=False)
+    def remove_app_images(self, app):
+        """Every image built for this app (paas/<app>:r<ts> release tags and any other paas/<app> tag). Returns the refs removed."""
+        out = []
+        for img in self.c.images.list(name=f"paas/{app}"):
+            for ref in img.tags:
+                if ref.split(":")[0] == f"paas/{app}":
+                    try: self.c.images.remove(ref, force=True, noprune=False); out.append(ref)
+                    except Exception: pass
+        return out
     # ---- exec / console ----
     def exec_run(self, iid, cmd, timeout=60, stdout_only=False):
         ct = self.c.containers.get(iid)

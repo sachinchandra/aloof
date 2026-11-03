@@ -47,6 +47,7 @@ def _check_email(email):
     if not e.isascii(): raise ValueError("invalid email: use plain ASCII letters (no lookalike or invisible characters)")
     local, sep, dom = e.rpartition("@")
     dom = dom.rstrip(".")
+    if len(local) > 64 or len(e) > 254: raise ValueError("invalid email: too long (max 64 characters before @, 254 in total)")
     if not sep or not local or not dom or '"' in local or "%" in local or "@" in local: raise ValueError("invalid email")
     if ".." in local or local[0] == "." or local[-1] == "." or not _LOCAL_RE.match(local) or not _DOM_RE.match(dom): raise ValueError("invalid email")
     return f"{local}@{dom}"

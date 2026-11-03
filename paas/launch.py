@@ -1,6 +1,7 @@
 """`aloof launch`: detect the framework of a source tree and generate a Dockerfile + aloof.toml. Builds without a Dockerfile use
 Nixpacks when the `nixpacks` binary is installed on the build host, Cloud Native Buildpacks (`pack`) when that is, and otherwise
 the Dockerfile generated here. Detection reads only file names and a few manifests (package.json, pyproject, Gemfile, ...)."""
+from paas.buildcfg import BUILD_TIMEOUT_S
 import os, re, json, shutil, subprocess
 KEY_FILES = ["package.json", "requirements.txt", "pyproject.toml", "Pipfile", "manage.py", "go.mod", "Cargo.toml", "Gemfile", "composer.json",
              "pom.xml", "build.gradle", "build.gradle.kts", "mix.exs", "index.html", "Procfile", "main.py", "app.py", "Dockerfile", "bun.lockb",
@@ -181,13 +182,13 @@ def prepare_context(ctx, log, tag=None, env=None):
     if os.path.exists(os.path.join(ctx, "Dockerfile")): return None
     if shutil.which("nixpacks") and tag and os.environ.get("PAAS_NO_NIXPACKS") != "1":
         log("no Dockerfile: building with Nixpacks")
-        p = subprocess.run(["nixpacks", "build", ctx, "--name", tag], capture_output=True, text=True, env=env, timeout=3600)
+        p = subprocess.run(["nixpacks", "build", ctx, "--name", tag], capture_output=True, text=True, env=env, timeout=BUILD_TIMEOUT_S)
         for line in (p.stdout + p.stderr).splitlines()[-30:]: log(line)
         if p.returncode == 0: return tag
         log("nixpacks failed; falling back to a generated Dockerfile")
     if shutil.which("pack") and tag and os.environ.get("PAAS_NO_BUILDPACKS") != "1":
         log("no Dockerfile: building with Cloud Native Buildpacks (heroku/builder:24)")
-        p = subprocess.run(["pack", "build", tag, "--path", ctx, "--builder", "heroku/builder:24", "--trust-builder"], capture_output=True, text=True, env=env, timeout=3600)
+        p = subprocess.run(["pack", "build", tag, "--path", ctx, "--builder", "heroku/builder:24", "--trust-builder"], capture_output=True, text=True, env=env, timeout=BUILD_TIMEOUT_S)
         for line in (p.stdout + p.stderr).splitlines()[-30:]: log(line)
         if p.returncode == 0: return tag
         log("buildpacks failed; falling back to a generated Dockerfile")
