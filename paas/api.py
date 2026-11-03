@@ -90,6 +90,21 @@ async def _impersonation_mask(request: Request, call_next):
     if imp_mask.APP_ROUTES.match(path): o = imp_mask.mask_spec(o)   # unknown spec keys never shown
     return Response(json.dumps(imp_mask.mask(o)).encode(), status_code=r.status_code, headers=h, media_type="application/json")
 @app.middleware("http")
+async def _public_errors(request: Request, call_next):
+    """Internal failures (Errno, docker daemon, tracebacks...) never reach customers; paas/public_errors.py. Admin routes keep raw text."""
+    r = await call_next(request)
+    from . import public_errors as pe
+    ct = r.headers.get("content-type", "")
+    if not pe.applies(request.url.path) or not (ct.startswith("application/json") or ct.startswith("text/plain")): return r
+    body = b"".join([c async for c in r.body_iterator])
+    h = {k: v for k, v in r.headers.items() if k.lower() != "content-length"}
+    if not pe._INTERNAL.search(body.decode(errors="replace")): return Response(body, status_code=r.status_code, headers=h, media_type=ct.split(";")[0])
+    if ct.startswith("text/plain"): out = pe.clean_text(body.decode(errors="replace")).encode()
+    else:
+        try: out = json.dumps(pe.clean(json.loads(body))).encode()
+        except Exception: out = body
+    return Response(out, status_code=r.status_code, headers=h, media_type=ct.split(";")[0])
+@app.middleware("http")
 async def _no_store_authenticated(request: Request, call_next):
     """L3: authenticated /v1 responses are never cached by browsers or proxies."""
     r = await call_next(request)

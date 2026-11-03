@@ -18,7 +18,7 @@ API = lambda: E("STRIPE_API_BASE", "https://api.stripe.com/v1")
 MIN_TOPUP, MAX_TOPUP = 10, 5000
 def configured(): return bool(E("STRIPE_SECRET_KEY"))
 PAYMENTS_TTL = 600; _acct = {"t": 0.0, "open": None}
-PAYMENTS_SOON = "Paid plans are opening soon: card payments aren't enabled on our Stripe account yet. Nothing was charged."
+PAYMENTS_SOON = "Paid plans are opening soon: card payments aren't enabled yet. Nothing was charged."   # bug 59: no processor name
 def payments_open(client=None, now=None):
     """True when Stripe can take card payments (account charges_enabled). Cached 10 min. If Stripe can't be reached, the last
     known answer is kept (or True on first boot) so a Stripe blip never hides billing; checkout will still report errors."""
@@ -48,7 +48,8 @@ def _flat(d, pre=""):
         elif v is not None: out.append((key, "true" if v is True else "false" if v is False else str(v)))
     return out
 def _call(method, path, data=None, idem=None, client=None):
-    if not configured(): raise RuntimeError("Stripe not configured (STRIPE_SECRET_KEY)")
+    if not configured():   # customer-facing (503 via the API); the config detail goes to the log only
+        log.error("stripe not configured (STRIPE_SECRET_KEY missing)"); raise RuntimeError(PAYMENTS_SOON)
     c = client or httpx.Client(timeout=30)
     h = {"Authorization": f"Bearer {E('STRIPE_SECRET_KEY')}", "Stripe-Version": E("STRIPE_API_VERSION", "2024-06-20"),
          "Content-Type": "application/x-www-form-urlencoded"}
