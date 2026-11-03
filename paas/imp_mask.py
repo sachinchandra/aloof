@@ -79,3 +79,19 @@ def allowed_route(method, path):
 def allowed_type(path, ct):
     ct = (ct or "").lower()
     return any(ct.startswith(t) for t in (_CT_V1 if path.startswith("/v1/") else _CT_PAGES))
+
+# Spec hardening (Nov 3): inside an app spec, string values are hidden unless the key is on this safe list (keys are kept).
+SPEC_SAFE = {"name", "image", "port", "ports", "internal_port", "region", "regions", "plan", "size", "instances", "replicas",
+             "min_instances", "max_instances", "autoscale", "scale", "protocol", "kind", "type", "source", "repo", "branch", "ref",
+             "dockerfile", "builder", "context", "subdir", "volumes", "volume", "mount", "mount_path", "path", "size_gb", "health_path",
+             "http", "tcp", "public", "https_only", "domains", "previews", "sleep", "idle_timeout", "deploy_strategy", "strategy"}
+def _spec_vals(o, safe=True):
+    if isinstance(o, dict): return {k: _spec_vals(v, safe and k in SPEC_SAFE) for k, v in o.items()}
+    if isinstance(o, list): return [_spec_vals(x, safe) for x in o]
+    if isinstance(o, str) and not safe and o and o != HIDDEN: return HIDDEN
+    return o
+def mask_spec(o):
+    """Apply the spec allowlist to every 'spec' object anywhere in a response."""
+    if isinstance(o, dict): return {k: (_spec_vals(v) if k == "spec" and isinstance(v, dict) else mask_spec(v)) for k, v in o.items()}
+    if isinstance(o, list): return [mask_spec(x) for x in o]
+    return o
