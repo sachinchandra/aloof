@@ -135,7 +135,18 @@ def _helper_pg(cmd, env, mounts=None, network="host"):
     d = get_drivers()["local-docker"]; img = E("PAAS_PG_IMAGE", "postgres:16-alpine")
     try: d.c.images.get(img)
     except Exception: d.c.images.pull(img)
-    return d.c.containers.run(img, ["sh", "-c", cmd], environment=env, network_mode=network, remove=True, volumes=mounts or {}, stdout=True, stderr=True)
+    # The postgres image declares VOLUME /var/lib/postgresql/data: remove=True alone leaves an anonymous volume behind on every run
+    # (one dangling volume per daily backup). A tmpfs there means no volume is created, and remove(v=True) cleans up regardless.
+    c = d.c.containers.create(img, ["sh", "-c", cmd], environment=env, network_mode=network, volumes=mounts or {},
+                              tmpfs={"/var/lib/postgresql/data": "size=16m"}, labels={"paas.role": "offsite-helper"})
+    try:
+        c.start(); rc = (c.wait() or {}).get("StatusCode", 1)
+        out = c.logs(stdout=True, stderr=False); err = c.logs(stdout=False, stderr=True)
+        if rc != 0: raise RuntimeError(f"pg helper exited {rc}: {err.decode(errors='replace')[-500:]}")
+        return out
+    finally:
+        try: c.remove(force=True, v=True)
+        except Exception as e: log.warning("pg helper container not removed: %s", e)
 def dump_control_db(path):
     if PGDB:
         d = os.path.dirname(os.path.realpath(path)); f = os.path.basename(path)

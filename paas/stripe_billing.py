@@ -98,7 +98,8 @@ def create_subscription_session(a, tier, client=None):
     price = tier_price(tier)
     if not price: raise RuntimeError(f"STRIPE_PRICE_{tier.upper()} not set")
     ok, cancel = _urls()
-    d = _tax({"mode": "subscription", "allow_promotion_codes": True, "payment_method_collection": "always", "customer": ensure_customer(a, client), "client_reference_id": a["id"], "success_url": ok, "cancel_url": cancel,
+    from . import promo_policy
+    d = _tax({"mode": "subscription", "allow_promotion_codes": promo_policy.offer_promo_codes(a["id"], tier), "payment_method_collection": "always", "customer": ensure_customer(a, client), "client_reference_id": a["id"], "success_url": ok, "cancel_url": cancel,
               "line_items": [{"price": price, "quantity": 1}], "metadata": {"account_id": a["id"], "kind": "subscription", "tier": tier},
               "subscription_data": {"metadata": {"account_id": a["id"], "tier": tier}}})
     s = _call("POST", "/checkout/sessions", d, idem=f"sub-{a['id']}-{tier}-{int(time.time())}", client=client)
@@ -197,6 +198,14 @@ def _sub_tier(o):
     tier = tier_for_price(pid)
     if not tier: log.warning("stripe subscription %s: unknown price id %r; plan unchanged", o.get("id"), pid)
     return tier
+def _card_fingerprint(session):
+    """Card fingerprint for the one-promo-per-person check (read-only GET), only when that policy is on. Never raises."""
+    from . import promo_policy
+    if promo_policy.one_per_person() == "off" or not session.get("subscription"): return None
+    try:
+        sub = _call("GET", f"/subscriptions/{session['subscription']}?expand[]=default_payment_method")
+        return (((sub.get("default_payment_method") or {}).get("card") or {}).get("fingerprint"))
+    except Exception: log.warning("card fingerprint lookup failed for %s", session.get("subscription")); return None
 def _process(ev):
     t = ev.get("type"); o = (ev.get("data") or {}).get("object") or {}
     if t in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
@@ -210,10 +219,30 @@ def _process(ev):
                 if o.get("customer"): q("update accounts set stripe_customer=? where id=? and stripe_customer is null", (o["customer"], acct))
                 q("update stripe_sessions set status='paid', updated=? where id=?", (time.time(), o.get("id")))
                 set_tier(acct, tier, o.get("subscription"), why="stripe checkout"); _track_upgrade(acct, tier, o)
-                return 200, {"ok": True, "tier": tier}
+                out = {"ok": True, "tier": tier}
+                from . import promo_policy
+                try:
+                    v = promo_policy.record_redemption(acct, o, _card_fingerprint(o))
+                    if v: out["promo"] = v
+                    took = promo_policy.clawback_starter(acct, o)
+                    if took: out["starter_clawback_cents"] = took
+                except Exception: log.exception("promo bookkeeping failed for account %s (plan already applied)", acct)
+                return 200, out
         return 200, {"ok": True, "ignored": "session"}
+    if t == "invoice.payment_failed":
+        acct = _acct_from(o)
+        if not acct or not o.get("subscription"): return 200, {"ok": True, "ignored": "not a subscription invoice"}
+        from . import promo_policy
+        return 200, {"ok": True, "past_due": promo_policy.mark_past_due(acct, f"invoice {o.get('id')} attempt {o.get('attempt_count')}")}
     if t == "invoice.paid":
         acct = _acct_from(o)
+        if acct and o.get("subscription"):
+            from . import promo_policy
+            r = q("select stripe_subscription from accounts where id=?", (acct,), one=True)
+            if r and r.get("stripe_subscription") == o.get("subscription"):
+                lines = ((o.get("lines") or {}).get("data") or [])
+                pid = ((lines[0].get("price") or {}).get("id")) if lines else None
+                promo_policy.clear_past_due(acct, tier_for_price(pid))
         if acct:
             q("insert into stripe_sessions(id,account_id,kind,amount_cents,status,invoice_id,invoice_url,created,updated) values(?,?,?,?,?,?,?,?,?) on conflict(id) do nothing",
               (o.get("id"), acct, "invoice", o.get("amount_paid"), "paid", o.get("id"), o.get("hosted_invoice_url"), time.time(), time.time()))
@@ -224,6 +253,10 @@ def _process(ev):
         if not r: return 200, {"ok": True, "ignored": "unknown subscription"}
         if t.endswith("deleted") or o.get("status") in ("canceled", "unpaid", "incomplete_expired"):
             set_tier(r["id"], "free", None, why=f"stripe {t} ({o.get('status')})"); return 200, {"ok": True, "tier": "free"}
+        from . import promo_policy
+        if o.get("status") == "past_due":
+            return 200, {"ok": True, "past_due": promo_policy.mark_past_due(r["id"], f"subscription {o.get('id')} past_due")}
+        if o.get("status") == "active" and promo_policy.clear_past_due(r["id"], _sub_tier(o)): return 200, {"ok": True, "past_due": "cleared"}
         tier = _sub_tier(o)
         if tier and tier != r["tier"]:
             set_tier(r["id"], tier, o["id"], why="stripe plan change")

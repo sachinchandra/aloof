@@ -184,6 +184,15 @@ create index if not exists lifecycle_mail_sent on lifecycle_mail(account_id, sen
     ,(22, """
 alter table accounts add column if not exists deleting INTEGER default 0;
 """)
+    # v23: promo redemptions per person (finance, behind PAAS_PROMO_ONE_PER_PERSON) and past-due state (PAAS_PAST_DUE_ACTION)
+    ,(23, """
+create table if not exists promo_redemptions(id AUTOPK, account_id bigint, promo TEXT, email_norm TEXT, card_fingerprint TEXT,
+  session_id TEXT, subscription TEXT, verdict TEXT, created REAL);
+create index if not exists promo_redemptions_email on promo_redemptions(email_norm);
+create index if not exists promo_redemptions_card on promo_redemptions(card_fingerprint);
+create index if not exists promo_redemptions_acct on promo_redemptions(account_id);
+alter table accounts add column if not exists past_due_since REAL;
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

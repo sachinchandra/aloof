@@ -8,7 +8,7 @@ c = TestClient(api.app)
 def test_promo_note_matches_checkout_code():
     src = open(os.path.join(ROOT, "paas/stripe_billing.py")).read()
     sub = [l for l in src.splitlines() if '"mode": "subscription"' in l][0]; top = [l for l in src.splitlines() if '"mode": "payment"' in l][0]
-    assert '"allow_promotion_codes": True' in sub and '"payment_method_collection": "always"' in sub and "allow_promotion_codes" not in top
+    assert '"allow_promotion_codes": promo_policy.offer_promo_codes(' in sub and '"payment_method_collection": "always"' in sub and "allow_promotion_codes" not in top
     for path in ("/docs/billing", "/pricing"):
         h = c.get(path).text; low = h.lower()
         assert "promo code" in low and "Hobby only" in h and "top-ups" in low and "card" in low, path
