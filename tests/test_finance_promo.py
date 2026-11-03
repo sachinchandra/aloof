@@ -20,9 +20,9 @@ def test_normalize_email():
     assert P.normalize_email("J.Doe+aloof@GoogleMail.com") == "jdoe@gmail.com"
     assert P.normalize_email("j.doe+x@company.dev") == "j.doe@company.dev"   # dots only ignored where the provider ignores them
 
-def test_defaults_are_off(monkeypatch):
+def test_approved_defaults(monkeypatch):
     for k in ("PAAS_PROMO_ONE_PER_PERSON", "PAAS_PAST_DUE_ACTION", "PAAS_STARTER_CREDIT_PROMO"): monkeypatch.delenv(k, raising=False)
-    assert (P.one_per_person(), P.past_due_action(), P.starter_mode()) == ("off", "none", "keep")
+    assert (P.one_per_person(), P.past_due_action(), P.starter_mode()) == ("flag", "limit", "keep")
     _, aid = _acct("fp-off@example.com", "fpoff")
     assert P.offer_promo_codes(aid, "hobby") and not P.offer_promo_codes(aid, "pro")
 

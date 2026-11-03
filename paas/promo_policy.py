@@ -1,4 +1,4 @@
-"""Finance prep (Nov 3, draft for sachin's review). Three policies, each behind an env flag and OFF by default:
+"""Finance prep (Nov 3, draft for sachin's review). Three policies, each behind an env flag. Defaults approved by sachin Nov 3: flag / limit / keep.
 
 PAAS_PROMO_ONE_PER_PERSON = off | flag | block
     One promo per person. Every discounted subscription checkout is recorded (account, promo, normalized email, card fingerprint).
@@ -18,8 +18,8 @@ import os, time, logging, re
 from .db import q
 log = logging.getLogger("paas.promo")
 E_ = lambda k, d: (os.environ.get(k) or d).strip().lower()
-def one_per_person(): return E_("PAAS_PROMO_ONE_PER_PERSON", "off")
-def past_due_action(): return E_("PAAS_PAST_DUE_ACTION", "none")
+def one_per_person(): return E_("PAAS_PROMO_ONE_PER_PERSON", "flag")
+def past_due_action(): return E_("PAAS_PAST_DUE_ACTION", "limit")
 def starter_mode(): return E_("PAAS_STARTER_CREDIT_PROMO", "keep")
 STARTER_CENTS = 500
 DOT_INSENSITIVE = {"gmail.com", "googlemail.com"}   # only providers that really ignore dots; +tags are stripped everywhere

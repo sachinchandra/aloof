@@ -87,3 +87,26 @@ def test_full_cycle_minio(s3env, fake, user, monkeypatch):
     offsite.prune("vol", "offvol"); n = len(user.get("/v1/volumes/offvol/offsite").json()); assert 7 <= n <= 14
     keys = [o["Key"] for o in offsite.s3().list_objects_v2(Bucket=b, Prefix="vol/offvol/").get("Contents", [])]; assert len(keys) == n
     user.delete("/v1/pg/offdb")
+
+def test_helper_pg_removes_its_volume(monkeypatch):
+    """Nov 3 leak: the temporary postgres container must not leave an anonymous volume (tmpfs on the data dir + remove(v=True))."""
+    calls = {}
+    class C:
+        def start(self): calls["start"] = 1
+        def wait(self): return {"StatusCode": 0}
+        def logs(self, stdout=True, stderr=False): return b"ok\n" if stdout else b""
+        def remove(self, **k): calls["remove"] = k
+    class Ctrs:
+        def create(self, img, cmd, **k): calls["create"] = k; return C()
+    class Imgs:
+        def get(self, i): return i
+    class D: c = type("X", (), {"containers": Ctrs(), "images": Imgs()})()
+    import paas.drivers as drv
+    monkeypatch.setattr(drv, "get_drivers", lambda: {"local-docker": D()})
+    assert offsite._helper_pg("true", {}) == b"ok\n"
+    assert calls["remove"] == {"force": True, "v": True} and "/var/lib/postgresql/data" in calls["create"]["tmpfs"]
+    assert "remove" not in calls["create"]
+    C.wait = lambda self: {"StatusCode": 2}; calls.clear()
+    import pytest
+    with pytest.raises(RuntimeError): offsite._helper_pg("false", {})
+    assert calls["remove"] == {"force": True, "v": True}
