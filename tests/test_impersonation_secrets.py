@@ -113,3 +113,17 @@ def test_app_and_status_free_text_hidden():
         r = c.get(u); assert r.status_code in (200, 404) and "QANM" not in r.text, (u, r.text[:300])
     assert imp_mask.hide_text({"x": [{"last_release": {"reason": "r", "log": ["l"], "msg": "m"}, "error": "e"}]}) == \
         {"x": [{"last_release": {"reason": imp_mask.HIDDEN, "log": imp_mask.HIDDEN, "msg": imp_mask.HIDDEN}, "error": imp_mask.HIDDEN}]}
+
+# --- Nov 3: unknown spec keys are hidden in view-as-user ---
+def test_spec_allowlist():
+    m = imp_mask.mask_spec({"apps": [{"spec": {"name": "w", "image": "nginx", "port": 80, "description": "QASPEC1", "labels": {"x": "QASPEC2"},
+                                                "source": {"repo": "https://github.com/a/b", "branch": "main", "note": "QASPEC3"}}}]})
+    sp = m["apps"][0]["spec"]
+    assert sp["name"] == "w" and sp["image"] == "nginx" and sp["port"] == 80 and sp["source"]["branch"] == "main"
+    assert "QASPEC" not in str(m) and set(sp["labels"]) == {"x"}
+    c, a = _imp(); i = a["id"]; now = time.time(); n = f"sp{time.time_ns()}"
+    q("insert into apps(name,account_id,status,spec,created,updated) values(?,?,?,?,?,?)",
+      (n, i, "running", dump_spec({"name": n, "image": "nginx", "plan": "shared-1x-256mb", "port": 80, "instances": 1, "description": "QASPEC4", "warning": "QASPEC5"}), now, now))
+    for u in ("/v1/apps", f"/v1/apps/{n}", f"/v1/apps/{n}/status"):
+        r = c.get(u); assert r.status_code in (200, 404) and "QASPEC" not in r.text, u
+    assert "nginx" in c.get(f"/v1/apps/{n}").text

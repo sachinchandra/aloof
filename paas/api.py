@@ -87,6 +87,7 @@ async def _impersonation_mask(request: Request, call_next):
     try: o = json.loads(body)
     except Exception: return Response(b'{"detail": "response hidden while viewing as user"}', status_code=r.status_code, headers=h, media_type="application/json")
     if text_route: o = imp_mask.hide_text(o)
+    if imp_mask.APP_ROUTES.match(path): o = imp_mask.mask_spec(o)   # unknown spec keys never shown
     return Response(json.dumps(imp_mask.mask(o)).encode(), status_code=r.status_code, headers=h, media_type="application/json")
 @app.middleware("http")
 async def _no_store_authenticated(request: Request, call_next):
