@@ -112,8 +112,10 @@
 <script>
 const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 document.querySelectorAll('.origin').forEach(e=>e.textContent=location.origin);
+function isLive(x){return x.status=='running'||(x.instances||[]).length>0}
+function urlCell(x){return isLive(x)?`<a href="${x.url}" target=_blank rel=noopener>${esc(x.url)}</a>`:`<span class=muted title="This app isn't serving traffic yet">${esc(x.url)}</span> <span class="muted nl">· not live</span>`}
 let _tt;function toast(m,err){const t=$('toast');t.textContent=m;t.classList.toggle('err',!!err);t.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('show'),3800)}
-let _dr,_df;function ask(msg,o={}){$('dlg_t').textContent=o.title||'Are you sure?';$('dlg_b').innerHTML=o.html||'<p>'+esc(msg)+'</p>';$('dlg_ok').textContent=o.ok||'Confirm';
+let _dr,_df;function ask(msg,o={}){clearTimeout(_tt);$('toast').classList.remove('show');$('dlg_t').textContent=o.title||'Are you sure?';$('dlg_b').innerHTML=o.html||'<p>'+esc(msg)+'</p>';$('dlg_ok').textContent=o.ok||'Confirm';
  $('dlg_ok').className='btn sm '+(o.danger||/destroy|delete|remove|restore|roll back/i.test(msg)?'danger':'pri');$('dlg_ok').disabled=!!o.block;$('dlg_no').style.display=o.alert?'none':'';
  _df=document.activeElement;$('dlg').classList.add('open');setTimeout(()=>(o.block?$('dlg_no'):$('dlg_ok')).focus(),20);return new Promise(r=>_dr=r)}
 function dlgClose(v){$('dlg').classList.remove('open');if(_df)_df.focus();if(_dr){_dr(v);_dr=null}}
@@ -161,7 +163,7 @@ async function apps(){const a=await api('GET','/v1/apps');APPS=a;PORTS=Object.fr
  $('apps_empty').style.display=a.length?'none':'';$('apps').style.display=a.length?'':'none';if(!a.length&&!apps.did){$('deploybox').open=true}apps.did=1;
  $('apps').innerHTML='<tr><th>App</th><th>Status</th><th>Plan</th><th>Region</th><th>Instances</th><th>URL</th><th></th></tr>'+a.map(x=>`<tr><td><a href="#" onclick="show('${x.name}');return false"><b>${esc(x.name)}</b></a></td>
  <td><span class="status s-${x.status}">${esc(x.status)}</span> <span class=muted>${esc(x.error||'')}</span></td><td>${x.plan.id}</td><td title="${esc(x.provider)}">${esc(regLabel(x.region||x.spec.region))}</td><td>${x.instances.length}${x.spec.autoscale?` <span class=muted>(${x.spec.autoscale.min}–${x.spec.autoscale.max})</span>`:''}</td>
- <td><a href="${x.url}" target=_blank>${esc(x.url)}</a>${(x.domains||[]).map(d=>`<br><a href="https://${esc(d)}/" target=_blank>${esc(d)}</a>`).join('')}</td><td><button class="btn ghost sm" onclick="show('${x.name}')">Manage</button></td></tr>`).join('');
+ <td>${urlCell(x)}${(x.domains||[]).map(d=>`<br><a href="https://${esc(d)}/" target=_blank rel=noopener>${esc(d)}</a>`).join('')}</td><td><button class="btn ghost sm" onclick="show('${x.name}')">Manage</button></td></tr>`).join('');
  if(open)show(open,true)}
 let dtab='overview', MS=[];
 async function show(n,quiet){if(open!=n)MS=[];open=n;const a=await api('GET','/v1/apps/'+n), d=await api('GET','/v1/apps/'+n+'/domains'), dl=await api('GET','/v1/domains').catch(()=>({})), v=await api('GET','/v1/volumes'), s=a.spec.autoscale||{}, h=a.spec.health||{};
@@ -171,7 +173,7 @@ async function show(n,quiet){if(open!=n)MS=[];open=n;const a=await api('GET','/v
  overview:`<div class=stats><div class=stat><span>Status</span><b><span class="status s-${a.status}">${esc(a.status)}</span></b></div><div class=stat><span>Instances</span><b id=m_inst>${a.instances.length}</b></div><div class=stat><span>Region</span><b title="Set at creation; can't be changed">${esc(regLabel(a.region||a.spec.region))}</b></div>
   <div class=stat><span>Requests (since restart)</span><b id=m_req>–</b></div><div class=stat><span>In flight</span><b id=m_inf>–</b></div></div>
   <div class="grid g2"><div class=pnl><h3>Requests / 5 s</h3><svg class=spark id=sp_req viewBox="0 0 300 56" preserveAspectRatio=none></svg></div><div class=pnl><h3>CPU % (avg per instance)</h3><svg class=spark id=sp_cpu viewBox="0 0 300 56" preserveAspectRatio=none></svg></div></div>
-  <div class=pnl><h3>Details</h3><table class=tbl><tr><td>URL</td><td><a href="${a.url}" target=_blank rel=noopener>${esc(a.url)}</a></td></tr><tr><td>Plan</td><td><code>${a.plan.id}</code> · ${a.plan.vcpu} vCPU · ${a.plan.memory_mb} MB</td></tr>
+  <div class=pnl><h3>Details</h3><table class=tbl><tr><td>URL</td><td>${urlCell(a)}</td></tr><tr><td>Plan</td><td><code>${a.plan.id}</code> · ${a.plan.vcpu} vCPU · ${a.plan.memory_mb} MB</td></tr>
   <tr><td>Runs on</td><td>${esc(a.provider)}</td></tr><tr><td>Source</td><td><code>${esc(a.spec.source.image||a.spec.source.git||'')}</code></td></tr><tr><td>Port</td><td>${a.spec.port}</td></tr></table></div>`,
  logs:`<div class=pnl><h3>Logs <span class=sp></span><button class="btn ghost sm" onclick="logs()">Refresh</button></h3><pre id=lg class=logs>…</pre></div>
   <div class=pnl><h3>Log drains</h3><p class=muted style="font-size:13px;margin-top:-4px">Forward every line as it happens to <code>https://</code> (JSON batches) or <code>syslog+tls://host:port</code> (RFC 5424). Retained history: <span id=ret>…</span> days on your plan.</p>
@@ -196,7 +198,7 @@ async function show(n,quiet){if(open!=n)MS=[];open=n;const a=await api('GET','/v
   <td><button class="btn ghost sm" onclick="verifydom('${esc(x.domain)}')">Check now</button> <button class="btn danger sm" onclick="rmdom('${esc(x.domain)}')">Remove</button></td></tr>`}).join('')||'<tr><td class=muted>No custom domains yet.</td></tr>'}</table></div></div>`,
  volumes:`<div class=pnl><h3>Volumes</h3>${(a.spec.volumes||[]).map(x=>`<p><code>${esc(x.name)}</code> → <code>${esc(x.path)}</code> <button class="btn ghost sm" onclick="detach('${x.name}')">Detach</button></p>`).join('')||'<p class=muted>No volumes attached.</p>'}
   <div class=inline><select id=va aria-label=Volume>${v.filter(x=>!x.app).map(x=>`<option>${esc(x.name)}</option>`).join('')}</select> <input id=vp value=/data aria-label="Mount path"> <button class="btn pri sm" onclick="attach()">Attach</button></div></div>`};
- D.innerHTML=`<div class=pnl style="padding-bottom:0"><h3 style="font-size:20px">${esc(n)} <span class="status s-${a.status}">${a.status}</span><span class=sp></span><a class="btn ghost sm" href="${a.url}" target=_blank rel=noopener>Open ↗</a> <button class="btn danger sm" onclick="destroy('${n}')">Destroy</button></h3><div id=dprog>${DP.app==n?dpHtml():''}</div>
+ D.innerHTML=`<div class=pnl style="padding-bottom:0"><h3 style="font-size:20px">${esc(n)} <span class="status s-${a.status}">${a.status}</span><span class=sp></span>${isLive(a)?`<a class="btn ghost sm" href="${a.url}" target=_blank rel=noopener>Open ↗</a>`:`<button class="btn ghost sm" disabled title="Not live yet">Open ↗</button>`} <button class="btn danger sm" onclick="destroy('${n}')">Destroy</button></h3><div id=dprog>${DP.app==n?dpHtml():''}</div>
  <div class=dtabs role=tablist>${T('overview','Overview')}${T('logs','Logs')}${T('env','Environment')}${T('scale','Scale & health')}${T('domains','Domains')}${T('volumes','Volumes')}${T('releases','Releases')}${T('console','Console')}</div></div>${pane[dtab]}`;
  if(!quiet)D.scrollIntoView({behavior:'smooth',block:'start'}); if(DP.app!=n||!quiet)dpLoad(n); if(dtab=='logs'){logs();drains()} if(dtab=='overview')metrics(); if(dtab=='releases')rels(); if(dtab=='console')conOpen(); else conClose()}
 // ---- deploy progress: only real backend states (GET /v1/apps/:name/deploy); polls while a deploy is in flight
