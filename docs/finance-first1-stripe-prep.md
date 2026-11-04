@@ -9,7 +9,7 @@ Branch `finance/first1-stripe-prep`. **Nothing deployed, nothing merged, no Stri
 | coupon `GDLsTF74` | 100% off, repeating 1 month, times_redeemed 0, **applies_to = {products: [prod_VQzeuLD1pWEmEI]} (Aloof Hobby)**, **not None** |
 | EARLY3 `promo_1UUgeFA2Yc23CAveBBZzToEr` → coupon `her8ewZE` | 100% off, 3 months, 0 redemptions, applies_to = Hobby product already |
 | Prices | Hobby $5/mo on prod_VQzeuLD1pWEmEI; Pro $20/mo on prod_VQzeDPSFqZ48jV; both tax_behavior=exclusive |
-| Webhook endpoint (api.aloof.si/v1/billing/stripe/webhook) | events: checkout.session.completed, checkout.session.async_payment_succeeded, invoice.paid, customer.subscription.updated, customer.subscription.deleted. **invoice.payment_failed is not subscribed.** |
+| Webhook endpoint `we_1UQ7fkA2Yc23CAveUcUxPinG` (api.aloof.si/v1/billing/stripe/webhook) | Nov 3: 5 events. **Updated Nov 3 (approved): 6 events**: checkout.session.completed, checkout.session.async_payment_succeeded, invoice.paid, **invoice.payment_failed**, customer.subscription.updated, customer.subscription.deleted |
 | Account | country AE, default currency aed, charges_enabled |
 | Stripe Tax settings | status active, head office AE, default tax code txcd_10103000 (SaaS, business use), tax_behavior inferred_by_currency, **0 registrations** |
 | prod env | STRIPE_TAX=0; the new flags are unset (so they're off) |
@@ -25,7 +25,7 @@ If you still want a fresh object (for example to add `max_redemptions`/`redeem_b
 
 FIRST1 is unavailable between steps 1 and 3, so run them back to back.
 
-## 2. One promo per person: `PAAS_PROMO_ONE_PER_PERSON=off|flag|block` (default off)
+## 2. One promo per person: `PAAS_PROMO_ONE_PER_PERSON=off|flag|block` (code default **flag**, approved Nov 3)
 - Each paid, discounted subscription checkout is stored in `promo_redemptions` (migration v23) with the account, promo, normalized email and card fingerprint. The email is normalized by lowercasing and stripping `+tag`; dots are removed only for gmail/googlemail. The card fingerprint is read with a GET on the subscription's default_payment_method, and only when the flag is on.
 - If the same account, normalized email or card has redeemed before, the redemption is a repeat. A repeat writes the audit row `billing.promo_repeat`, including the matching accounts.
 - `flag`: record and audit only. `block`: additionally, checkout stops offering the promo field to an account/email already known to have redeemed. This happens **before payment**, so there are no refunds or cancellations.
@@ -38,19 +38,19 @@ Tradeoffs:
 - Shared family or company cards cause false positives, which is why repeats are flagged rather than refused.
 - Privacy: a normalized email and fingerprint are stored per redemption, covered by the existing billing-data retention.
 
-## 3. Failed payments: `PAAS_PAST_DUE_ACTION=none|limit|free` (default none)
+## 3. Failed payments: `PAAS_PAST_DUE_ACTION=none|limit|free` (code default **limit**, approved Nov 3; not set in prod golive.env, so limit applies)
 - Handles `invoice.payment_failed` (subscription invoices only) and `customer.subscription.updated` with status=past_due. It sets `accounts.past_due_since` and writes the audit row `billing.past_due`.
-- `limit`: pauses running apps (same as the Free cap) but keeps the plan. `free`: drops to Free but **keeps the subscription id**.
+- `limit`: apps get their own **`past_due`** status and the event "paused: the latest payment for your plan didn't go through…" (not the Free-cap message). The pause sticks through the monthly reset, plan changes and upgrades, and redeploys/scale-ups are refused (409). The instance count is remembered, and when past_due clears (invoice.paid or status=active) every app is **actively restarted** at its old size (workers and cron included; scale-to-zero web apps start 1 and then idle normally). `free`: drops to Free but **keeps the subscription id**. (Fixes for support bugs 61/62/65, Nov 4.)
 - Restore: `invoice.paid` for that subscription, or status=active, clears past_due and restores the tier from the price, or un-pauses the apps.
 - `unpaid`/`canceled` still drop to Free (existing behaviour).
 - Recommendation: `limit`. Stripe Smart Retries take about 1–3 weeks, and customers keep their plan settings while apps pause. `free` is harsher, but it also stops Hobby/Pro-only sizes.
 
-**Stripe live change (planned, not done):** add `invoice.payment_failed` to the endpoint. Read the endpoint id (we_…) with GET /v1/webhook_endpoints, then
+**Stripe live change: DONE Nov 3** (approved). `invoice.payment_failed` was added to the endpoint above; GET before (5 events) and after (6 events) verified.
 `POST /v1/webhook_endpoints/<we_id>` with `enabled_events[]` = checkout.session.async_payment_succeeded, checkout.session.completed, customer.subscription.deleted, customer.subscription.updated, invoice.paid, **invoice.payment_failed**. This replaces the whole list, so send all six.
 Without this change, past_due still arrives through customer.subscription.updated, so the code works with the current subscription.
 Also check Dashboard → Billing → Revenue recovery: Smart Retries on, and "if all retries fail → cancel or mark unpaid". Both already map to Free.
 
-## 4. $5 starting credit stacking with the free month: `PAAS_STARTER_CREDIT_PROMO=keep|clawback` (default keep)
+## 4. $5 starting credit stacking with the free month: `PAAS_STARTER_CREDIT_PROMO=keep|clawback` (default keep) — decided Nov 3: keep (no clawback)
 Today every account gets `credit_cents` default 500 (db.py column default).
 
 Options:
@@ -83,6 +83,6 @@ Not legal or tax advice. Confirm with the FZE's accountant, especially free-zone
 ## Open decisions for sachin
 1. Item 1: keep the existing FIRST1/GDLsTF74 (already Hobby-only, my recommendation), or recreate it anyway?
 2. One-promo policy mode: off, flag (my recommendation for launch) or block?
-3. Past-due action: limit (my recommendation), free or none. Add invoice.payment_failed to the webhook (live change above)?
+3. ~~Past-due action~~ decided: limit; invoice.payment_failed subscribed (Nov 3). Still open: a customer email on a failed payment (support bug 63, sachin's call).
 4. Starter credit: enable clawback, and approve the copy change?
 5. Tax: VAT registration timing with the FTA, EU OSS/UK registration, personal- or business-use tax code, Tax Basic vs Complete, and when to flip STRIPE_TAX=1.

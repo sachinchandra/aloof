@@ -67,7 +67,7 @@ def test_past_due_and_restore(monkeypatch, mode):
     monkeypatch.setenv("PAAS_PAST_DUE_ACTION", mode); s = "pd" + mode
     c, a = _acct(f"{s}@example.com", s)
     _post(f"evt_{s}0", "checkout.session.completed", _co(a, s, disc=False))
-    capped = []; monkeypatch.setattr(S.billing, "cap_account", lambda acct: capped.append(acct))
+    capped = []; monkeypatch.setattr(S.billing, "pause_past_due", lambda acct: capped.append(acct))
     inv = {"id": "in_" + s, "customer": "cus_" + s, "subscription": "sub_" + s, "attempt_count": 1, "metadata": {}}
     assert _post(f"evt_{s}1", "invoice.payment_failed", inv)["past_due"] == mode
     tier = q("select tier, past_due_since from accounts where id=?", (a,), one=True)

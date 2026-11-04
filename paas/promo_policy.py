@@ -8,7 +8,7 @@ PAAS_PROMO_ONE_PER_PERSON = off | flag | block
            refunds). Repeats that only show up after payment (new account, same card) are flagged, never auto-cancelled.
 PAAS_PAST_DUE_ACTION = none | limit | free
     invoice.payment_failed / subscription status past_due:
-    limit: pause running apps (like the Free cap) but keep the plan; free: drop to Free but keep the subscription id so Stripe's
+    limit: pause apps with their own 'past_due' status (sticks through month reset / plan changes) but keep the plan; free: drop to Free but keep the subscription id so Stripe's
     successful retry (invoice.paid / status active) restores the plan automatically. Both restore on payment.
 PAAS_STARTER_CREDIT_PROMO = keep | clawback
     clawback: when a promo makes the first Hobby month free, remove whatever is left of the $5 starting credit (only if the account
@@ -82,7 +82,7 @@ def mark_past_due(acct, why):
     q("update accounts set past_due_since=coalesce(past_due_since, ?) where id=?", (time.time(), acct))
     from .db import audit; audit(acct, None, "billing.past_due", f"account={acct} action={act} ({why})")
     if act == "limit":
-        from . import billing; billing.cap_account(acct)
+        from . import billing; billing.pause_past_due(acct)
     elif act == "free":
         r = q("select stripe_subscription from accounts where id=?", (acct,), one=True)
         from .stripe_billing import set_tier
@@ -96,6 +96,6 @@ def clear_past_due(acct, tier=None):
     from . import billing
     if tier and tier != r["tier"]:
         from .stripe_billing import set_tier; set_tier(acct, tier, r.get("stripe_subscription"), why="payment recovered")
-    else: billing.uncap_account(acct, "payment received")
+    billing.resume_past_due(acct)
     from .db import audit; audit(acct, None, "billing.past_due_cleared", f"account={acct}")
     return True

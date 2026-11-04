@@ -331,7 +331,10 @@ def app_metrics(name: str, a=Depends(acct)):
     return {"ts": time.time(), "requests_total": M.reqs.get(name, 0), "inflight": M.inflight.get(name, 0), "instances": len(ap.get("instances") or []),
             "cpu_percent": cpu, "egress_bytes_unbilled": EGRESS.get(name, 0), "last_request": M.last.get(name)}
 @app.post("/v1/apps/{name}/scale")
-def scale(name: str, s: Scale, a=Depends(acct)): own(name, a); return with_url(engine.scale(name, s.instances))
+def scale(name: str, s: Scale, a=Depends(acct)):
+    own(name, a)
+    try: return with_url(engine.scale(name, s.instances))
+    except PermissionError as e: raise HTTPException(409, str(e))
 class Env(BaseModel): env: dict[str, str|None]
 @app.post("/v1/apps/{name}/env")
 def env(name: str, e: Env, a=Depends(acct)): own(name, a); return with_url(engine.set_env(name, e.env))
@@ -1196,8 +1199,9 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
         await ws.close(code=4403, reason=f"this deploy token is scoped to app {a['_scope_app']}"); return
     if caller_level(ws, a) < 2:
         await ws.close(code=4403, reason="insufficient scope: the console needs paas:write"); return
-    if ap["status"] in ("suspended", "capped"):
-        await ws.close(code=4409, reason="app is " + ("suspended (balance at $0): top up to resume" if ap["status"] == "suspended" else "paused at the Free plan's monthly cap")); return
+    if ap["status"] in ("suspended", "capped", "past_due"):
+        await ws.close(code=4409, reason="app is " + {"suspended": "suspended (balance at $0): top up to resume", "capped": "paused at the Free plan's monthly cap",
+                                                       "past_due": "paused: the latest plan payment failed; update your card to resume"}[ap["status"]]); return
     sel = lambda: q("select * from instances where app=? and status='running'" + (" and id=?" if instance else "") + " order by started", (name, *([instance] if instance else [])), one=True)
     i = sel()
     if not i and not instance and ap["status"] in ("running", "idle"):   # scaled to zero: wake it like an incoming request would
@@ -1358,6 +1362,7 @@ async def edge(path: str, request: Request):
             except capacity.PlatformAtCapacity as e: return PlainTextResponse(str(e), 503, headers={"Retry-After": str(e.retry_after)})
             finally: controller.M.end(name)
             insts = q("select id,host,port from instances where app=? and status='running'", (name,))
+        if not insts and ap and ap["status"] == "past_due": return PlainTextResponse(f"app '{name}' is paused: the latest payment for this plan failed", 402)
         if not insts and ap and ap["status"] == "capped": return PlainTextResponse(f"app '{name}' is paused: free tier usage cap reached for this month", 402)
         if not insts: return PlainTextResponse(f"app '{name}' has no running instances", 503)
     i = lb.pick(name, insts); tried = set()

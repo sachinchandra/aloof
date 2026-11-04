@@ -186,10 +186,12 @@ def account_active(account_id):
     if account_id is None: return True
     a = q("select suspended, deleting from accounts where id=?", (account_id,), one=True)
     return bool(a) and not a.get("suspended") and not a.get("deleting")
+PAST_DUE_APP = "this app is paused because the latest payment for your plan failed; update your card in Billing → Manage billing and it restarts automatically"
 def deploy(account_id, spec):
     if not account_active(account_id): raise PermissionError("this account is suspended or being deleted; deploys are disabled")
     if not spec.get("plan"): spec.pop("plan", None)   # empty/None = "not given": redeploys keep their plan, new apps get default_plan()
     ex = q("select * from apps where name=?", (spec.get("name"),), one=True)
+    if ex and ex.get("status") == "past_due": raise PermissionError(PAST_DUE_APP)
     if ex and ex["account_id"] == account_id and ex["status"] != "destroyed":   # redeploy: keep attached state
         old = load_spec(ex["spec"])
         for k in ("volumes", "autoscale", "health", "plan", "port", "instances", "command", "networks", "net_alias", "kind", "pg_plan", "provider",
@@ -436,6 +438,7 @@ def scale(name, n, reason="manual"):
     with _lock(name):
         app = q("select * from apps where name=?", (name,), one=True); spec = load_spec(app["spec"])
         if app["status"] in ("destroyed","failed","building","queued") or not spec.get("_image"): return get_app(name)
+        if app["status"] == "past_due" and n: raise PermissionError(PAST_DUE_APP)   # only billing.resume_past_due restarts it
         a = spec.get("autoscale"); n = max(0, min(int(n), 10))
         if a and reason == "manual": a["min"] = min(a["min"], n); a["max"] = max(a["max"], n)
         cur = q("select * from instances where app=? and status='running' order by started", (name,))

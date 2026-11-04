@@ -112,6 +112,9 @@ def _rules(app, spec, ev, insts, errors, rel, now):
     if st == "suspended" or "suspended: prepaid balance exhausted" in text:
         out.append(_c("Suspended: prepaid balance reached $0", "high", "app status suspended" if st == "suspended" else "suspension event",
                       "Top up credit (Dashboard → Billing, or POST /v1/billing/topup); suspended apps resume automatically."))
+    if st == "past_due":
+        out.append(_c("Paused: the latest plan payment failed", "high", "app status past_due",
+                      "Update the card in Dashboard → Billing → Manage billing; apps restart automatically once Stripe's retry succeeds."))
     if st == "capped":
         out.append(_c("Paused: Free tier monthly usage cap reached", "high", "app status capped", "Upgrade to Hobby (PUT /v1/billing/tier) or wait for the next month."))
     oom = [i for i in insts if i.get("oom_killed") or i.get("exit_code") == 137] or ("137" in text and "exit" in text) or re.search(r"(?i)out of memory|oomkilled|killed process", errtext)

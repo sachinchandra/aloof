@@ -5,7 +5,7 @@ when the balance runs out (or, on Free, paused at the hard cap)."""
 import os, json, time, logging
 from .db import q, event
 from .plans import PLANS
-from .crypto import load_spec
+from .crypto import load_spec, dump_spec
 log = logging.getLogger("paas.billing")
 E = lambda k, d=None: os.environ.get(k, d)
 def usd(cents): return round((cents or 0) / 100.0, 2)
@@ -96,6 +96,34 @@ def cap_account(acct):
         engine.scale(app["name"], 0, reason="free tier cap reached")
         q("update apps set status='capped' where name=?", (app["name"],))
         event(app["name"], "paused: free tier included usage used up for this month; upgrade or wait for next month")
+PAST_DUE_MSG = ("paused: the latest payment for your plan didn't go through. Update your card in Billing → Manage billing; "
+                "the app restarts automatically once the payment succeeds")
+def pause_past_due(acct):
+    """Failed plan payment (PAAS_PAST_DUE_ACTION=limit). Apps get their own 'past_due' status (not 'capped'), so the monthly reset,
+    plan changes and upgrades (which only unpause 'capped') can't restart them; only resume_past_due() does. The instance count is
+    remembered because scaling to 0 overwrites spec.instances, so workers/cron/non-autoscaled apps come back at their old size."""
+    from . import engine
+    out = []
+    for app in q("select name, spec from apps where account_id=? and status in ('running','idle','capped')", (acct,)):
+        n0 = len(q("select id from instances where app=? and status='running'", (app["name"],))) or int(load_spec(app["spec"]).get("instances") or 0)
+        engine.scale(app["name"], 0, reason="payment past due")
+        sp = load_spec(q("select spec from apps where name=?", (app["name"],), one=True)["spec"]); sp["_resume_instances"] = n0
+        q("update apps set status='past_due', spec=?, updated=? where name=?", (dump_spec(sp), time.time(), app["name"]))
+        event(app["name"], PAST_DUE_MSG); out.append(app["name"])
+    return out
+def resume_past_due(acct, why="payment received"):
+    """past_due cleared: actively start every paused app (an idle app only wakes on an HTTP request; workers and cron never get one)."""
+    from . import engine
+    out = []
+    for app in q("select name, spec from apps where account_id=? and status='past_due'", (acct,)):
+        sp = load_spec(app["spec"]); n = int(sp.pop("_resume_instances", 0) or 0); a = sp.get("autoscale")
+        if a: n = max(int(a.get("min") or 0), min(n, int(a.get("max") or n)))
+        elif n < 1: n = 1
+        q("update apps set status=?, spec=?, updated=? where name=?", ("idle" if a else "stopped", dump_spec(sp), time.time(), app["name"]))
+        event(app["name"], f"resumed ({why})")
+        if n: engine.scale(app["name"], n, reason="resume after payment")
+        out.append(app["name"])
+    return out
 def uncap_account(acct, why):
     for app in q("select name from apps where account_id=? and status='capped'", (acct,)):
         q("update apps set status='idle', updated=? where name=?", (time.time(), app["name"])); event(app["name"], f"unpaused ({why}); wakes on next request")
