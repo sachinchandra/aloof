@@ -38,7 +38,7 @@ def test_past_due_pause_message_sticks_and_resumes(fake_engine):
     assert _post("evt_pd61a", "invoice.payment_failed", {"id": "in_pd61", "customer": "cus_pd61", "subscription": "sub_pd61", "attempt_count": 1, "metadata": {}})["past_due"] == "limit"
     for n in ("pd61-web", "pd61-worker", "pd61-auto"): assert st(n) == "past_due" and running(n) == 0
     msgs = [e["msg"] for e in q("select msg from events where app='pd61-worker'")]
-    assert any("payment for your plan didn't go through" in m for m in msgs) and not any("free tier" in m for m in msgs[-2:])   # bug 61
+    assert any("your plan payment failed" in m for m in msgs) and not any("free tier" in m for m in msgs[-2:])   # bug 61
     # bug 62: month reset, plan change and upgrade don't unpause
     billing.uncap_account(aid, "new month"); S.set_tier(aid, "pro", "sub_pd61", why="test plan change"); S.set_tier(aid, "hobby", "sub_pd61", why="test")
     q("update accounts set month_key='1999-01' where id=?", (aid,)); billing.meter_tick(time.time())
@@ -66,3 +66,17 @@ def test_status_active_also_resumes_and_diagnose(fake_engine):
 def test_free_cap_message_unchanged(fake_engine):
     _, aid = _setup("pd63"); billing.cap_account(aid)
     assert st("pd63-worker") == "capped"; billing.uncap_account(aid, "new month"); assert st("pd63-worker") == "idle"
+
+def test_past_due_free_fallback_uses_past_due_copy(fake_engine, monkeypatch):
+    """QA Nov 4: Hobby payment fails with PAAS_PAST_DUE_ACTION=free -> capped, but the event and 402 say payment failed, not free-tier cap."""
+    monkeypatch.setenv("PAAS_PAST_DUE_ACTION", "free")
+    c, aid = _setup("pd6f")
+    q("update apps set spec=? where name='pd6f-worker'", (json.dumps({"name": "pd6f-worker", "plan": "shared-1x-1gb", "instances": 2, "_image": "img", "source": {"image": "img"}}),))
+    P.mark_past_due(aid, "test")
+    assert st("pd6f-worker") == "capped"
+    msgs = [e["msg"] for e in q("select msg from events where app='pd6f-worker'")]
+    assert billing.PAST_DUE_PAUSE in msgs and not any("free tier" in m for m in msgs)
+    assert "grace" not in billing.PAST_DUE_PAUSE.lower()
+    q("update instances set status='stopped' where app='pd6f-worker'")
+    r = w.get("/", headers={"host": "pd6f-worker.aloof.test"})
+    if r.status_code == 402: assert "your plan payment failed" in r.text and "free tier" not in r.text

@@ -90,14 +90,18 @@ def meter_tick(now=None):
                 q("update apps set status='suspended' where name=?", (app["name"],)); event(app["name"], "suspended: prepaid balance exhausted; top up to resume")
     try: check_low_balance(now)
     except Exception as e: log.warning("low-balance check: %s", e)
+PAST_DUE_PAUSE = "Paused: your plan payment failed. Update your card in Billing to bring apps back."
+def is_past_due(acct):
+    a = q("select past_due_since from accounts where id=?", (acct,), one=True)
+    return bool(a and a.get("past_due_since"))
 def cap_account(acct):
     from . import engine
+    pd = is_past_due(acct)   # Hobby/Pro payment failed and the account fell back to Free: say so, not "free tier cap"
     for app in q("select name from apps where account_id=? and status in ('running','idle')", (acct,)):
-        engine.scale(app["name"], 0, reason="free tier cap reached")
+        engine.scale(app["name"], 0, reason="payment past due" if pd else "free tier cap reached")
         q("update apps set status='capped' where name=?", (app["name"],))
-        event(app["name"], "paused: free tier included usage used up for this month; upgrade or wait for next month")
-PAST_DUE_MSG = ("paused: the latest payment for your plan didn't go through. Update your card in Billing → Manage billing; "
-                "the app restarts automatically once the payment succeeds")
+        event(app["name"], PAST_DUE_PAUSE if pd else "paused: free tier included usage used up for this month; upgrade or wait for next month")
+PAST_DUE_MSG = PAST_DUE_PAUSE
 def pause_past_due(acct):
     """Failed plan payment (PAAS_PAST_DUE_ACTION=limit). Apps get their own 'past_due' status (not 'capped'), so the monthly reset,
     plan changes and upgrades (which only unpause 'capped') can't restart them; only resume_past_due() does. The instance count is

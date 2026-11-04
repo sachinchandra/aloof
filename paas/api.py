@@ -1201,6 +1201,7 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
     if caller_level(ws, a) < 2:
         await ws.close(code=4403, reason="insufficient scope: the console needs paas:write"); return
     if ap["status"] in ("suspended", "capped", "past_due"):
+        if ap["status"] == "capped" and billing.is_past_due(ap["account_id"]): await ws.close(code=4409, reason=billing.PAST_DUE_PAUSE); return
         await ws.close(code=4409, reason="app is " + {"suspended": "suspended (balance at $0): top up to resume", "capped": "paused at the Free plan's monthly cap",
                                                        "past_due": "paused: the latest plan payment failed; update your card to resume"}[ap["status"]]); return
     sel = lambda: q("select * from instances where app=? and status='running'" + (" and id=?" if instance else "") + " order by started", (name, *([instance] if instance else [])), one=True)
@@ -1363,7 +1364,8 @@ async def edge(path: str, request: Request):
             except capacity.PlatformAtCapacity as e: return PlainTextResponse(str(e), 503, headers={"Retry-After": str(e.retry_after)})
             finally: controller.M.end(name)
             insts = q("select id,host,port from instances where app=? and status='running'", (name,))
-        if not insts and ap and ap["status"] == "past_due": return PlainTextResponse(f"app '{name}' is paused: the latest payment for this plan failed", 402)
+        if not insts and ap and (ap["status"] == "past_due" or (ap["status"] == "capped" and billing.is_past_due(ap["account_id"]))):
+            return PlainTextResponse(billing.PAST_DUE_PAUSE, 402)
         if not insts and ap and ap["status"] == "capped": return PlainTextResponse(f"app '{name}' is paused: free tier usage cap reached for this month", 402)
         if not insts: return PlainTextResponse(f"app '{name}' has no running instances", 503)
     i = lb.pick(name, insts); tried = set()

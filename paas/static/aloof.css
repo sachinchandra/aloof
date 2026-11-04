@@ -192,7 +192,7 @@ footer.f .base{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12p
 .summary{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:14px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-md);padding:14px;margin:12px 0}
 .summary dt{color:var(--fg3)}.summary dd{margin:0;font-weight:550}
 .req{color:var(--bad);margin-left:2px}
-label .hint{display:block;font-weight:400;color:var(--fg3);font-size:12px;margin-top:4px}
+label .hint,.fld .hint{display:block;font-weight:400;color:var(--fg3);font-size:12px;margin-top:4px}
 .or{display:flex;align-items:center;gap:10px;color:var(--fg3);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
 .srcseg{margin:4px 0 10px}
 .keybox{border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 8%,var(--panel));border-radius:var(--r-md);padding:14px;margin:12px 0}
@@ -397,3 +397,5 @@ a:focus-visible,.btn:focus-visible,summary:focus-visible{outline:2px solid var(-
 
 @media(max-width:480px){.stat b{font-size:20px}}
 [aria-invalid=true]{border-color:var(--bad,#ef4444)!important}
+
+.fld>label{margin:12px 0 6px}.fld>input,.fld>select{width:100%}
