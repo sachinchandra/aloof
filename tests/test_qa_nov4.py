@@ -69,3 +69,63 @@ def test_view_as_masks_image_userinfo():
 def test_no_processor_name_in_messages():
     src = open(api.__file__).read()
     assert "use Stripe (/v1/billing/checkout)" not in src and "managed by your Stripe subscription" not in src
+
+# ---- QA retest of 4f722c6 (R5) ----
+def _pd_app(monkeypatch, tag, cron=False, status="stopped"):
+    monkeypatch.setenv("PAAS_PAST_DUE_ACTION", "limit")
+    c = _acct_client(f"qa5{tag}@example.com"); aid = c.get("/v1/auth/me").json()["id"]
+    q("update accounts set tier='hobby', stripe_customer=?, stripe_subscription=?, past_due_since=? where id=?", (f"cus_q5{tag}", f"sub_q5{tag}", time.time(), aid))
+    spec = {"name": f"qa5-{tag}", "plan": "shared-1x-256mb", "instances": 0, "_image": "img", "source": {"image": "img"}}
+    if cron: spec["cron"] = [{"name": "nightly", "schedule": "0 3 * * *", "command": "echo hi"}]
+    now = time.time()
+    q("insert into apps(name,account_id,spec,status,provider,created,updated) values(?,?,?,?,?,?,?)", (f"qa5-{tag}", aid, json.dumps(spec), status, "local-docker", now, now))
+    q("insert into releases(app,version,image,spec,status,created) values(?,?,?,?,?,?)", (f"qa5-{tag}", 1, "img:old", json.dumps(spec), "superseded", now))
+    q("insert into releases(app,version,image,spec,status,created) values(?,?,?,?,?,?)", (f"qa5-{tag}", 2, "img", json.dumps(spec), "active", now))
+    return c, aid
+
+@pytest.fixture
+def qa5_clean():
+    yield
+    for t in ("apps", "releases"): q(f"delete from {t} where " + ("name" if t == "apps" else "app") + " like 'qa5-%'")
+    try: q("delete from volumes where name='qa5vol'")
+    except Exception: pass
+
+@pytest.mark.parametrize("status", ["stopped", "past_due"])
+def test_r5a_rollback_blocked_past_due(monkeypatch, qa5_clean, status):
+    c, _ = _pd_app(monkeypatch, "rb" + status[:2], status=status)
+    with pytest.raises(engine.PastDue): engine.rollback(f"qa5-rb{status[:2]}")
+    r = c.post(f"/v1/apps/qa5-rb{status[:2]}/rollback", json={}); assert r.status_code == 402 and r.json()["code"] == "payment_past_due"
+
+def test_r5b_manual_cron_run_blocked(monkeypatch, qa5_clean):
+    from paas import cron as cronmod
+    ran = []; monkeypatch.setattr(cronmod, "run_job", lambda *a, **k: ran.append(1) or 0)
+    c, _ = _pd_app(monkeypatch, "cr", cron=True)
+    r = c.post("/v1/apps/qa5-cr/cron/nightly/run"); assert r.status_code == 402 and r.json()["code"] == "payment_past_due" and not ran
+
+def test_r5_volumes_still_allowed_past_due(monkeypatch, qa5_clean):
+    c, _ = _pd_app(monkeypatch, "vo")
+    assert c.post("/v1/volumes", json={"name": "qa5vol", "size_gb": 1}).status_code != 402
+
+@pytest.mark.parametrize("line", ["failed to read Dockerfile at /tmp/aloof-build-abc123/Dockerfile",
+                                  "COPY failed: stat /var/lib/aloof/builds/x: not found", "loading /workspace/paas/paas/engine.py line 3"])
+def test_r5d_internal_path_always_hidden(line):
+    out = PE.clean_text(line); assert "/tmp/aloof-build" not in out and "/var/lib/aloof" not in out and "/workspace/paas" not in out
+
+@pytest.mark.parametrize("line", ["COPY failed: file not found in build context or excluded by .dockerignore: stat package.json: file does not exist",
+                                  "ERROR: failed to solve: failed to read dockerfile: open Dockerfile: no such file or directory",
+                                  "npm ERR! code ELIFECYCLE", "Step 3/7 : WORKDIR /workspace/app"])
+def test_r5d_customer_build_errors_kept(line): assert PE.clean_text(line) == line
+
+@pytest.mark.parametrize("img,bad", [("nginx:alpine@sha256:" + "c" * 64, False), ("ghcr.io/a/b:1.2@sha256:" + "d" * 64, False),
+                                      ("user:sha256@registry.io/x", True), ("user:tok@registry.io/x:1@sha256:" + "e" * 64, True)])
+def test_r5e_tag_plus_digest(img, bad):
+    spec = {"name": "qa5-img", "source": {"image": img}}
+    if bad:
+        with pytest.raises(ValueError, match="credentials"): engine.validate(spec)
+    else:
+        try: engine.validate(spec)
+        except ValueError as e: assert "credentials" not in str(e)
+        except Exception: pass
+
+def test_r5f_no_processor_in_diagnose():
+    from paas import diagnose; assert "Stripe" not in open(diagnose.__file__).read().split("past_due", 1)[1][:2000]

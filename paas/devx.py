@@ -332,6 +332,8 @@ def cron_run(name: str, job: str, request: Request, a=Depends(acct)):
     ap = own(name, a); spec = load_spec(q("select spec from apps where name=?", (name,), one=True)["spec"])
     j = next((j for j in spec.get("cron") or [] if j["name"] == job), None)
     if not j or not spec.get("_image"): raise HTTPException(404, "no such job (or app not built yet)")
+    if ap.get("status") == "past_due": raise engine.PastDue(engine.PAST_DUE_APP)
+    if engine.past_due_limited(ap["account_id"]): raise engine.PastDue(engine.PAST_DUE_ACCT)
     _audit(a["id"], name, "cron.run", job, _ip(request))
     code = cronmod.run_job(name, j, spec, get_drivers()[ap["provider"]])
     return {"exit_code": code, "output": (q("select output from cron_runs where app=? and job=? order by id desc", (name, job), one=True) or {}).get("output", "")[-4000:]}

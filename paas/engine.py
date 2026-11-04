@@ -6,7 +6,7 @@ from .plans import PLANS
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 _locks = {}
 def _lock(app): return _locks.setdefault(app, threading.Lock())
-USERINFO_IMG = re.compile(r"^(?:[a-z][a-z0-9+.\-]*://)?[^/@\s]+:[^/\s]*@|^(?:[a-z][a-z0-9+.\-]*://)?[^/@\s]+@[^/\s]+/")   # user:token@host/..., user@host/...; not name@sha256:digest
+USERINFO_IMG = re.compile(r"^(?:[a-z][a-z0-9+.\-]*://)?[^/@\s]+:[^/\s]*@(?!sha256:[0-9a-f]{64}$)|^(?:[a-z][a-z0-9+.\-]*://)?[^/@\s]+@[^/\s]+/")   # user:token@host/..., user@host/...; not name@sha256:digest
 def validate(spec):
     if not NAME_RE.match(spec.get("name","")): raise ValueError("name must be 3-32 chars, lowercase letters/digits/hyphens")
     if spec.get("plan","cpu-small") not in PLANS: raise ValueError(f"unknown plan; choose from {list(PLANS)}")
@@ -249,6 +249,9 @@ def releases(name):
 def rollback(name, version=None, reason=None, only_if_latest=None):
     """Redeploy an earlier release's image + config (env, plan, port, command, scale, health). Volumes, Postgres attachments and
     domains stay as they are now. No rebuild, so it's fast; zero-downtime like any deploy."""
+    ap = q("select account_id, status from apps where name=?", (name,), one=True)
+    if ap and ap["status"] == "past_due": raise PastDue(PAST_DUE_APP)
+    if ap and past_due_limited(ap["account_id"]): raise PastDue(PAST_DUE_ACCT)
     cur = q("select version from releases where app=? and status='active' order by version desc", (name,), one=True)
     if version is None:
         r = q("select * from releases where app=? and status='superseded' and image is not null" + (" and version<?" if cur else "") + " order by version desc",
