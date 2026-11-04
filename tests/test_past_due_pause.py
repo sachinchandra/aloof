@@ -43,8 +43,8 @@ def test_past_due_pause_message_sticks_and_resumes(fake_engine):
     billing.uncap_account(aid, "new month"); S.set_tier(aid, "pro", "sub_pd61", why="test plan change"); S.set_tier(aid, "hobby", "sub_pd61", why="test")
     q("update accounts set month_key='1999-01' where id=?", (aid,)); billing.meter_tick(time.time())
     assert all(st(n) == "past_due" for n in ("pd61-web", "pd61-worker", "pd61-auto"))
-    with pytest.raises(PermissionError): engine.scale("pd61-worker", 1)
-    assert c.post("/v1/apps/pd61-worker/scale", json={"instances": 1}).status_code == 409
+    with pytest.raises(engine.PastDue): engine.scale("pd61-worker", 1)
+    assert c.post("/v1/apps/pd61-worker/scale", json={"instances": 1}).status_code == 402
     # bug 65: payment succeeds -> apps actively restarted at their old size
     _post("evt_pd61b", "invoice.paid", {"id": "in_pd61b", "customer": "cus_pd61", "subscription": "sub_pd61", "amount_paid": 500, "metadata": {},
                                         "lines": {"data": [{"price": {"id": "price_hobby"}}]}})

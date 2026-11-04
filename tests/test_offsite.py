@@ -93,7 +93,7 @@ def test_helper_pg_removes_its_volume(monkeypatch):
     calls = {}
     class C:
         def start(self): calls["start"] = 1
-        def wait(self): return {"StatusCode": 0}
+        def wait(self, timeout=None): calls["timeout"] = timeout; return {"StatusCode": 0}
         def logs(self, stdout=True, stderr=False): return b"ok\n" if stdout else b""
         def remove(self, **k): calls["remove"] = k
     class Ctrs:
@@ -106,7 +106,8 @@ def test_helper_pg_removes_its_volume(monkeypatch):
     assert offsite._helper_pg("true", {}) == b"ok\n"
     assert calls["remove"] == {"force": True, "v": True} and "/var/lib/postgresql/data" in calls["create"]["tmpfs"]
     assert "remove" not in calls["create"]
-    C.wait = lambda self: {"StatusCode": 2}; calls.clear()
+    assert calls["timeout"] == 3600
+    C.wait = lambda self, timeout=None: {"StatusCode": 2}; calls.clear()
     import pytest
     with pytest.raises(RuntimeError): offsite._helper_pg("false", {})
     assert calls["remove"] == {"force": True, "v": True}

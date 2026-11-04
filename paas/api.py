@@ -284,6 +284,8 @@ def providers():
         out.append({"name": d.name, "gpu": d.supports_gpu, "regions": d.regions, "available": ok, "detail": why, "ready_nodes": nodes,
                     "docs": getattr(PROVISIONERS.get(d.name), "docs", "")})
     return out
+@app.exception_handler(engine.PastDue)
+async def _past_due_402(request, exc): return JSONResponse({"detail": str(exc), "code": "payment_past_due"}, status_code=402)
 @app.post("/v1/apps")
 def deploy(r: DeployReq, a=Depends(acct)):
     if r.name.startswith("pg-"): raise HTTPException(400, "app names starting with pg- are reserved for managed Postgres")
@@ -333,8 +335,7 @@ def app_metrics(name: str, a=Depends(acct)):
 @app.post("/v1/apps/{name}/scale")
 def scale(name: str, s: Scale, a=Depends(acct)):
     own(name, a)
-    try: return with_url(engine.scale(name, s.instances))
-    except PermissionError as e: raise HTTPException(409, str(e))
+    return with_url(engine.scale(name, s.instances))
 class Env(BaseModel): env: dict[str, str|None]
 @app.post("/v1/apps/{name}/env")
 def env(name: str, e: Env, a=Depends(acct)): own(name, a); return with_url(engine.set_env(name, e.env))
@@ -520,7 +521,7 @@ async def stripe_webhook(request: Request):
     return JSONResponse(body, status_code=code)
 # ---- Razorpay (optional INR top-ups, off unless PAAS_RAZORPAY_ENABLED=1) ----
 def _rzp():
-    if not rzp.enabled(): raise HTTPException(404, "Razorpay is disabled; use Stripe (/v1/billing/checkout)")
+    if not rzp.enabled(): raise HTTPException(404, "this payment method is disabled; pay by card (/v1/billing/checkout)")
 class OrderReq(BaseModel): credit_inr: int
 @app.post("/v1/billing/razorpay/orders")
 def billing_order(o: OrderReq, a=Depends(acct)):
@@ -582,7 +583,7 @@ def billing_tier(t: TierReq, a=Depends(acct)):
     With a Stripe subscription use /v1/billing/subscribe or the portal instead."""
     from .crypto import load_spec
     if t.tier not in TIERS: raise HTTPException(400, f"tier must be one of {list(TIERS)}")
-    if a.get("stripe_subscription"): raise HTTPException(409, "tier is managed by your Stripe subscription; use the customer portal")
+    if a.get("stripe_subscription"): raise HTTPException(409, "tier is managed by your card subscription; change it in Billing → Manage billing (POST /v1/billing/portal)")
     old = TIERS.get(a.get("tier") or "free", TIERS["free"]); new = TIERS[t.tier]
     if new.get("plans"):
         bad = [r["name"] for r in q("select name, spec from apps where account_id=? and status!='destroyed'", (a["id"],)) if load_spec(r["spec"]).get("plan") not in new["plans"]]

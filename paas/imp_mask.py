@@ -85,8 +85,10 @@ SPEC_SAFE = {"name", "image", "port", "ports", "internal_port", "region", "regio
              "min_instances", "max_instances", "autoscale", "scale", "protocol", "kind", "type", "source", "repo", "branch", "ref",
              "dockerfile", "builder", "context", "subdir", "volumes", "volume", "mount", "mount_path", "path", "size_gb", "health_path",
              "http", "tcp", "public", "https_only", "domains", "previews", "sleep", "idle_timeout", "deploy_strategy", "strategy"}
-def _spec_vals(o, safe=True):
-    if isinstance(o, dict): return {k: _spec_vals(v, safe and k in SPEC_SAFE) for k, v in o.items()}
+_IMG_CRED = re.compile(r"^((?:[a-z][a-z0-9+.\-]*://)?)[^/@\s]+:[^/\s]*@")   # user:token@registry/x in image refs
+def _spec_vals(o, safe=True, key=None):
+    if isinstance(o, str) and key == "image" and _IMG_CRED.search(o): return _IMG_CRED.sub(r"\1" + HIDDEN + "@", o)
+    if isinstance(o, dict): return {k: _spec_vals(v, safe and k in SPEC_SAFE, k) for k, v in o.items()}
     if isinstance(o, list): return [_spec_vals(x, safe) for x in o]
     if isinstance(o, str) and not safe and o and o != HIDDEN: return HIDDEN
     return o

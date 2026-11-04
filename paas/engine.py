@@ -6,6 +6,7 @@ from .plans import PLANS
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 _locks = {}
 def _lock(app): return _locks.setdefault(app, threading.Lock())
+USERINFO_IMG = re.compile(r"^(?:[a-z][a-z0-9+.\-]*://)?[^/@\s]+:[^/\s]*@|^(?:[a-z][a-z0-9+.\-]*://)?[^/@\s]+@[^/\s]+/")   # user:token@host/..., user@host/...; not name@sha256:digest
 def validate(spec):
     if not NAME_RE.match(spec.get("name","")): raise ValueError("name must be 3-32 chars, lowercase letters/digits/hyphens")
     if spec.get("plan","cpu-small") not in PLANS: raise ValueError(f"unknown plan; choose from {list(PLANS)}")
@@ -17,6 +18,7 @@ def validate(spec):
     if src.get("image"):
         from .creds import check_image
         if not isinstance(src["image"], str) or re.search(r"\s", src["image"]): raise ValueError("source.image is not a valid image reference")
+        if USERINFO_IMG.search(src["image"]): raise ValueError("source.image must not contain credentials (user:token@); save registry credentials with a registry login (MCP registry_login) instead")
         check_image(src["image"])
     pr = spec.get("processes")
     if pr:
@@ -187,11 +189,22 @@ def account_active(account_id):
     a = q("select suspended, deleting from accounts where id=?", (account_id,), one=True)
     return bool(a) and not a.get("suspended") and not a.get("deleting")
 PAST_DUE_APP = "this app is paused because the latest payment for your plan failed; update your card in Billing → Manage billing and it restarts automatically"
+PAST_DUE_ACCT = ("the latest payment for your plan failed, so deploys and scaling are paused. Update your card in Billing → Manage billing; "
+                 "everything resumes automatically once the payment succeeds")
+class PastDue(Exception):
+    """Account past due under PAAS_PAST_DUE_ACTION=limit: the API answers 402 (not a PermissionError, so no route maps it to 409)."""
+def past_due_limited(account_id):
+    if account_id is None: return False
+    from . import promo_policy
+    if promo_policy.past_due_action() != "limit": return False
+    a = q("select past_due_since from accounts where id=?", (account_id,), one=True)
+    return bool(a and a.get("past_due_since"))
 def deploy(account_id, spec):
+    if past_due_limited(account_id): raise PastDue(PAST_DUE_ACCT)
     if not account_active(account_id): raise PermissionError("this account is suspended or being deleted; deploys are disabled")
     if not spec.get("plan"): spec.pop("plan", None)   # empty/None = "not given": redeploys keep their plan, new apps get default_plan()
     ex = q("select * from apps where name=?", (spec.get("name"),), one=True)
-    if ex and ex.get("status") == "past_due": raise PermissionError(PAST_DUE_APP)
+    if ex and ex.get("status") == "past_due": raise PastDue(PAST_DUE_APP)
     if ex and ex["account_id"] == account_id and ex["status"] != "destroyed":   # redeploy: keep attached state
         old = load_spec(ex["spec"])
         for k in ("volumes", "autoscale", "health", "plan", "port", "instances", "command", "networks", "net_alias", "kind", "pg_plan", "provider",
@@ -438,7 +451,8 @@ def scale(name, n, reason="manual"):
     with _lock(name):
         app = q("select * from apps where name=?", (name,), one=True); spec = load_spec(app["spec"])
         if app["status"] in ("destroyed","failed","building","queued") or not spec.get("_image"): return get_app(name)
-        if app["status"] == "past_due" and n: raise PermissionError(PAST_DUE_APP)   # only billing.resume_past_due restarts it
+        if app["status"] == "past_due" and n: raise PastDue(PAST_DUE_APP)   # only billing.resume_past_due restarts it
+        if n and reason == "manual" and past_due_limited(app["account_id"]): raise PastDue(PAST_DUE_ACCT)
         a = spec.get("autoscale"); n = max(0, min(int(n), 10))
         if a and reason == "manual": a["min"] = min(a["min"], n); a["max"] = max(a["max"], n)
         cur = q("select * from instances where app=? and status='running' order by started", (name,))

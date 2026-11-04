@@ -10,17 +10,25 @@ _INTERNAL = re.compile(r"\[Errno -?\d+\]|No such file or directory: '[^']*'|Trac
     r"ConnectionResetError|BrokenPipeError|TimeoutError|KeyError|TypeError|AttributeError|NameError|IndexError|"
     r"UnboundLocalError|RecursionError|MemoryError|sqlite3\.\w+|psycopg\w*\.\w+)\b|'NoneType' object|object has no attribute|"
     r"ReadTimeout|ConnectTimeout|Read timed out|HTTPConnectionPool|urllib3\.|httpx\.\w+Error|requests\.exceptions|"
-    r"Max retries exceeded|Connection aborted|\bEOF occurred\b", re.I)
+    r"Max retries exceeded|Connection aborted|\bEOF occurred\b|TimeoutExpired|OCI runtime create failed|No space left on device|"
+    r"context deadline exceeded|CalledProcessError|Command '\[[^\n]*\]' timed out after|^\s*(?:ValueError|RuntimeError):", re.I | re.M)
+# An Errno or one of our internal paths means it's ours even if the line also mentions a Dockerfile etc. (QA Nov 4)
+_HARD = re.compile(r"\[Errno -?\d+\]|/tmp/aloof-build|/workspace/|/var/lib/aloof|/home/box|site-packages/|\.venv/|/var/run/docker", re.I)
+_BUILD_TIMEOUT = re.compile(r"TimeoutExpired|timed out after \d+(?:\.\d+)? seconds", re.I)
+def timeout_msg():
+    from .buildcfg import BUILD_TIMEOUT_S
+    return (f"The build took longer than {max(1, round(BUILD_TIMEOUT_S / 60))} minutes and was stopped. "
+            "Speed it up (cache dependencies, smaller build context) and retry.")
 _GENUINE = re.compile(r"pull access denied|manifest unknown|manifest for .* not found|repository does not exist|"
     r"no such image|invalid reference format|unauthorized: |denied: |The command '.*' returned a non-zero code|"
     r"did not complete successfully: exit code|executor failed running|failed to solve|Dockerfile|exited with code", re.I)
 _PREFIX = re.compile(r"^(.*?(?:ERROR:|failed:|failed \(|error:)\s*)", re.I)
 _TAIL = re.compile(r"(\)?;\s*v\d+ still serving.*|;\s*still serving v\d+.*)$", re.I)
-def internal(s): return isinstance(s, str) and bool(_INTERNAL.search(s)) and not _GENUINE.search(s)
+def internal(s): return isinstance(s, str) and bool(_INTERNAL.search(s)) and (bool(_HARD.search(s)) or not _GENUINE.search(s))
 def clean_line(line):
     if not internal(line): return line
     p = _PREFIX.match(line); t = _TAIL.search(line)
-    return (p[1] if p else "") + MSG + (t[1] if t else "")
+    return (p[1] if p else "") + (timeout_msg() if _BUILD_TIMEOUT.search(line) else MSG) + (t[1] if t else "")
 def clean_text(s):
     if not isinstance(s, str) or not _INTERNAL.search(s): return s
     out, skipping = [], False

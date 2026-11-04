@@ -140,7 +140,7 @@ def _helper_pg(cmd, env, mounts=None, network="host"):
     c = d.c.containers.create(img, ["sh", "-c", cmd], environment=env, network_mode=network, volumes=mounts or {},
                               tmpfs={"/var/lib/postgresql/data": "size=16m"}, labels={"paas.role": "offsite-helper"})
     try:
-        c.start(); rc = (c.wait() or {}).get("StatusCode", 1)
+        c.start(); rc = (c.wait(timeout=int(E("PAAS_OFFSITE_HELPER_TIMEOUT_S", "3600"))) or {}).get("StatusCode", 1)   # hung pg_dump: raises, finally removes
         out = c.logs(stdout=True, stderr=False); err = c.logs(stdout=False, stderr=True)
         if rc != 0: raise RuntimeError(f"pg helper exited {rc}: {err.decode(errors='replace')[-500:]}")
         return out

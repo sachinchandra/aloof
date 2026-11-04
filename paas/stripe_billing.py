@@ -232,6 +232,8 @@ def _process(ev):
     if t == "invoice.payment_failed":
         acct = _acct_from(o)
         if not acct or not o.get("subscription"): return 200, {"ok": True, "ignored": "not a subscription invoice"}
+        cur = q("select stripe_subscription from accounts where id=?", (acct,), one=True)
+        if not cur or cur.get("stripe_subscription") != o.get("subscription"): return 200, {"ok": True, "ignored": "not the account's current subscription"}
         from . import promo_policy
         return 200, {"ok": True, "past_due": promo_policy.mark_past_due(acct, f"invoice {o.get('id')} attempt {o.get('attempt_count')}")}
     if t == "invoice.paid":
