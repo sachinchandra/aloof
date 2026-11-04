@@ -12,13 +12,14 @@ SITE=$(sed -n '/# __SITE__ begin/,/# __SITE__ end/p' Caddyfile.prod)
   for d in $PAAS_BASE_DOMAIN ${PAAS_ALT_DOMAINS//,/ }; do
     if [ "$d" = "$PAAS_BASE_DOMAIN" ] && [ "${PAAS_CANONICAL_WWW:-0}" = 1 ]; then
       # www.<base> is canonical; the apex (if its DNS exists) redirects to www
-      printf 'www.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8000 {\n\t\tlb_try_duration 10s\n\t\tlb_try_interval 250ms\n\t}\n}\n%s {\n\timport aloof_sec\n\tredir https://www.%s{uri} permanent\n}\napi.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8000 {\n\t\tlb_try_duration 10s\n\t\tlb_try_interval 250ms\n\t}\n}\n' "$d" "$d" "$d" "$d"
+      printf 'www.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8000 127.0.0.1:8010 {\n\t\tlb_policy first\n\t\tlb_try_duration 10s\n\t\tlb_try_interval 250ms\n\t\thealth_uri /healthz\n\t\thealth_interval 2s\n\t\thealth_timeout 2s\n\t\tfail_duration 3s\n\t}\n}\n%s {\n\timport aloof_sec\n\tredir https://www.%s{uri} permanent\n}\napi.%s {\n\timport aloof_sec\n\treverse_proxy 127.0.0.1:8000 127.0.0.1:8010 {\n\t\tlb_policy first\n\t\tlb_try_duration 10s\n\t\tlb_try_interval 250ms\n\t\thealth_uri /healthz\n\t\thealth_interval 2s\n\t\thealth_timeout 2s\n\t\tfail_duration 3s\n\t}\n}\n' "$d" "$d" "$d" "$d"
       echo "$SITE" | sed -n '/^mcp\.__D__ {/,$p' | grep -v '^# __SITE__' | sed "s|__D__|$d|g"
     else echo "$SITE" | sed "s|__D__|$d|g"; fi; done
   sed -n '/# __SITE__ end/,$p' Caddyfile.prod | sed '1d'; } > "$LIVE"
 /usr/local/bin/caddy validate --config "$LIVE" --adapter caddyfile >/dev/null 2>&1 || { /usr/local/bin/caddy validate --config "$LIVE" --adapter caddyfile; exit 1; }
 LIVE_ABS=$(cd ../data && pwd)/Caddyfile.live
 sed -i "/^\[program:paas\]/,/^\[/ s|^environment=.*|environment=$E,HOME=\"/home/box\"|" supervisord.conf
+sed -i "/^\[program:paas-b\]/,/^\[/ s|^environment=.*|environment=$E,PAAS_API_PORT=\"8010\",PAAS_EDGE_PORT=\"8090\",PAAS_BACKGROUND=\"0\",HOME=\"/home/box\"|" supervisord.conf
 sed -i "/^\[program:mcp\]/,/^\[/ s|^environment=.*|environment=PAAS_ENV_FILE=\"$PWD/golive.env\",ALOOF_API_URL=\"http://localhost:8000\",MCP_PUBLIC_URL=\"$MCP_PUBLIC_URL\",PAAS_BRAND=\"$PAAS_BRAND\",HOME=\"/home/box\"|" supervisord.conf
 sed -i "/^\[program:caddy\]/,/^\[/ { s|--config [^ ]*|--config $LIVE_ABS|; s|^environment=.*|environment=XDG_DATA_HOME=\"/var/lib/aloof/caddy\",XDG_CONFIG_HOME=\"/var/lib/aloof/caddy\"| }" supervisord.conf
 sudo mkdir -p /var/lib/aloof/caddy
@@ -30,5 +31,6 @@ if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then
 fi
 sudo supervisorctl -c supervisord.conf reread && sudo supervisorctl -c supervisord.conf update
 # zero-downtime: restart only the app processes, never caddy; caddy picks up config via graceful reload
-sudo supervisorctl -c supervisord.conf restart paas mcp
+sudo supervisorctl -c supervisord.conf restart mcp
+sudo ../deploy/deploy.sh --restart-only   # rolling: paas then paas-b, each waits for /healthz
 sudo supervisorctl -c supervisord.conf status caddy | grep -q RUNNING && /usr/local/bin/caddy reload --config "$LIVE_ABS" --adapter caddyfile --address localhost:2019 || sudo supervisorctl -c supervisord.conf start caddy
