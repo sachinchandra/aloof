@@ -243,7 +243,7 @@ a.logo i{width:28px;height:28px;flex:none}
 .pp-how{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:16px}.pp-how>div{border:1px solid var(--line);border-radius:14px;padding:20px;background:var(--panel)}.pp-how p{margin:6px 0 0;color:var(--fg2);font-size:14px}
 .pp-faq{max-width:820px}
 .pp-end{text-align:center;margin-top:88px;padding:48px 20px;border:1px solid var(--line);border-radius:18px;background:var(--panel)}.pp-end h2{margin:0 0 8px;font-size:28px;letter-spacing:-.025em}.pp-end p{margin:0 0 22px}
-.pp-card{position:relative}.pp-pop{position:absolute;top:-11px;left:28px;background:var(--acc);color:#fff;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:99px;letter-spacing:.02em}
+.pp-card{position:relative}.pp-pop{position:absolute;top:-11px;left:28px;background:var(--acc);color:var(--on-acc);font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:99px;letter-spacing:.02em}
 .pp-sub2{max-width:640px;margin:12px auto 0;font-size:14.5px}.pp-hero .lead{max-width:720px}
 .pp-also{display:grid;grid-template-columns:2fr 1fr 2fr;gap:16px;margin-top:24px}.pp-also>div{border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:var(--panel)}.pp-also p{margin:6px 0 0;color:var(--fg2);font-size:14px}
 .pp-ex td:last-child{white-space:nowrap}
@@ -336,7 +336,7 @@ html[data-theme=light] .hero.v5{background:radial-gradient(900px 520px at 15% 10
 .hv[data-step="6"] .hv-bars i,.hv[data-step="7"] .hv-bars i,.hv[data-step="8"] .hv-bars i,.hv[data-step="9"] .hv-bars i{height:18%;background:#2f7a5a}
 .v5-split{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center}
 .chat{background:var(--bg2,var(--card));border:1px solid var(--line2);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:12px}
-.msg{max-width:84%;padding:11px 15px;border-radius:14px;font-size:15px}.msg.you{align-self:flex-end;background:var(--acc);color:#fff}.msg.ai{background:color-mix(in srgb,var(--fg) 7%,transparent)}
+.msg{max-width:84%;padding:11px 15px;border-radius:14px;font-size:15px}.msg.you{align-self:flex-end;background:var(--acc);color:var(--on-acc)}.msg.ai{background:color-mix(in srgb,var(--fg) 7%,transparent)}
 .tool{display:inline-flex;gap:8px;align-items:center;font:12px var(--mono);color:var(--fg2)}.tool svg{width:14px;height:14px}.tool span{opacity:.7}
 .chips{display:flex;gap:8px}.chips span{font-size:13px;border:1px solid var(--line2);border-radius:99px;padding:5px 12px;color:var(--fg2)}
 .flow{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;counter-reset:x}
@@ -392,6 +392,7 @@ a:focus-visible,.btn:focus-visible,summary:focus-visible{outline:2px solid var(-
  input,select,textarea{font-size:16px;min-height:42px}
  input[type=checkbox],input[type=radio]{min-height:0}
  .content a.mut,.pnl p a,.pnl .muted a{padding:4px 0;display:inline-block}
+.muted.c a,.soonline a{text-decoration:underline;text-underline-offset:3px}
  summary.btn{min-height:42px}
 }
 

@@ -31,7 +31,14 @@ b.onclick=function(){var t=p.cloneNode(true);t.querySelectorAll('.copy').forEach
 var io=window.IntersectionObserver&&new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.12});
 document.querySelectorAll('.reveal').forEach(function(el){io?io.observe(el):el.classList.add('in')});</script>"""
 SITE = os.environ.get("PAAS_PUBLIC_WWW", "https://www.aloof.si").rstrip("/")
-CUR = {"path": "/", "og": "default", "type": "website"}
+import threading as _th
+class _Cur(_th.local):
+    """Per-request page context. Thread-local so concurrent renders can't swap each other's canonical/og:url."""
+    def __init__(self): self.d = {"path": "/", "og": "default", "type": "website"}
+    def __getitem__(self, k): return self.d[k]
+    def get(self, k, default=None): return self.d.get(k, default)
+    def update(self, **kw): self.d.update(kw)
+CUR = _Cur()
 def head(title, desc):
     t, d = html.escape(title), html.escape(desc); u = SITE + CUR["path"]; og = f"{SITE}/static/og/{CUR['og']}.png"
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -39,7 +46,7 @@ def head(title, desc):
 <meta property="og:type" content="{CUR['type']}"><meta property="og:site_name" content="Aloof"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{u}"><meta property="og:image" content="{og}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{og}">
 <link rel=alternate type="application/rss+xml" title="Aloof blog" href="/rss.xml">
-<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=23">{THEME_JS}</head>"""
+<link rel=icon href="/favicon.ico?v=3" sizes="32x32"><link rel=icon href="/icon.svg?v=3" type="image/svg+xml"><link rel=icon type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3"><link rel=icon type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3"><link rel=apple-touch-icon href="/apple-touch-icon.png?v=3"><link rel=manifest href="/site.webmanifest?v=3"><link rel=stylesheet href="/static/aloof.css?v=24">{THEME_JS}</head>"""
 def nav(brand):
     return f"""<a class=skip href="#main">Skip to content</a><header class=top><div class=wrap><a class=logo href="/" aria-label="{brand} home"><i></i>{brand}</a>
 <nav class=navlinks id=nl aria-label=Primary><a href="/#features">Product</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/guides">Guides</a><a href="/blog">Blog</a></nav>
@@ -286,10 +293,10 @@ def pricing(brand):
 <div class=pp-grid>{cards}</div>
 <p class="muted pp-note">Need committed capacity, dedicated nodes or invoicing? <a href="mailto:sales@aloof.si"><b>Enterprise: contact us</b></a>.</p>
 <h2 class=pp-h id=examples>What will I pay?</h2><p class=pp-sub>Real setups, priced always-on for a 30-day month.</p>
-<div class=scroll><table class="tbl pp-tbl pp-ex"><tr><th>You run</th><th class=num>Monthly usage</th><th class=num>You pay</th></tr>{exh}</table></div>
+<div class=scroll tabindex=0 role=region aria-label="Example monthly bills"><table class="tbl pp-tbl pp-ex"><tr><th>You run</th><th class=num>Monthly usage</th><th class=num>You pay</th></tr>{exh}</table></div>
 <p class="muted pp-d" style="margin-top:12px">Apps that scale to zero cost nothing while asleep; you pay only for the seconds they run. Volumes are still billed while an app sleeps.</p>
 <h2 class=pp-h id=compute>Instance prices</h2><p class=pp-sub>Billed per second, from included usage first, then prepaid credit. The monthly price assumes the instance runs all 30 days.</p>
-<div class=scroll><table class="tbl pp-tbl">{head}{rows("shared", "shared")}{rows("performance", "dedicated")}</table></div>
+<div class=scroll tabindex=0 role=region aria-label="Compute prices"><table class="tbl pp-tbl">{head}{rows("shared", "shared")}{rows("performance", "dedicated")}</table></div>
 <p class="muted pp-d" style="margin-top:12px">Shared CPUs are burstable with a guaranteed 1/8-core baseline. Performance CPUs give you a full reserved vCPU.</p>
 <div class=pp-also>
 <div><b>Also billed</b><p>Volumes ${R['volume_usd_gb_month']:.2f}/GB-month · egress ${R['egress_usd_gb']:.2f}/GB · backups and snapshots ${R['backup_usd_gb_month']:.2f}/GB-month · extra RAM ${R['extra_ram_usd_gb_month']:.2f}/GB-month</p></div>
