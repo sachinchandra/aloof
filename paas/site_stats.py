@@ -99,10 +99,28 @@ def report(frm=None, to=None, top=20):
                             "null": "not measured (before collecting_since); 0 means measured and zero."}}
 def _admin(request: Request):
     from .www import require_admin; return require_admin(request)
+RANGES = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
+
+def ux_shape(r, rng=None):
+    """Fields matching the admin UI adapter (902baa2). Totals null when status == no_data."""
+    ok = r["status"] == "ok"
+    add = lambda a, b: None if a is None or b is None else a + b
+    tc = sorted([{"label": c["cta"], "kind": "cta", "clicks": c["clicks"]} for c in r["ctas"]] +
+                [{"label": o["host"], "kind": "outbound", "clicks": o["clicks"]} for o in r["outbound"]], key=lambda x: (-x["clicks"], x["label"]))
+    r.update({"range_key": rng, "visitors": r["totals"]["visitor_days"] if ok else None,
+              "clicks": add(r["totals"]["cta_clicks"], r["totals"]["outbound_clicks"]) if ok else None,
+              "series": [{"day": d["date"], "visitors": d["visitors"], "clicks": add(d["cta_clicks"], d["outbound_clicks"])} for d in r["daily"]],
+              "top_clicks": tc[:20], "generated": r["generated_at"]})
+    return r
+
 @R.get("/v1/admin/site-analytics")
-def admin_site_analytics(request: Request, frm: str = None, to: str = None, top: int = 20, _=Depends(_admin)):
+def admin_site_analytics(request: Request, frm: str = None, to: str = None, top: int = 20, range: str = None, _=Depends(_admin)):
     frm = request.query_params.get("from") or frm
-    try: return report(frm, to, max(1, min(int(top), 100)))
+    if range is not None:
+        if range not in RANGES: raise HTTPException(400, "range must be one of 1d, 7d, 30d, 90d")
+        today = _dt.datetime.now(_dt.timezone.utc).date()
+        to = today.isoformat(); frm = (today - _dt.timedelta(days=RANGES[range] - 1)).isoformat()
+    try: return ux_shape(report(frm, to, max(1, min(int(top), 100))), range)
     except HTTPException: raise
     except Exception as e:   # unavailable is never shown as zero
         import logging; logging.getLogger("paas.site_stats").warning("site analytics failed: %s", type(e).__name__)

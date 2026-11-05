@@ -62,3 +62,9 @@ def test_zero_vs_no_data():
     r = S.report("2026-01-08", "2026-01-12")
     assert r["status"] == "ok" and [d["pageviews"] for d in r["daily"]] == [None, None, 5, 0, 0] and r["totals"]["pageviews"] == 5
     assert S.report("2025-12-01", "2025-12-05")["status"] == "no_data"
+
+def test_ux_shape():
+    q("insert into site_counts(day, kind, key, n) values('2026-01-10','cta','signup',2),('2026-01-10','out','github.com',3)")
+    r = S.ux_shape(S.report("2026-01-10", "2026-01-11"), None)
+    assert r["clicks"] == 5 and r["series"] == [{"day": "2026-01-10", "visitors": 0, "clicks": 5}, {"day": "2026-01-11", "visitors": 0, "clicks": 0}]
+    assert r["top_clicks"][0] == {"label": "github.com", "kind": "outbound", "clicks": 3} and isinstance(r["generated"], int)
