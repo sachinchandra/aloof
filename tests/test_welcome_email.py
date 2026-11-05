@@ -23,7 +23,7 @@ def test_flag_on_queues_at_signup_then_tick_sends_template(monkeypatch):
     a = _mk("on"); assert _row(a["id"])["status"] == "queued" and SENT == []   # signup only queues
     assert welcome.tick() == 1 and _row(a["id"])["status"] == "sent"
     to, subj, body, h = SENT[0]
-    assert to == a["email"] and subj == "Welcome to Aloof" and "/dashboard" in body and "unsubscribe" in body and "{" not in body and "# Marketing" not in body
+    assert to == a["email"] and subj == "Welcome to Aloof - your first deploy" and "/dashboard" in body and "unsubscribe" in body and "{" not in body and "# Marketing" not in body
     assert "List-Unsubscribe" in h and a["api_key"] not in body
     assert welcome.tick() == 0 and len(SENT) == 1   # once only
 

@@ -59,7 +59,15 @@ https:// {
 	tls {
 		on_demand
 	}
-	reverse_proxy 127.0.0.1:8080 {
+	# both edge processes (A :8080, B :8090) so customer apps stay up while paas/paas-b roll (QA N5-1)
+	reverse_proxy 127.0.0.1:8080 127.0.0.1:8090 {
+		lb_policy first
+		lb_try_duration 10s
+		lb_try_interval 250ms
+		health_uri /__aloof_edge_healthz
+		health_interval 2s
+		health_timeout 2s
+		fail_duration 3s
 		header_up X-Forwarded-Proto https
 	}
 }
@@ -67,7 +75,14 @@ https:// {
 # 301s known hosts (platform, *.domain, verified custom domains) to https and 404s unknown hosts (no reflected redirect).
 http:// {
 	rewrite * /v1/tls/http-redirect
-	reverse_proxy 127.0.0.1:8000 {
+	reverse_proxy 127.0.0.1:8000 127.0.0.1:8010 {
+		lb_policy first
+		lb_try_duration 10s
+		lb_try_interval 250ms
+		health_uri /healthz
+		health_interval 2s
+		health_timeout 2s
+		fail_duration 3s
 		header_up X-Aloof-Uri {http.request.orig_uri}
 		header_up -X-Forwarded-For
 	}

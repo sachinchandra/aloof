@@ -44,7 +44,8 @@ class LocalDockerDriver(Driver):
                 except docker.errors.ImageNotFound: raise RuntimeError(f"No such image {img} (built image was pruned; redeploy from source)")
             creds.pull(app, img, log); return img
         tag = f"paas/{app}:r{int(time.time()*1000)}"   # unique per build so releases can roll back
-        work = tempfile.mkdtemp(prefix="aloof-build-")
+        from ..engine import OWNER
+        work = tempfile.mkdtemp(prefix=f"aloof-build-{OWNER}-")   # owner-stamped: only this process cleans it up (N5-2)
         try:
             if source.get("git"): creds.clone(app, source, work, log)
             elif source.get("upload"): creds.extract_upload(app, source["upload"], work); log("extracted uploaded build context")

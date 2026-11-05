@@ -36,7 +36,15 @@ https:// {
 	tls internal {
 		on_demand
 	}
-	reverse_proxy 127.0.0.1:8080 {
+	# 8090 = paas-b when running; unhealthy upstreams are skipped
+	reverse_proxy 127.0.0.1:8080 127.0.0.1:8090 {
+		lb_policy first
+		lb_try_duration 10s
+		lb_try_interval 250ms
+		health_uri /__aloof_edge_healthz
+		health_interval 2s
+		health_timeout 2s
+		fail_duration 3s
 		header_up X-Forwarded-Proto https
 	}
 }

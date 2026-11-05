@@ -193,6 +193,12 @@ create index if not exists promo_redemptions_card on promo_redemptions(card_fing
 create index if not exists promo_redemptions_acct on promo_redemptions(account_id);
 alter table accounts add column if not exists past_due_since REAL;
 """)
+    ,(24, """
+alter table releases add column if not exists owner TEXT;
+alter table apps add column if not exists build_owner TEXT;
+create table if not exists login_hits(k TEXT not null, ts REAL not null);
+create index if not exists login_hits_k on login_hits(k, ts);
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

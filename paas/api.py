@@ -1,4 +1,4 @@
-import os, json, itertools, httpx, time, asyncio, socket, logging, weakref
+import os, json, itertools, httpx, time, asyncio, socket, logging, weakref, hashlib, secrets
 from fastapi import FastAPI, Header, HTTPException, Request, Depends, Cookie, WebSocket, BackgroundTasks
 log = logging.getLogger("paas.api")
 from fastapi.responses import PlainTextResponse, HTMLResponse, FileResponse, StreamingResponse, Response, RedirectResponse, JSONResponse
@@ -638,14 +638,33 @@ def auth_register(c: RegisterReq):
     _save_attribution(a["id"], c.attribution)
     analytics.capture(a["id"], "signup_completed", {"method": "password"} | analytics.attribution(c))
     return _login_response(a, {"ok": True, "email": a["email"], "api_key": a["api_key"]})
-# Soft login rate limit (in-memory, per process): LOGIN_LIMIT attempts per LOGIN_WINDOW s per client IP and per email -> 429 + Retry-After.
+# Soft login rate limit: LOGIN_LIMIT attempts per LOGIN_WINDOW s per client IP and per email -> 429 + Retry-After.
+# Stored in the DB (login_hits; keys sha256-hashed, no raw emails/IPs) so it survives restarts/rolls and is shared by paas and
+# paas-b (QA N5-3). Falls back to a per-process dict if the DB write fails.
 LOGIN_LIMIT = int(os.environ.get("PAAS_LOGIN_LIMIT", "10")); LOGIN_WINDOW = 60.0
 from .netaddr import client_ip, rate_key
-_login_hits = {}
+class _Hits(dict):
+    def clear(self):
+        super().clear()
+        try: q("delete from login_hits")
+        except Exception: pass
+_login_hits = _Hits()   # in-memory fallback; .clear() also resets the DB table (tests)
 def _ipk(request): return rate_key(client_ip(request))   # IPv6 bucketed per /64 so rotating addresses inside one allocation share a limit
+def _hk(k): return hashlib.sha256(("aloof-login:" + k).encode()).hexdigest()[:32]
 def _rate_check(keys, now=None):
     now = now or time.time(); retry = 0
-    if len(_login_hits) > 50000: _login_hits.clear()   # memory bound; worst case resets the window
+    try:
+        hk = [_hk(k) for k in keys]
+        for k in hk:
+            r = q("select count(*) n, min(ts) t from login_hits where k=? and ts>?", (k, now - LOGIN_WINDOW), one=True)
+            if r and r["n"] >= LOGIN_LIMIT: retry = max(retry, int(LOGIN_WINDOW - (now - r["t"])) + 1)
+        if retry: raise HTTPException(429, "too many login attempts; try again later", headers={"Retry-After": str(retry)})
+        for k in hk: q("insert into login_hits(k, ts) values(?, ?)", (k, now))
+        if secrets.randbelow(50) == 0: q("delete from login_hits where ts<?", (now - 10 * LOGIN_WINDOW,))
+        return
+    except HTTPException: raise
+    except Exception as e: log.warning("login rate limit DB unavailable, using memory: %s", type(e).__name__)
+    if len(_login_hits) > 50000: dict.clear(_login_hits)
     for k in keys:
         h = [t for t in _login_hits.get(k, []) if now - t < LOGIN_WINDOW]; _login_hits[k] = h
         if len(h) >= LOGIN_LIMIT: retry = max(retry, int(LOGIN_WINDOW - (now - h[0])) + 1)
@@ -1346,6 +1365,8 @@ def _sh_record(name, status, t0, request=None, path="/"):
         ip = client_ip(request) if request else None
         selfheal.record(name, status, (time.monotonic() - t0) * 1000, ip, path)   # time to response headers
     except Exception: pass
+@proxy.get("/__aloof_edge_healthz", include_in_schema=False)
+def edge_healthz(): return PlainTextResponse("ok")   # Caddy active health check for the edge upstreams (:8080 A, :8090 B)
 @proxy.api_route("/{path:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS","HEAD"])
 async def edge(path: str, request: Request):
     host = request.headers.get("host","").split(":")[0].lower(); name, path = resolve_app(host, path)

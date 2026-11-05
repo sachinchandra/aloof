@@ -5,6 +5,11 @@ from .drivers import get_drivers
 from .plans import PLANS
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 _locks = {}
+import os as _os
+# Which app process this is (rolling deploys run paas :8000 and paas-b :8010). Builds/releases/build dirs are stamped with it so
+# each process recovers only its own interrupted work at startup (QA N5-2).
+OWNER = _os.environ.get("PAAS_INSTANCE") or f"api{_os.environ.get('PAAS_API_PORT', '8000')}"
+def primary(): return _os.environ.get("PAAS_BACKGROUND", "1") == "1"
 def _lock(app): return _locks.setdefault(app, threading.Lock())
 USERINFO_IMG = re.compile(r"^(?:[a-z][a-z0-9+.\-]*://)?[^/@\s]+:[^/\s]*@(?!sha256:[0-9a-f]{64}$)|^(?:[a-z][a-z0-9+.\-]*://)?[^/@\s]+@[^/\s]+/")   # user:token@host/..., user@host/...; not name@sha256:digest
 def validate(spec):
@@ -145,6 +150,9 @@ def apply_tier_limits(account_id, spec, redeploy=False):
         a = spec.get("autoscale") or {}
         spec["autoscale"] = {"min": 0, "max": min(int(a.get("max") or 1), t["max_instances"]), "target_concurrency": a.get("target_concurrency") or 10,
                              "cpu_percent": a.get("cpu_percent"), "idle_seconds": min(int(a.get("idle_seconds") or t["idle_seconds"]), t["idle_seconds"])}
+        want = max(int(spec["instances"] or 0), int(a.get("max") or 0))
+        if want > t["max_instances"] and spec.get("name"):   # say so instead of clamping silently (QA N5 info)
+            event(spec["name"], f"WARNING: the {k} tier allows {t['max_instances']} instance(s); requested {want}, running at most {t['max_instances']}. Upgrade to hobby for more.")
         spec["instances"] = min(spec["instances"], t["max_instances"])
     return spec
 def _check_platform_image(account_id, spec):
@@ -226,7 +234,7 @@ def deploy(account_id, spec):
     q("insert into apps(name,account_id,spec,status,provider,created,updated,error) values(?,?,?,?,?,?,?,null) "
       "on conflict(name) do update set account_id=excluded.account_id, spec=excluded.spec, status=excluded.status, provider=excluded.provider, updated=excluded.updated, error=null",
       (name, account_id, dump_spec(spec), "queued", prov, ex["created"] if ex else now, now))
-    q("update apps set region=? where name=?", (spec["region"], name))
+    q("update apps set region=?, build_owner=? where name=?", (spec["region"], OWNER, name))
     event(name, f"deploy queued on {prov} plan={spec['plan']} instances={spec['instances']}")
     threading.Thread(target=_run_deploy, args=(name,), daemon=True).start()
     return get_app(name)
@@ -234,8 +242,8 @@ def deploy(account_id, spec):
 RELEASE_KEEP = 20
 def _new_release(name, spec, reason):
     v = (q("select max(version) v from releases where app=?", (name,), one=True) or {}).get("v") or 0
-    q("insert into releases(app,version,image,spec,status,reason,created) values(?,?,?,?,?,?,?)",
-      (name, v + 1, spec.get("_image"), dump_spec(spec), "deploying", reason, time.time()))
+    q("insert into releases(app,version,image,spec,status,reason,created,owner) values(?,?,?,?,?,?,?,?)",
+      (name, v + 1, spec.get("_image"), dump_spec(spec), "deploying", reason, time.time(), OWNER))
     return v + 1
 def _set_release(name, version, status, image=None, spec=None):
     if status == "active": q("update releases set status='superseded' where app=? and status='active'", (name,))
@@ -269,7 +277,7 @@ def rollback(name, version=None, reason=None, only_if_latest=None):
         for x in json.loads(db["attached"] or "[]"):
             if x["app"] == name and x["var"] in now_spec.get("env", {}): spec["env"][x["var"]] = now_spec["env"][x["var"]]
     spec["_image"] = r["image"]
-    q("update apps set spec=?, status='queued', updated=?, error=null where name=?", (dump_spec(spec), time.time(), name))
+    q("update apps set spec=?, status='queued', updated=?, error=null, build_owner=? where name=?", (dump_spec(spec), time.time(), OWNER, name))
     event(name, f"rollback to v{r['version']} queued")
     threading.Thread(target=_run_deploy, args=(name, r["image"], reason or f"rollback to v{r['version']}", only_if_latest), daemon=True).start()
     return get_app(name)
@@ -455,6 +463,10 @@ def scale(name, n, reason="manual"):
         app = q("select * from apps where name=?", (name,), one=True); spec = load_spec(app["spec"])
         if app["status"] in ("destroyed","failed","building","queued") or not spec.get("_image"): return get_app(name)
         if app["status"] == "past_due" and n: raise PastDue(PAST_DUE_APP)   # only billing.resume_past_due restarts it
+        if app["status"] == "past_due":   # manual scale to 0 while paused: remember it, so resume honours it (N5-4)
+            spec["_resume_instances"] = 0; spec["_resume_set"] = True
+            q("update apps set spec=?, updated=? where name=?", (dump_spec(spec), time.time(), name))
+            event(name, f"scaled to 0 while paused ({reason}); stays stopped when the payment clears"); return get_app(name)
         if n and reason == "manual" and past_due_limited(app["account_id"]): raise PastDue(PAST_DUE_ACCT)
         a = spec.get("autoscale"); n = max(0, min(int(n), 10))
         if a and reason == "manual": a["min"] = min(a["min"], n); a["max"] = max(a["max"], n)
@@ -615,9 +627,11 @@ def recover_interrupted(build_tmp=None):
     starting are marked failed, and leftover build dirs are removed. An app whose previous release is still serving stays running."""
     import glob, os, tempfile, shutil as _sh
     n = 0
-    for ap in q("select name, status from apps where status in ('queued','building','starting')"):
+    # mine = stamped with this process; unstamped (pre-N5-2) work belongs to the primary (PAAS_BACKGROUND=1) only
+    mine = lambda o: o == OWNER or (not o and primary())
+    for ap in q("select name, status, build_owner from apps where status in ('queued','building','starting')"):
         name = ap["name"]
-        if deploy_running(name): continue
+        if deploy_running(name) or not mine(ap.get("build_owner")): continue
         rel = q("select version from releases where app=? and status='deploying' order by version desc", (name,), one=True)
         if rel:
             _set_release(name, rel["version"], "failed")
@@ -629,9 +643,11 @@ def recover_interrupted(build_tmp=None):
             q("update apps set spec=?, status='running', error=? where name=?", (prev["spec"], f"{v}{INTERRUPTED}; still serving v{prev['version']}", name))
         else: q("update apps set status='failed', error=? where name=?", (f"{v}{INTERRUPTED}".strip(), name))
         event(name, f"ERROR: {v}{INTERRUPTED}"); n += 1
-    q("update releases set status='failed', error=coalesce(error, ?) where status='deploying'", (INTERRUPTED,))
+    q("update releases set status='failed', error=coalesce(error, ?) where status='deploying' and (owner=?" + (" or owner is null)" if primary() else ")"), (INTERRUPTED, OWNER))
     for d in glob.glob(os.path.join(build_tmp or tempfile.gettempdir(), "aloof-build-*")):
-        _sh.rmtree(d, ignore_errors=True)
+        b = os.path.basename(d)
+        if b.startswith(f"aloof-build-{OWNER}-") or (primary() and not re.match(r"aloof-build-[a-z0-9]+-", b)):   # own dirs; legacy unstamped -> primary
+            _sh.rmtree(d, ignore_errors=True)
     return n
 def destroy_app(name, with_volumes=False):
     """User-facing delete: destroy the app, then remove what its template created (volumes, Postgres). Volumes the user

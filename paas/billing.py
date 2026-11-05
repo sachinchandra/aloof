@@ -120,8 +120,9 @@ def resume_past_due(acct, why="payment received"):
     from . import engine
     out = []
     for app in q("select name, spec from apps where account_id=? and status='past_due'", (acct,)):
-        sp = load_spec(app["spec"]); n = int(sp.pop("_resume_instances", 0) or 0); a = sp.get("autoscale")
-        if a: n = max(int(a.get("min") or 0), min(n, int(a.get("max") or n)))
+        sp = load_spec(app["spec"]); n = int(sp.pop("_resume_instances", 0) or 0); a = sp.get("autoscale"); chosen = sp.pop("_resume_set", False)
+        if chosen: sp["instances"] = n   # the customer scaled while paused: honour it exactly (N5-4)
+        elif a: n = max(int(a.get("min") or 0), min(n, int(a.get("max") or n)))
         elif n < 1: n = 1
         q("update apps set status=?, spec=?, updated=? where name=?", ("idle" if a else "stopped", dump_spec(sp), time.time(), app["name"]))
         event(app["name"], f"resumed ({why})")
