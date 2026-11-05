@@ -1,19 +1,21 @@
-Subject: Welcome to Aloof
-# Marketing: edit freely. Lines starting with # are ignored. The first line must be "Subject: ...".
-# Placeholders: {dashboard_url} {docs_url} {unsubscribe_url}. Plain text only; no HTML.
-
+Subject: Welcome to Aloof - your first deploy
+# Welcome email for new sign-ups. Plain text. Draft by Marketing; needs sachin's OK before PAAS_WELCOME_EMAIL=1.
+# Placeholders: {dashboard_url}, {docs_url}, {unsubscribe_url}
 Hi,
 
-Thanks for signing up for Aloof.
+Thanks for signing up for Aloof. I'm Sachin, and I build it.
 
-[PLACEHOLDER: welcome copy from Marketing goes here.]
+Aloof runs your backends, workers and Postgres in Nuremberg (EU), billed per second in US dollars. You can deploy from the dashboard, the CLI, or let an AI agent do it over MCP.
 
-Open your dashboard: {dashboard_url}
-Read the docs: {docs_url}
+Get your first app running:
+1. Open your dashboard: {dashboard_url}
+2. Follow the quickstart: {docs_url}
 
-Questions? Just reply to this email.
+Want to try Hobby? Enter FIRST1 in the promotion code field at checkout for your first month free (first-time customers only).
 
-The Aloof team
+If anything breaks or confuses you, just reply to this email. It comes straight to me.
 
---
-You're getting this because you signed up for Aloof. Unsubscribe: {unsubscribe_url}
+Sachin
+Aloof - www.aloof.si
+
+Don't want these emails? Unsubscribe: {unsubscribe_url}
