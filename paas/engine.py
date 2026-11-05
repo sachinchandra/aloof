@@ -738,7 +738,9 @@ def create_account(email, password_hash=None, verified=False):
     key = new_api_key()
     q("insert into accounts(email,api_key_hash,api_key_prefix,password_hash,email_verified,created,is_test) values(?,?,?,?,?,?,?)",
       (email.lower(), sha256(key), key[:10], password_hash, int(verified), time.time(), int(is_test_email(email, verified))))
-    a = q("select * from accounts where email=?", (email.lower(),), one=True); a["api_key"] = key; return a
+    a = q("select * from accounts where email=?", (email.lower(),), one=True); a["api_key"] = key
+    from . import welcome; welcome.queue(a["id"])   # every signup method; no-op unless PAAS_WELCOME_EMAIL=1; sent by the paas process only
+    return a
 def rotate_api_key(account_id):
     key = new_api_key(); q("update accounts set api_key_hash=?, api_key_prefix=? where id=?", (sha256(key), key[:10], account_id))
     from . import ws_registry; ws_registry.revalidate(account_id, "API key rotated"); return key

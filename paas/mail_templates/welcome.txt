@@ -1,0 +1,19 @@
+Subject: Welcome to Aloof
+# Marketing: edit freely. Lines starting with # are ignored. The first line must be "Subject: ...".
+# Placeholders: {dashboard_url} {docs_url} {unsubscribe_url}. Plain text only; no HTML.
+
+Hi,
+
+Thanks for signing up for Aloof.
+
+[PLACEHOLDER: welcome copy from Marketing goes here.]
+
+Open your dashboard: {dashboard_url}
+Read the docs: {docs_url}
+
+Questions? Just reply to this email.
+
+The Aloof team
+
+--
+You're getting this because you signed up for Aloof. Unsubscribe: {unsubscribe_url}

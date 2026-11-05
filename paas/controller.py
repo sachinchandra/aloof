@@ -92,6 +92,8 @@ def start():
     threading.Thread(target=_loop, args=(_wl.retry_unsent, 300), daemon=True).start()
     from . import lifecycle as _lc
     threading.Thread(target=_loop, args=(_lc.tick, 600), daemon=True).start()   # no-op unless LIFECYCLE_EMAILS_ENABLED=1
+    from . import welcome as _wel
+    threading.Thread(target=_loop, args=(_wel.tick, 60), daemon=True).start()   # no-op unless PAAS_WELCOME_EMAIL=1 (paas process only)
     from . import www as _www
     threading.Thread(target=_loop, args=(_www.snapshot, 1800), daemon=True).start()
     from . import domains as _doms
