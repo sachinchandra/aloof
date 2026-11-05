@@ -116,7 +116,7 @@ def _rules(app, spec, ev, insts, errors, rel, now):
         out.append(_c("Paused: the latest plan payment failed", "high", "app status past_due",
                       "Update the card in Dashboard → Billing → Manage billing; apps restart automatically once the payment retry succeeds."))
     if st == "capped" and "your plan payment failed" in text:
-        out.append(_c("Paused: your plan payment failed", "high", "app status capped after a failed payment", "Update your card in Billing to bring apps back."))
+        out.append(_c("Paused: your plan payment failed", "high", "app status capped after a failed payment", "Update your card in Billing → Manage billing to bring apps back."))
     elif st == "capped":
         out.append(_c("Paused: Free tier monthly usage cap reached", "high", "app status capped", "Upgrade to Hobby (PUT /v1/billing/tier) or wait for the next month."))
     oom = [i for i in insts if i.get("oom_killed") or i.get("exit_code") == 137] or ("137" in text and "exit" in text) or re.search(r"(?i)out of memory|oomkilled|killed process", errtext)

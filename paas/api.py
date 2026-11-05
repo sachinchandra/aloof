@@ -1222,7 +1222,7 @@ async def app_console(ws: WebSocket, name: str, instance: str|None=None):
     if ap["status"] in ("suspended", "capped", "past_due"):
         if ap["status"] == "capped" and billing.is_past_due(ap["account_id"]): await ws.close(code=4409, reason=billing.PAST_DUE_PAUSE); return
         await ws.close(code=4409, reason="app is " + {"suspended": "suspended (balance at $0): top up to resume", "capped": "paused at the Free plan's monthly cap",
-                                                       "past_due": "paused: the latest plan payment failed; update your card to resume"}[ap["status"]]); return
+                                                       "past_due": "paused: the latest plan payment failed; update your card in Billing → Manage billing to resume"}[ap["status"]]); return
     sel = lambda: q("select * from instances where app=? and status='running'" + (" and id=?" if instance else "") + " order by started", (name, *([instance] if instance else [])), one=True)
     i = sel()
     if not i and not instance and ap["status"] in ("running", "idle"):   # scaled to zero: wake it like an incoming request would

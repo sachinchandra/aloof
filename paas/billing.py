@@ -90,7 +90,7 @@ def meter_tick(now=None):
                 q("update apps set status='suspended' where name=?", (app["name"],)); event(app["name"], "suspended: prepaid balance exhausted; top up to resume")
     try: check_low_balance(now)
     except Exception as e: log.warning("low-balance check: %s", e)
-PAST_DUE_PAUSE = "Paused: your plan payment failed. Update your card in Billing to bring apps back."
+PAST_DUE_PAUSE = "Paused: your plan payment failed. Update your card in Billing → Manage billing to bring apps back."
 def is_past_due(acct):
     a = q("select past_due_since from accounts where id=?", (acct,), one=True)
     return bool(a and a.get("past_due_since"))
