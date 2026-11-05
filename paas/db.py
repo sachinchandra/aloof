@@ -199,6 +199,11 @@ alter table apps add column if not exists build_owner TEXT;
 create table if not exists login_hits(k TEXT not null, ts REAL not null);
 create index if not exists login_hits_k on login_hits(k, ts);
 """)
+    ,(25, """
+create table if not exists site_salt(day TEXT primary key, salt TEXT not null);
+create table if not exists site_visitors(day TEXT not null, vh TEXT not null, primary key(day, vh));
+create table if not exists site_counts(day TEXT not null, kind TEXT not null, key TEXT not null, n bigint not null default 0, primary key(day, kind, key));
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")

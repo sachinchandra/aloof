@@ -78,7 +78,7 @@ def posthog_host(): return (os.environ.get("POSTHOG_HOST") or POSTHOG_DEFAULT_HO
 def analytics_tag():
     """Empty string (load nothing) unless a PostHog project key is configured."""
     k = posthog_key()
-    return f'<script>window.ALOOF_PH={json.dumps({"key": k, "host": posthog_host(), "hosts": analytics_hosts()})}</script><script src="/static/analytics.js?v=9" defer></script>' if k else ""
+    return f'<script>window.ALOOF_PH={json.dumps({"key": k, "host": posthog_host(), "hosts": analytics_hosts()})}</script><script src="/static/analytics.js?v=10" defer></script>' if k else ""
 def analytics_hosts():
     """Only platform hosts load analytics (never <app>.<domain> user apps): base, www and api for the base + alt domains."""
     ds = [d.strip() for d in (os.environ.get("PAAS_BASE_DOMAIN", "aloof.si") + "," + os.environ.get("PAAS_ALT_DOMAINS", "")).split(",") if d.strip()]
@@ -723,7 +723,7 @@ LEGAL = {
 <p>Your application code and images, environment variables, application logs (stdout/stderr), databases, volumes, snapshots and backups, and anything your end users send to your apps ("Customer Data"). We process Customer Data only to provide the Service to you. We don't look at it, analyse it, or use it for our own purposes, except where needed to keep the Service running, to fix a problem you ask us to help with, to enforce our Terms, or where the law requires it.</p>
 
 <h2 id="analytics">3. Analytics</h2>
-<p>On this website, the docs and the dashboard we use PostHog Cloud US (PostHog Inc., data stored in the United States) to count page views and clicks on sign-up buttons, and to see which campaign or referring site brought you here (UTM parameters and referrer). It runs without cookies: no identifier is stored on your device beyond the current browser tab, so no consent banner is shown. When you're logged in, events are linked to your account id so we can understand how the product is used. We don't send your email, app data or logs to PostHog.</p>
+<p>On this website, the docs and the dashboard we use PostHog Cloud US (PostHog Inc., data stored in the United States) to count page views and clicks on sign-up buttons, and to see which campaign or referring site brought you here (UTM parameters and referrer). It runs without cookies: no identifier is stored on your device beyond the current browser tab, so no consent banner is shown. When you're logged in, events are linked to your account id so we can understand how the product is used. We don't send your email, app data or logs to PostHog.</p><p>We also keep our own aggregate counts of page views and sign-up button clicks per day. For unique daily visitors we store only a one-way hash of your IP range and browser, made with a key that changes every day and is then deleted, so it can't be traced back to you or linked across days. No IP addresses, cookies or account ids are stored for this.</p>
 <p>Our servers also send a small number of product events to PostHog US under the same account id (for example sign-up completed, first deploy, MCP client connected, plan upgraded, waitlist joined), with only the fields needed to count them, such as the plan, amount or MCP client name. When you sign up or log in we also mark whether the account is one of our internal test accounts, so we can filter those out.</p>
 
 <h2 id="purposes">4. Why we use your data and our legal bases</h2>

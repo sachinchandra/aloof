@@ -16,6 +16,9 @@ window.aloofAttribution=function(){var f=ft(),o={};Object.keys(f).forEach(functi
 window.aloofTrack=send;
 function once(){var f=ft(),o={};K.forEach(function(k){if(f['first_'+k])o['initial_'+k]=f['first_'+k]});if(f.first_referrer)o.initial_referrer=f.first_referrer;if(f.first_landing)o.initial_landing=f.first_landing;return o}
 window.aloofIdentify=function(id,email,isTest){if(!id)return;var prev=anon;uid=String(id);T=!!isTest;var st={is_test:T};send('$identify',{$anon_distinct_id:prev,$set:st,$set_once:once()})};
+/* first-party counts for the owner dashboard (paas/site_stats.py): path or CTA name only; no ids, no query, no cookies */
+function fp(k,c){try{var d=JSON.stringify({k:k,p:location.pathname.slice(0,120),c:c});if(navigator.sendBeacon)navigator.sendBeacon('/v1/site/hit',new Blob([d],{type:'application/json'}));else fetch('/v1/site/hit',{method:'POST',headers:{'Content-Type':'application/json'},body:d,keepalive:true})}catch(e){}}
+fp('pv');
 send('$pageview',Object.assign({},window.__aloof_utm,{referrer:document.referrer&&document.referrer.indexOf(location.origin)!==0?cu(document.referrer).slice(0,300):''}));
 function esc(v){return String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"')}
 function chain(el){var out=[],n=0;for(;el&&el.nodeType===1&&el.tagName!=='BODY'&&n<6;el=el.parentElement,n++){var t=el.tagName.toLowerCase(),c=(typeof el.className==='string'?el.className.trim().split(/\s+/).filter(Boolean).slice(0,5):[]),s=t+(c.length?'.'+c.join('.'):'');
@@ -25,5 +28,5 @@ document.addEventListener('click',function(e){var t=e.target;if(!t||!t.closest)r
  /* $autocapture: tag/classes/id/href (no query)/button text only; never input values */
  var tx=el.tagName==='A'||el.tagName==='BUTTON'?(el.innerText||'').trim().replace(/\s+/g,' ').slice(0,60):'';
  send('$autocapture',{$event_type:'click',$elements_chain:chain(el),$el_text:tx});
- var a=t.closest('[data-cta]');if(a)send('cta_clicked',{cta:a.dataset.cta,location:a.dataset.ctaLoc||location.pathname,href:(a.getAttribute('href')||'').split('?')[0].slice(0,200)});if(a&&a.dataset.cta==='subscribe_card'&&ft().first_promo)send('cta_clicked',{cta:ft().first_promo.toLowerCase()+'_claim',location:a.dataset.ctaLoc||location.pathname,promo:ft().first_promo})},true);
+ var a=t.closest('[data-cta]');if(a)fp('cta',String(a.dataset.cta).slice(0,40));var oa=t.closest('a[href]');if(oa&&oa.host&&oa.host!==location.host&&/^https?:$/.test(oa.protocol))fp('out',oa.hostname);if(a)send('cta_clicked',{cta:a.dataset.cta,location:a.dataset.ctaLoc||location.pathname,href:(a.getAttribute('href')||'').split('?')[0].slice(0,200)});if(a&&a.dataset.cta==='subscribe_card'&&ft().first_promo)send('cta_clicked',{cta:ft().first_promo.toLowerCase()+'_claim',location:a.dataset.ctaLoc||location.pathname,promo:ft().first_promo})},true);
 })();

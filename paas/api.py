@@ -1327,6 +1327,7 @@ def admin_backups_run(verify: bool=False):
     return r
 from . import devx
 app.include_router(devx.R)
+from . import site_stats as _sst; app.include_router(_sst.R)   # first-party visitors/clicks (before www.R catch-all)
 from . import www_changelog as _chl; app.include_router(_chl.R)   # before www.R: its catch-all serves the homepage
 app.include_router(www.R)
 from . import www_compare as _cmp; app.include_router(_cmp.R)
