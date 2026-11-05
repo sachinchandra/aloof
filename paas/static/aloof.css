@@ -392,7 +392,6 @@ a:focus-visible,.btn:focus-visible,summary:focus-visible{outline:2px solid var(-
  input,select,textarea{font-size:16px;min-height:42px}
  input[type=checkbox],input[type=radio]{min-height:0}
  .content a.mut,.pnl p a,.pnl .muted a{padding:4px 0;display:inline-block}
-.muted.c a,.soonline a{text-decoration:underline;text-underline-offset:3px}
  summary.btn{min-height:42px}
 }
 
@@ -400,3 +399,4 @@ a:focus-visible,.btn:focus-visible,summary:focus-visible{outline:2px solid var(-
 [aria-invalid=true]{border-color:var(--bad,#ef4444)!important}
 
 .fld>label{margin:12px 0 6px}.fld>input,.fld>select{width:100%}
+.muted.c a,.soonline a{text-decoration:underline;text-underline-offset:3px}
