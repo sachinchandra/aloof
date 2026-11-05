@@ -29,6 +29,8 @@ details.tacc summary{cursor:pointer;font-family:var(--mono);text-transform:upper
 dialog.acd{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(920px,calc(100% - 24px));max-height:90vh;overflow:auto}dialog.acd::backdrop{background:rgba(0,0,0,.6)}.acd .acts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.acd h3{font-size:13px;font-family:var(--mono);text-transform:uppercase;color:var(--fg2);margin:20px 0 8px}
 .acd dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:14px;margin:0}.acd dt{color:var(--fg3)}.linkish{background:none;border:0;padding:0;color:inherit;font:inherit;text-decoration:underline dotted;cursor:pointer;text-align:left}
 .fld{display:block;margin-top:10px;font-size:13px}.fld input{display:block;width:100%;margin-top:4px}
+.trf{margin-top:4px}.trf .rng{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}.trf .rng button{background:none;border:0;color:var(--fg2);font:inherit;font-size:13px;padding:6px 12px;cursor:pointer;min-height:34px}.trf .rng button[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 18%,transparent);color:var(--fg);font-weight:600}.trf .rng button:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+.trf .tk{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin:12px 0}.trf .tk .stat b{font-size:26px}.trf .defs{font-size:13px;color:var(--fg2);margin:6px 0 0}.trf .defs b{color:var(--fg)}.trf .ld b{display:block;width:60%;min-height:26px;color:transparent;background:linear-gradient(90deg,var(--panel2),var(--line),var(--panel2));background-size:200% 100%;animation:sk 1.2s linear infinite;border-radius:6px}@media(prefers-reduced-motion:reduce){.trf .ld b{animation:none}}
 </style></head><body>
 <header class=top><div class=wrap><a class=logo href="/"><i></i>Aloof</a><span class=tag>owner</span><span class=sp></span><a class="btn ghost sm" id=mfabtn href="/admin/2fa" title="Two-factor authentication">2FA</a><button class="btn ghost sm" id=themebtn onclick="toggleTheme();themeLbl()" aria-label="Switch theme">◐<span class=tl> Theme</span></button><a href="/admin/2fa">2FA</a><a href="/dashboard">Dashboard</a></div></header>
 <main class="wrap adm" id=main>
@@ -37,6 +39,9 @@ dialog.acd{background:var(--panel);color:var(--fg);border:1px solid var(--line);
 <div class=ah><div><h1>Owner dashboard</h1><p class=muted id=gen style="margin:4px 0 0">Loading…</p></div><span class=sp></span>
 <div class=exp><button class="btn sm" onclick="load()">Refresh</button><select id=ex aria-label="CSV table"><option>summary</option><option>users</option><option>top_users</option><option>signups</option><option>deploys</option><option>failed_deploys</option><option>design_partners</option><option>waitlist</option><option>audit</option></select><button class="btn pri sm" onclick="exportCsv()">Export CSV</button><button class="btn ghost sm" onclick="fetch('/v1/auth/logout',{method:'POST',headers:H()}).then(()=>location='/login')">Log out</button></div></div>
 <div id=err></div><div id=banner></div><div id=alerts></div><h2 style="margin-top:8px">Today vs the last 7 days <span class=muted style="text-transform:none;font-size:12px">(India time, real accounts only)</span></h2><div class=pulse id=pulse></div>
+<section class=trf id=traffic aria-labelledby=trfh><div class=ah style="margin:34px 0 0"><h2 id=trfh style="margin:0">Website traffic</h2><span class=sp></span><div class=rng role=group aria-label="Date range"><button type=button data-r=1d aria-pressed=false onclick="trfLoad('1d')">Today</button><button type=button data-r=7d aria-pressed=true onclick="trfLoad('7d')">7 days</button><button type=button data-r=30d aria-pressed=false onclick="trfLoad('30d')">30 days</button><button type=button data-r=90d aria-pressed=false onclick="trfLoad('90d')">90 days</button></div></div>
+<p class=defs><b>Unique visitors</b>: different people who opened a page on the public site (aloof.si, docs, pricing, blog). <b>Clicks</b>: clicks on sign-up and deploy buttons and on links that leave the site. API calls, apps you host, the dashboard and test accounts are not counted.</p>
+<div id=trfb aria-live=polite aria-busy=true></div></section>
 <h2>Users &amp; revenue</h2><div class=k id=k1><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div><div class=stat><span>&nbsp;</span><b>0</b></div></div>
 <h2>Needs attention: errors &amp; failed deploys</h2><div id=stuck></div><div class=two><div class=scroll><table class=tbl id=fd></table></div><div class=scroll><table class=tbl id=ae></table></div></div>
 <div class=two style="margin-top:14px"><div class=card><h3>GPU unlock</h3><p id=gpu class=muted></p><div class=prog><b id=gpub style="width:0"></b></div><p class=muted id=gpun style="font-size:13px"></p></div>
@@ -171,4 +176,33 @@ async function exportCsv(){const t=$('ex').value,r=await fetch('/v1/admin/export
 themeLbl();load();setInterval(()=>{if(!document.hidden)load()},60000);setInterval(()=>genLbl(),15000);
 </script><script>fetch('/v1/admin/2fa').then(r=>r.ok?r.json():null).then(s=>{if(!s)return;const b=document.getElementById('mfabtn');if(!b)return;
 b.textContent=s.enrolled?(s.session_verified?'2FA ✓':'Verify 2FA'):'Turn on 2FA';if(!s.enrolled||!s.session_verified)b.classList.remove('ghost')}).catch(()=>{})</script>
-</body></html>
+<script>/* traffic:start */
+/* Adapter: the only place that knows the server's traffic endpoint and response shape. Pending Backend's contract: TRF_API stays null (no request is made) until it is confirmed; then set the URL and adjust trfMap only. */
+const TRF_API=null;
+const TRF_RANGES={'1d':'Today','7d':'Last 7 days','30d':'Last 30 days','90d':'Last 90 days'};
+function trfMap(j,r){if(!j||typeof j!='object')return null;const n=v=>Number.isFinite(+v)&&v!==null&&v!==''?Math.max(0,Math.round(+v)):null;
+  const v=n(j.visitors),c=n(j.clicks);if(v==null||c==null)return null;
+  const series=(Array.isArray(j.series)?j.series:[]).filter(x=>x&&x.day).map(x=>({day:String(x.day),visitors:n(x.visitors)||0,clicks:n(x.clicks)||0}));
+  const top=(Array.isArray(j.top_clicks)?j.top_clicks:[]).filter(x=>x&&x.label).map(x=>({label:String(x.label),clicks:n(x.clicks)||0})).sort((a,b)=>b.clicks-a.clicks).slice(0,8);
+  return{range:TRF_RANGES[j.range]?j.range:r,visitors:v,clicks:c,series,top,empty:v==0&&c==0,updated:n(j.generated)}}
+function trfView(m,st,msg){const esc=s=>String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])),f=x=>Number(x).toLocaleString();
+  if(st=='loading')return`<div class="tk ld"><div class=stat><span>Unique visitors</span><b>&nbsp;</b></div><div class=stat><span>Clicks</span><b>&nbsp;</b></div></div><p class=sr-only>Loading website traffic</p>`;
+  if(st=='unavailable')return`<div class=banner role=status>Traffic numbers aren't connected yet. Nothing is shown until real counts are available.</div>`;
+  if(st=='error')return`<div class=errcard role=alert><p><b>Couldn't load website traffic.</b> ${esc(msg)}. The rest of the dashboard is unaffected.</p><button type=button class="btn pri sm" onclick="trfLoad()">Try again</button></div>`;
+  const lbl=TRF_RANGES[m.range].toLowerCase();
+  if(m.empty)return`<div class=banner role=status>No visits or clicks recorded for ${esc(lbl)}. Try a longer range.</div>`;
+  const mx=Math.max(1,...m.series.map(x=>x.visitors));
+  const ch=m.series.length>1?`<div class=card><h3>Visitors per day</h3><div class=chart role=img aria-label="Visitors per day, ${esc(lbl)}">${m.series.map(x=>`<i style="height:${Math.max(2,100*x.visitors/mx)}%" data-t="${esc(x.day)}: ${x.visitors} visitors, ${x.clicks} clicks"></i>`).join('')}</div><div class=axis><span>${esc(m.series[0].day)}</span><span>${esc(m.series[m.series.length-1].day)}</span></div></div>`:'';
+  const tp=m.top.length?`<div class=card><h3>Most clicked</h3><div class=scroll><table class=tbl><tr><th scope=col>Button or link</th><th scope=col>Clicks</th></tr>${m.top.map(x=>`<tr><td><code>${esc(x.label)}</code></td><td>${f(x.clicks)}</td></tr>`).join('')}</table></div></div>`:'';
+  return`<div class=tk><div class=stat><span>Unique visitors</span><b>${f(m.visitors)}</b><small>${esc(TRF_RANGES[m.range])}</small></div><div class=stat><span>Clicks</span><b>${f(m.clicks)}</b><small>${esc(TRF_RANGES[m.range])}</small></div></div>${ch||tp?`<div class=two>${ch}${tp}</div>`:''}`}
+let TRF_R='7d',TRF_SEQ=0;
+async function trfLoad(r){r=r||TRF_R;TRF_R=r;const b=document.getElementById('trfb'),seq=++TRF_SEQ;if(!b)return;
+  document.querySelectorAll('#traffic .rng button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.r==r?'true':'false'));
+  if(!TRF_API){b.innerHTML=trfView(null,'unavailable');b.setAttribute('aria-busy','false');return}b.setAttribute('aria-busy','true');b.innerHTML=trfView(null,'loading');let st='ok',m=null,msg='';
+  try{const res=await fetch(TRF_API+'?range='+encodeURIComponent(r),{headers:{'X-Aloof-CSRF':'1'},credentials:'same-origin'});
+    if(res.status==404||res.status==501)st='unavailable';else if(!res.ok){st='error';msg='The server answered '+res.status}
+    else{m=trfMap(await res.json().catch(()=>null),r);if(!m){st='error';msg='The server sent numbers in a shape this page doesn\'t understand'}}}
+  catch(e){st='error';msg='The server could not be reached'}
+  if(seq!=TRF_SEQ)return;if(m&&m.range!=r){TRF_R=m.range;document.querySelectorAll('#traffic .rng button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.r==m.range?'true':'false'))}b.innerHTML=trfView(m,st,msg);b.setAttribute('aria-busy','false')}
+if(typeof document!='undefined'&&document.getElementById('trfb'))(window.requestIdleCallback||setTimeout)(()=>trfLoad());
+/* traffic:end */</script></body></html>
