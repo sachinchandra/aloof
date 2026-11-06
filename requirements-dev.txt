@@ -1,8 +1,8 @@
 # Development and test dependencies
-pytest==9.1.1
+pytest==9.2.0
 respx==0.23.1
 dnslib==0.9.26
-ruff==0.17.0
+ruff==0.17.3
 pip-audit==2.10.1
 
 # Optional: browser/UI testing (requires system dependencies)
