@@ -2,6 +2,7 @@
 Talks to the control-plane REST API. Auth: PAAS_API_KEY env, or pass api_key to tools."""
 import os, sys, json, httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 API = os.environ.get("ALOOF_API_URL", os.environ.get("PAAS_API_URL", "http://localhost:8000"))
 BRAND = os.environ.get("PAAS_BRAND", "Aloof")
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
@@ -89,6 +90,11 @@ def _r(method, path, key=None, **kw):
 # Old tool names still work when called and are listed only on opt-in (?tools=legacy, header X-Aloof-Tools: legacy,
 # or ALOOF_MCP_TOOLS=legacy for stdio). LEGACY maps each old name to its replacement.
 import re as _re, urllib.parse as _up
+
+# Tool annotations for Claude Connectors Directory compliance (MCP spec)
+_READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
+_MUTATE = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
+_DESTROY = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
 INSPECT = ("status", "details", "logs", "diagnose", "releases", "metrics", "events", "domains")
 LISTS = ("apps", "domains", "volumes", "snapshots", "postgres", "backups", "templates", "plans", "regions", "usage")
 def _q(s): return _up.quote(str(s), safe="")
@@ -99,7 +105,7 @@ def _text(path, key, **params):
         except Exception: body = r.text
         raise ToolError(_err(r.status_code, body))
     return r.text
-@mcp.tool(name="inspect")
+@mcp.tool(name="inspect", title="Inspect app", annotations=_READ)
 def inspect_(name: str, what: str = "status", tail: int = 100, after: int = 0, api_key: str = "") -> dict:
     """Read-only look at one app. what=status (default: state, url, instances, plus requested_release, serving_release, health of the
     serving release, mismatch and a plain warning when a newer deploy failed) | details (process groups, cron, previews, private hostname)
@@ -117,7 +123,7 @@ def inspect_(name: str, what: str = "status", tail: int = 100, after: int = 0, a
     if what == "events": return {"name": name, "events": _r("GET", f"/v1/apps/{n}/events", api_key, params={"after": after})}
     if what == "domains": return {"name": name, "domains": _r("GET", f"/v1/apps/{n}/domains", api_key)}
     raise ToolError(f"unknown what='{what}'; use one of: {', '.join(INSPECT)}")
-@mcp.tool(name="list")
+@mcp.tool(name="list", title="List resources", annotations=_READ)
 def list_(kind: str = "apps", name: str = "", source: str = "", api_key: str = "") -> dict:
     """Read-only lists. kind=apps | domains (all custom domains with status and DNS still needed; `name` = one app) | volumes (and where
     each is mounted) | snapshots (of volume `name`) | postgres (databases, attached apps, backups) | backups (encrypted off-site backups
@@ -141,11 +147,11 @@ def list_(kind: str = "apps", name: str = "", source: str = "", api_key: str = "
     if kind == "regions": return _r("GET", "/v1/regions")
     if kind == "usage": return _r("GET", "/v1/usage", api_key)
     raise ToolError(f"unknown kind='{kind}'; use one of: {', '.join(LISTS)}")
-@mcp.tool()
+@mcp.tool(title="Sign up for account", annotations=_MUTATE)
 def signup(email: str) -> dict:
     """Create an account and return an API key (pk_...). Store it; pass as api_key to other tools."""
     return _r("POST", "/v1/signup", json={"email": email})
-@mcp.tool()
+@mcp.tool(title="Deploy app", annotations=_MUTATE)
 def deploy_app(name: str, image: str = "", git_url: str = "", git_ref: str = "", plan: str = "",
                port: int = 8080, env: dict[str,str] | None = None, instances: int = 1, region: str = "", config: dict | None = None,
                wait: bool = False, timeout_s: int = 600, api_key: str = "") -> dict:
@@ -180,13 +186,13 @@ def _wait_release(name, before, timeout_s, key, first=None):
     ok = bool(st.get("deploy_ok"))
     return {"ok": ok, "result": "live" if ok else "failed", "warning": st.get("warning"), "error": (st.get("requested_release") or {}).get("error"),
             **{k: st.get(k) for k in ("requested_release", "serving_release", "health", "mismatch")}, "url": st.get("url"), "status": st.get("status")}
-@mcp.tool()
+@mcp.tool(title="Deploy template", annotations=_MUTATE)
 def deploy_template(template: str, name: str, env: dict[str,str] | None = None, plan: str = "", api_key: str = "") -> dict:
     """Deploy a one-click template (id from list(kind='templates')) as app `name`. Creates the volumes and managed Postgres it needs,
     generates its secrets (returned once in generated_secrets), and starts the deploy. Pass required env vars in `env`."""
     if not _re.fullmatch(r"[a-z0-9][a-z0-9-]{1,38}[a-z0-9]", template or ""): return {"error": "unknown template id; use list(kind='templates')"}
     return _r("POST", f"/v1/templates/{_q(template)}/deploy", api_key, json={"name": name, "env": env or {}, **({"plan": plan} if plan else {})})
-@mcp.tool()
+@mcp.tool(title="Scale app", annotations=_MUTATE)
 def scale_app(name: str, instances: int | None = None, autoscale: dict | None = None, api_key: str = "") -> dict:
     """Scale an app. instances=N sets a fixed count (0 stops it; traffic is round-robined). autoscale={min, max, target_concurrency,
     cpu_percent, idle_seconds} turns on autoscaling on in-flight requests per instance (min=0 = scale-to-zero after idle_seconds with
@@ -197,71 +203,71 @@ def scale_app(name: str, instances: int | None = None, autoscale: dict | None = 
         return _r("PUT", f"/v1/apps/{_q(name)}/autoscale", api_key, json=a)
     if instances is None: raise ToolError("give instances=N or autoscale={...}")
     return _r("POST", f"/v1/apps/{_q(name)}/scale", api_key, json={"instances": instances})
-@mcp.tool()
+@mcp.tool(title="Set environment variables", annotations=_MUTATE)
 def set_env(name: str, env: dict[str, str], api_key: str = "") -> dict:
     """Set environment variables (triggers rolling restart)."""
     return _r("POST", f"/v1/apps/{_q(name)}/env", api_key, json={"env": env})
-@mcp.tool()
+@mcp.tool(title="Rollback app", annotations=_MUTATE)
 def rollback_app(name: str, version: int | None = None, api_key: str = "") -> dict:
     """Roll back to an earlier release (default: the previous one). Zero downtime, no rebuild. Check with inspect(what='status')."""
     return _r("POST", f"/v1/apps/{_q(name)}/rollback", api_key, json={"version": version})
-@mcp.tool()
+@mcp.tool(title="Set self-healing", annotations=_MUTATE)
 def set_self_heal(name: str, enabled: bool, api_key: str = "") -> dict:
     """Self-healing deploys (default on): for ~5 minutes after a deploy the new release's 5xx rate and p95 latency are compared with
     the previous release; if clearly worse it is rolled back automatically with the reason recorded. Turn it off/on per app."""
     return _r("PUT", f"/v1/apps/{_q(name)}/self-heal", api_key, json={"enabled": enabled})
-@mcp.tool()
+@mcp.tool(title="Execute command", annotations=_MUTATE)
 def exec_command(name: str, command: str, api_key: str = "") -> dict:
     """Run a shell command in a running instance of the app (like `fly ssh console -C`). Audited. Returns exit_code and output."""
     return _r("POST", f"/v1/apps/{_q(name)}/exec", api_key, json={"command": command})
-@mcp.tool()
+@mcp.tool(title="Destroy app", annotations=_DESTROY)
 def destroy_app(name: str, with_volumes: bool = False, api_key: str = "") -> dict:
     """Permanently delete an app and stop its instances. Volumes and Postgres databases its template created are deleted too;
     volumes you attached yourself are detached and kept unless with_volumes=True. The result lists deleted and kept resources."""
     return _r("DELETE", f"/v1/apps/{_q(name)}" + ("?with_volumes=true" if with_volumes else ""), api_key)
-@mcp.tool()
+@mcp.tool(title="Add custom domain", annotations=_MUTATE)
 def add_domain(name: str, domain: str, api_key: str = "") -> dict:
     """Attach a custom domain to an app. Returns the DNS records to create at the registrar: a TXT ownership record plus either a CNAME (subdomains) or A + AAAA records
     (root/apex domains; ALIAS/ANAME/CNAME flattening also works). Aloof re-checks DNS automatically every few minutes, and the HTTPS certificate is issued after it verifies.
     Limits per account: Free 1, Hobby 3, Pro 10 domains. Unverified claims are released after 7 days."""
     return _r("POST", f"/v1/apps/{_q(name)}/domains", api_key, json={"domain": domain})
-@mcp.tool()
+@mcp.tool(title="Verify domain DNS", annotations=_MUTATE)
 def verify_domain(name: str, domain: str, api_key: str = "") -> dict:
     """Check a custom domain's DNS now (TXT ownership + CNAME/A/AAAA routing) and return its status and what is missing. Rate limited; Aloof also re-checks automatically."""
     return _r("POST", f"/v1/apps/{_q(name)}/domains/{_q(domain)}/verify", api_key)
-@mcp.tool()
+@mcp.tool(title="Remove custom domain", annotations=_DESTROY)
 def remove_domain(name: str, domain: str, api_key: str = "") -> dict:
     """Remove a custom domain from an app (its certificate stops being renewed). Your DNS records are untouched."""
     return _r("DELETE", f"/v1/apps/{_q(name)}/domains/{_q(domain)}", api_key)
-@mcp.tool()
+@mcp.tool(title="Create volume", annotations=_MUTATE)
 def create_volume(name: str, size_gb: int = 1, region: str = "", api_key: str = "") -> dict:
     """Create a persistent volume in `region` (default nbg1). Attach it to an app in the same region with attach_volume; data survives redeploys."""
     return _r("POST", "/v1/volumes", api_key, json={"name": name, "size_gb": size_gb, **({"region": region} if region else {})})
-@mcp.tool()
+@mcp.tool(title="Attach volume", annotations=_MUTATE)
 def attach_volume(app: str, volume: str, path: str = "/data", api_key: str = "") -> dict:
     """Mount a volume into an app at `path` (rolling redeploy)."""
     return _r("POST", f"/v1/apps/{_q(app)}/volumes", api_key, json={"volume": volume, "path": path})
-@mcp.tool()
+@mcp.tool(title="Detach volume", annotations=_MUTATE)
 def detach_volume(app: str, volume: str, api_key: str = "") -> dict:
     """Unmount a volume from an app (data is kept)."""
     return _r("DELETE", f"/v1/apps/{_q(app)}/volumes/{_q(volume)}", api_key)
-@mcp.tool()
+@mcp.tool(title="Create Postgres database", annotations=_MUTATE)
 def create_postgres(name: str, plan: str = "pg-dev", region: str = "", api_key: str = "") -> dict:
     """Create a managed Postgres 16 database (plans: pg-dev $2.99/mo, pg-basic $9.99, pg-standard $28.99, pg-perf $60.99; daily
     backups, 7 kept) in `region` (default nbg1; must match the app's region). Then attach_postgres to inject DATABASE_URL into an app."""
     return _r("POST", "/v1/pg", api_key, json={"name": name, "plan": plan, **({"region": region} if region else {})})
-@mcp.tool()
+@mcp.tool(title="Attach Postgres database", annotations=_MUTATE)
 def attach_postgres(name: str, app: str, var: str = "DATABASE_URL", api_key: str = "") -> dict:
     """Connect an app to a database over a private network and inject its connection URL as env `var` (rolling redeploy)."""
     return _r("POST", f"/v1/pg/{_q(name)}/attach", api_key, json={"app": app, "var": var})
-@mcp.tool()
+@mcp.tool(title="Create backup", annotations=_MUTATE)
 def backup(kind: str, name: str, api_key: str = "") -> dict:
     """Take a backup now. kind='postgres' = on-demand pg_dump of database `name` (daily backups also happen automatically);
     kind='volume' = snapshot of volume `name` (tar.gz, 10 kept). See them with list(kind='postgres') / list(kind='snapshots')."""
     if kind == "postgres": return _r("POST", f"/v1/pg/{_q(name)}/backups", api_key)
     if kind == "volume": return _r("POST", f"/v1/volumes/{_q(name)}/snapshots", api_key)
     raise ToolError("kind must be 'postgres' or 'volume'")
-@mcp.tool()
+@mcp.tool(title="Restore from backup", annotations=_DESTROY)
 def restore(kind: str, name: str, backup_id: str, api_key: str = "") -> dict:
     """Destructive: overwrite data from a backup; confirm with the user first. kind='snapshot' restores volume `name` from snapshot
     `backup_id` (the attached app is stopped during the restore and restarted after); kind='offsite_pg' / 'offsite_vol' restores a
@@ -270,11 +276,11 @@ def restore(kind: str, name: str, backup_id: str, api_key: str = "") -> dict:
     if kind in ("offsite_pg", "offsite_vol"):
         return _r("POST", f"/v1/{'pg' if kind == 'offsite_pg' else 'volumes'}/{_q(name)}/offsite-restore", api_key, json={"backup_id": backup_id})
     raise ToolError("kind must be 'snapshot', 'offsite_pg' or 'offsite_vol'")
-@mcp.tool()
+@mcp.tool(title="Add log drain", annotations=_MUTATE)
 def add_log_drain(name: str, url: str, api_key: str = "") -> dict:
     """Forward the app's logs to https:// (JSON array POST) or syslog+tls://host:port / syslog+tcp:// / syslog+udp:// (RFC 5424)."""
     return _r("POST", f"/v1/apps/{_q(name)}/drains", api_key, json={"url": url})
-@mcp.tool()
+@mcp.tool(title="Add credential", annotations=_MUTATE)
 def add_credential(kind: str, host: str, username: str = "", secret: str = "", app: str = "", api_key: str = "") -> dict:
     """Save private source credentials, for all apps or one `app`; encrypted at rest. kind='registry': container registry login
     (docker.io, ghcr.io, ECR, GCR/Artifact Registry, any v2 registry) with username + secret (password/token). kind='git_ssh': generates
@@ -283,109 +289,112 @@ def add_credential(kind: str, host: str, username: str = "", secret: str = "", a
     if kind in ("git_ssh", "git_token"):
         return _r("POST", "/v1/git/credentials", api_key, json={"host": host, "kind": kind[4:], "token": secret or None, "app": app or None})
     raise ToolError("kind must be 'registry', 'git_ssh' or 'git_token'")
-@mcp.tool()
+@mcp.tool(title="Create deploy token", annotations=_MUTATE)
 def create_deploy_token(app: str = "", expires_in: str = "90d", allow_destroy: bool = False, api_key: str = "") -> dict:
     """Create a CI deploy token scoped to one app (or the whole account if app is empty). Shown once. By default it can deploy, scale and
     change config but can't destroy apps, delete volumes/databases or restore backups; allow_destroy=true lifts that (full-access callers only)."""
     return _r("POST", "/v1/tokens", api_key, json={"app": app or None, "expires_in": expires_in, "can_destroy": bool(allow_destroy)})
-@mcp.tool()
+@mcp.tool(title="Join GPU waitlist", annotations=_MUTATE)
 def join_gpu_waitlist(email: str, gpu: str = "", note: str = "") -> dict:
     """GPUs (L4, RTX 4090, L40, A100 80GB, H100) are coming soon. Add an email to the waitlist; optional `gpu` plan id
     (e.g. 'gpu-h100') and a short note on the workload."""
     return _r("POST", "/v1/waitlist", json={"email": email, **({"gpu": gpu} if gpu else {}), **({"note": note} if note else {})})
 # ---- legacy names (pre-v2). Hidden from tools/list unless opted in; always callable so old clients keep working. ----
 LEGACY = {}
-def _legacy(new):
+def _legacy(new, annotations=_MUTATE, title=None):
     def deco(f):
-        LEGACY[f.__name__] = new; mcp.add_tool(f, description=f"(legacy) use {new}. " + " ".join((f.__doc__ or "").split())); return f
+        t = title or f"(Legacy) {f.__name__.replace('_', ' ').title()}"
+        LEGACY[f.__name__] = new
+        mcp.add_tool(f, title=t, annotations=annotations, description=f"(legacy) use {new}. " + " ".join((f.__doc__ or "").split()))
+        return f
     return deco
-@_legacy("list(kind='plans')")
+@_legacy("list(kind='plans')", _READ, "List plans (legacy)")
 def list_plans() -> dict:
     """Pricing, tiers, regions and providers."""
     return list_(kind="plans")
-@_legacy("inspect(what='status')")
+@_legacy("inspect(what='status')", _READ, "Get app status (legacy)")
 def get_status(name: str, api_key: str = "") -> dict:
     """App status, url, instances, releases."""
     return inspect_(name, "status", api_key=api_key)
-@_legacy("list(kind='apps')")
+@_legacy("list(kind='apps')", _READ, "List apps (legacy)")
 def list_apps(api_key: str = "") -> list | dict:
     """Your apps."""
     return _r("GET", "/v1/apps", api_key)
-@_legacy("inspect(what='logs')")
+@_legacy("inspect(what='logs')", _READ, "Get app logs (legacy)")
 def get_logs(name: str, tail: int = 100, api_key: str = "") -> str:
     """Events plus recent stdout/stderr."""
     return _text(f"/v1/apps/{_q(name)}/logs", api_key, tail=tail)
-@_legacy("scale_app(autoscale={...})")
+@_legacy("scale_app(autoscale={...})", _MUTATE, "Set autoscale (legacy)")
 def set_autoscale(name: str, min_instances: int = 0, max_instances: int = 3, target_concurrency: int = 10,
                   cpu_percent: float | None = None, idle_seconds: int = 60, api_key: str = "") -> dict:
     """Enable autoscaling."""
     return scale_app(name, autoscale={"min": min_instances, "max": max_instances, "target_concurrency": target_concurrency,
                                       "cpu_percent": cpu_percent, "idle_seconds": idle_seconds}, api_key=api_key)
-@_legacy("list(kind='usage')")
+@_legacy("list(kind='usage')", _READ, "Get usage (legacy)")
 def get_usage(api_key: str = "") -> dict:
     """Usage and credit."""
     return list_(kind="usage", api_key=api_key)
-@_legacy("list(kind='templates')")
+@_legacy("list(kind='templates')", _READ, "List templates (legacy)")
 def list_templates() -> dict:
     """One-click templates."""
     return list_(kind="templates")
-@_legacy("list(kind='volumes')")
+@_legacy("list(kind='volumes')", _READ, "List volumes (legacy)")
 def list_volumes(api_key: str = "") -> list | dict:
     """Volumes."""
     return _r("GET", "/v1/volumes", api_key)
-@_legacy("list(kind='domains')")
+@_legacy("list(kind='domains')", _READ, "List domains (legacy)")
 def list_domains(name: str = "", api_key: str = "") -> dict:
     """Custom domains."""
     return list_(kind="domains", name=name, api_key=api_key)
-@_legacy("inspect(what='releases')")
+@_legacy("inspect(what='releases')", _READ, "List releases (legacy)")
 def list_releases(name: str, api_key: str = "") -> list | dict:
     """Release history."""
     return _r("GET", f"/v1/apps/{_q(name)}/releases", api_key)
-@_legacy("inspect(what='diagnose')")
+@_legacy("inspect(what='diagnose')", _READ, "Diagnose app (legacy)")
 def diagnose_app(name: str, api_key: str = "") -> dict:
     """Why is my app broken."""
     return inspect_(name, "diagnose", api_key=api_key)
-@_legacy("list(kind='regions')")
+@_legacy("list(kind='regions')", _READ, "List regions (legacy)")
 def list_regions() -> dict:
     """Regions."""
     return list_(kind="regions")
-@_legacy("list(kind='postgres')")
+@_legacy("list(kind='postgres')", _READ, "List Postgres databases (legacy)")
 def list_postgres(api_key: str = "") -> list | dict:
     """Databases."""
     return _r("GET", "/v1/pg", api_key)
-@_legacy("backup(kind='postgres')")
+@_legacy("backup(kind='postgres')", _MUTATE, "Backup Postgres (legacy)")
 def backup_postgres(name: str, api_key: str = "") -> dict:
     """pg_dump now."""
     return backup("postgres", name, api_key)
-@_legacy("backup(kind='volume')")
+@_legacy("backup(kind='volume')", _MUTATE, "Snapshot volume (legacy)")
 def snapshot_volume(volume: str, api_key: str = "") -> dict:
     """Snapshot a volume."""
     return backup("volume", volume, api_key)
-@_legacy("restore(kind='snapshot')")
+@_legacy("restore(kind='snapshot')", _DESTROY, "Restore volume (legacy)")
 def restore_volume(volume: str, snapshot_id: str, api_key: str = "") -> dict:
     """Destructive: restore a volume snapshot; confirm with the user first."""
     return restore("snapshot", volume, snapshot_id, api_key)
-@_legacy("list(kind='backups')")
+@_legacy("list(kind='backups')", _READ, "List offsite backups (legacy)")
 def list_offsite_backups(kind: str, name: str, api_key: str = "") -> list | dict:
     """Off-site backups (kind pg|vol)."""
     return _r("GET", f"/v1/{'pg' if kind == 'pg' else 'volumes'}/{_q(name)}/offsite", api_key)
-@_legacy("restore(kind='offsite_pg'|'offsite_vol')")
+@_legacy("restore(kind='offsite_pg'|'offsite_vol')", _DESTROY, "Restore offsite backup (legacy)")
 def restore_offsite_backup(kind: str, name: str, backup_id: str, api_key: str = "") -> dict:
     """Destructive: restore from an off-site backup; confirm with the user first."""
     return restore("offsite_pg" if kind == "pg" else "offsite_vol", name, backup_id, api_key)
-@_legacy("add_credential(kind='registry')")
+@_legacy("add_credential(kind='registry')", _MUTATE, "Registry login (legacy)")
 def registry_login(server: str, username: str, password: str, app: str = "", api_key: str = "") -> dict:
     """Registry credentials."""
     return add_credential("registry", server, username, password, app, api_key)
-@_legacy("add_credential(kind='git_ssh'|'git_token')")
+@_legacy("add_credential(kind='git_ssh'|'git_token')", _MUTATE, "Add git credential (legacy)")
 def add_git_credential(host: str, kind: str = "ssh", token: str = "", app: str = "", api_key: str = "") -> dict:
     """Git credentials."""
     return add_credential("git_token" if kind == "token" else "git_ssh", host, "", token, app, api_key)
-@_legacy("deploy_app(config=...)")
+@_legacy("deploy_app(config=...)", _MUTATE, "Deploy with config (legacy)")
 def deploy_with_config(name: str, config: dict, image: str = "", git_url: str = "", git_ref: str = "", api_key: str = "") -> dict:
     """Deploy from an aloof.toml dict."""
     return deploy_app(name, image=image, git_url=git_url, git_ref=git_ref, config=config, api_key=api_key)
-@_legacy("inspect(what='details')")
+@_legacy("inspect(what='details')", _READ, "App status (legacy)")
 def app_status(name: str, api_key: str = "") -> dict:
     """Process groups, cron, previews."""
     return inspect_(name, "details", api_key=api_key)
