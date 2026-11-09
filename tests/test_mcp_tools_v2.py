@@ -62,3 +62,55 @@ def test_docs_have_legacy_mapping():
     j = c.get("/mcp-tools.json").json(); assert len(j["tools"]) == 25 and j["legacy"]["get_status"] == "inspect(what='status')"
     assert c.get("/.well-known/mcp.json").json()["tools"] == mcp_tool_names()
     assert "Tools (25," in c.get("/llms.txt").text
+
+async def _all_tools():
+    """Return all tools including legacy (for annotation checks)."""
+    from mcp.shared.memory import create_connected_server_and_client_session as conn
+    async with conn(S.mcp._mcp_server) as s:
+        return (await s.list_tools()).tools
+
+def test_all_tools_have_title_and_annotations(monkeypatch):
+    """Verify every tool has a title and readOnlyHint/destructiveHint per Claude Connectors Directory policy."""
+    monkeypatch.setenv("ALOOF_MCP_TOOLS", "legacy")
+    tools = anyio.run(_all_tools)
+    missing_title = []
+    missing_annotations = []
+    for t in tools:
+        if not t.title:
+            missing_title.append(t.name)
+        if t.annotations is None:
+            missing_annotations.append(f"{t.name} (no annotations)")
+        elif t.annotations.readOnlyHint is None and t.annotations.destructiveHint is None:
+            missing_annotations.append(f"{t.name} (no readOnlyHint or destructiveHint)")
+    assert not missing_title, f"Tools missing title: {missing_title}"
+    assert not missing_annotations, f"Tools missing annotations: {missing_annotations}"
+
+def test_read_only_tools_annotated_correctly(monkeypatch):
+    """Spot check: read-only tools should have readOnlyHint=True."""
+    monkeypatch.setenv("ALOOF_MCP_TOOLS", "legacy")
+    tools = {t.name: t for t in anyio.run(_all_tools)}
+    for name in ("inspect", "list", "get_status", "list_apps", "diagnose_app", "list_postgres"):
+        t = tools[name]
+        assert t.annotations is not None, f"{name} has no annotations"
+        assert t.annotations.readOnlyHint is True, f"{name} should be readOnlyHint=True"
+        assert t.annotations.destructiveHint is False, f"{name} should not be destructive"
+
+def test_destructive_tools_annotated_correctly(monkeypatch):
+    """Spot check: destructive tools should have destructiveHint=True."""
+    monkeypatch.setenv("ALOOF_MCP_TOOLS", "legacy")
+    tools = {t.name: t for t in anyio.run(_all_tools)}
+    for name in ("destroy_app", "restore", "remove_domain", "restore_volume", "restore_offsite_backup"):
+        t = tools[name]
+        assert t.annotations is not None, f"{name} has no annotations"
+        assert t.annotations.destructiveHint is True, f"{name} should be destructiveHint=True"
+        assert t.annotations.readOnlyHint is False, f"{name} should not be read-only"
+
+def test_mutating_tools_annotated_correctly(monkeypatch):
+    """Spot check: mutating (but non-destructive) tools should have readOnlyHint=False, destructiveHint=False."""
+    monkeypatch.setenv("ALOOF_MCP_TOOLS", "legacy")
+    tools = {t.name: t for t in anyio.run(_all_tools)}
+    for name in ("deploy_app", "scale_app", "set_env", "create_volume", "backup"):
+        t = tools[name]
+        assert t.annotations is not None, f"{name} has no annotations"
+        assert t.annotations.readOnlyHint is False, f"{name} should be readOnlyHint=False"
+        assert t.annotations.destructiveHint is False, f"{name} should be destructiveHint=False"
