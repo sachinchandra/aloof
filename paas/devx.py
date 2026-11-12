@@ -90,11 +90,14 @@ def deploy_config(name: str, b: DeployCfg, request: Request, a=Depends(acct)):
     elif b.upload_id: src = {"upload": b.upload_id} | {k: x for k, x in src.items() if k in ("subdir", "dockerfile", "build_args")}
     if not (src.get("image") or src.get("git") or src.get("upload")): raise HTTPException(400, "nothing to deploy: set [build] image/git in aloof.toml or upload the directory (aloof deploy)")
     spec["source"] = src; spec["env"] = {**spec.get("env", {}), **b.env}
-    st = consume_staged_secrets(name, a["id"], _ip(request))
-    if st["set"] or st["unset"]:
-        spec["env"] = {**spec.get("env", {}), **st["set"]}
-        for k in st["unset"]: spec["env"].pop(k, None)
+    st = get_staged_secrets(name)
     ex = engine.get_app(name)
+    if st["set"] or st["unset"]:
+        ex_row = q("select spec from apps where name=? and status!='destroyed'", (name,), one=True)
+        old_env = crypto.load_spec(ex_row["spec"]).get("env", {}) if ex_row else {}
+        spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
+        for k in st["unset"]: spec["env"].pop(k, None)
+        spec["_replace_env"] = True
     for m in v["mounts"]:
         vol = q("select * from volumes where name=?", (m["name"],), one=True)
         if vol and vol["account_id"] != a["id"]: raise HTTPException(409, f"volume {m['name']} belongs to another account")
@@ -107,11 +110,14 @@ def deploy_config(name: str, b: DeployCfg, request: Request, a=Depends(acct)):
     if ex and ex["status"] != "destroyed" and "env" not in (b.config or {}): pass
     from .api import actor_method
     engine.set_deploy_actor(a["id"], actor_method(a, request))
-    try: r = engine.deploy(a["id"], spec)
+    try:
+        r = engine.deploy(a["id"], spec)
+        if st["set"] or st["unset"]: clear_staged_secrets(name, a["id"], _ip(request))
+        _audit(a["id"], name, "deploy", json.dumps({"source": {k: x for k, x in src.items() if k != "build_args"}})[:500], _ip(request))
+        return _api().with_url(r) | {"warnings": v["warnings"]}
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
-    _audit(a["id"], name, "deploy", json.dumps({"source": {k: x for k, x in src.items() if k != "build_args"}})[:500], _ip(request))
-    return _api().with_url(r) | {"warnings": v["warnings"]}
+    finally: engine.clear_deploy_actor()
 class DetectReq(BaseModel): files: dict[str, str|None]; name: str|None=None
 @R.post("/v1/launch/detect")
 def launch_detect(b: DetectReq):
@@ -162,14 +168,12 @@ def _put_staged(app, st): kv_put("staged_secrets", app, crypto.enc_json(st))
 def get_staged_secrets(app):
     """Return pending staged secrets for an app (public API for other modules)."""
     return _staged(app)
-def consume_staged_secrets(app, account_id, ip=None):
-    """Consume staged secrets: clear from KV and audit. Returns the staged dict (set/unset).
-    The caller merges into spec before deploy. Returns empty dict if none staged."""
+def clear_staged_secrets(app, account_id, ip=None):
+    """Clear staged secrets from KV and audit. Called AFTER a deploy succeeds."""
     st = _staged(app)
-    if not st["set"] and not st["unset"]: return {"set": {}, "unset": []}
+    if not st["set"] and not st["unset"]: return
     kv_del("staged_secrets", app)
     _audit(account_id, app, "secrets.auto_apply", f"{len(st['set'])} set, {len(st['unset'])} unset (applied with code deploy)", ip)
-    return st
 @R.get("/v1/apps/{name}/secrets")
 def secrets_list(name: str, a=Depends(acct)):
     own(name, a); spec = load_spec(q("select spec from apps where name=?", (name,), one=True)["spec"]); st = _staged(name)
@@ -189,13 +193,19 @@ def secrets_set(name: str, b: SecReq, request: Request, a=Depends(acct)):
         for k in b.unset: st["set"].pop(k, None)
         _put_staged(name, st); return {"staged": True, "detail": f"run `aloof secrets deploy {name}` to apply"}
     env = dict(b.secrets) | {k: None for k in b.unset}
-    return _api().with_url(engine.set_env(name, env)) | {"staged": False}
+    from .api import actor_method
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
+    try: return _api().with_url(engine.set_env(name, env)) | {"staged": False}
+    finally: engine.clear_deploy_actor()
 @R.post("/v1/apps/{name}/secrets/deploy")
 def secrets_deploy(name: str, request: Request, a=Depends(acct)):
     own(name, a); st = _staged(name)
     if not st["set"] and not st["unset"]: raise HTTPException(400, "no staged secrets")
     kv_del("staged_secrets", name); _audit(a["id"], name, "secrets.deploy", f"{len(st['set'])} set, {len(st['unset'])} unset", _ip(request))
-    return _api().with_url(engine.set_env(name, dict(st["set"]) | {k: None for k in st["unset"]}))
+    from .api import actor_method
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
+    try: return _api().with_url(engine.set_env(name, dict(st["set"]) | {k: None for k in st["unset"]}))
+    finally: engine.clear_deploy_actor()
 # ---------------- status / scale ----------------
 @R.get("/v1/apps/{name}/status")
 def app_status(name: str, a=Depends(acct)):
@@ -326,9 +336,11 @@ def preview_create(name: str, b: PreviewReq, request: Request, a=Depends(acct)):
     ps = github_app.preview_spec(name, b.pr, git, b.ref, (spec.get("source") or {}).get("github_installation"))
     from .api import actor_method
     engine.set_deploy_actor(a["id"], actor_method(a, request))
-    try: r = engine.deploy(a["id"], ps)
+    try:
+        r = engine.deploy(a["id"], ps)
+        _audit(a["id"], name, "preview.deploy", f"{ps['name']} @ {b.ref}", _ip(request)); return _api().with_url(r)
     except (ValueError, PermissionError) as e: raise HTTPException(400, str(e))
-    _audit(a["id"], name, "preview.deploy", f"{ps['name']} @ {b.ref}", _ip(request)); return _api().with_url(r)
+    finally: engine.clear_deploy_actor()
 @R.get("/v1/apps/{name}/previews")
 def preview_list(name: str, a=Depends(acct)):
     own(name, a); out = []
@@ -413,14 +425,20 @@ def gh_link(name: str, b: LinkReq, request: Request, a=Depends(acct)):
     _audit(a["id"], name, "github.link", f"{l['repo']}@{l['branch']}", _ip(request)); out = {"linked": l}
     if b.deploy:
         ex = engine.get_app(name); spec = {"name": name, "source": {"git": f"{github_app.WEB}/{l['repo']}.git", "ref": l["branch"], "github_installation": l["installation_id"]}}
-        st = consume_staged_secrets(name, a["id"], _ip(request))
+        st = get_staged_secrets(name)
         if st["set"] or st["unset"]:
-            spec["env"] = {**spec.get("env", {}), **st["set"]}
+            ex_row = q("select spec from apps where name=? and status!='destroyed'", (name,), one=True)
+            old_env = crypto.load_spec(ex_row["spec"]).get("env", {}) if ex_row else {}
+            spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
             for k in st["unset"]: spec["env"].pop(k, None)
+            spec["_replace_env"] = True
         from .api import actor_method
         engine.set_deploy_actor(a["id"], actor_method(a, request))
-        try: out["app"] = _api().with_url(engine.deploy(a["id"], spec))
+        try:
+            out["app"] = _api().with_url(engine.deploy(a["id"], spec))
+            if st["set"] or st["unset"]: clear_staged_secrets(name, a["id"], _ip(request))
         except (ValueError, PermissionError) as e: raise HTTPException(400, str(e))
+        finally: engine.clear_deploy_actor()
     return out
 @R.delete("/v1/apps/{name}/github")
 def gh_unlink(name: str, a=Depends(acct)): own(name, a); q("delete from github_links where app=? and account_id=?", (name, a["id"])); return {"ok": True}

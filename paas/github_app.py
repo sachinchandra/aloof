@@ -114,16 +114,28 @@ def _report(iid, repo, sha, state, app, url, desc, check_id=None):
     except Exception as e: log.warning("check run: %s", e)
 def _deploy_and_report(account_id, spec, iid, repo, sha, url_of, pr=None):
     from . import engine, devx
+    from .db import q
+    from .crypto import load_spec
     name = spec["name"]; url = url_of(name)
     check = _report(iid, repo, sha, "pending", name, url, f"deploying {sha[:7]}")
+    st = {"set": {}, "unset": []}
     if not pr:
-        st = devx.consume_staged_secrets(name, account_id, "github_webhook")
+        st = devx.get_staged_secrets(name)
         if st["set"] or st["unset"]:
-            spec["env"] = {**spec.get("env", {}), **st["set"]}
+            ex = q("select spec from apps where name=? and status!='destroyed'", (name,), one=True)
+            old_env = load_spec(ex["spec"]).get("env", {}) if ex else {}
+            spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
             for k in st["unset"]: spec["env"].pop(k, None)
+            spec["_replace_env"] = True
     engine.set_deploy_actor(account_id, "github_webhook" if not pr else "github_preview")
-    try: engine.deploy(account_id, spec)
-    except Exception as e: _report(iid, repo, sha, "failure", name, url, f"deploy rejected: {e}", check); return
+    try:
+        engine.deploy(account_id, spec)
+        if st["set"] or st["unset"]: devx.clear_staged_secrets(name, account_id, None)
+    except Exception as e:
+        _report(iid, repo, sha, "failure", name, url, f"deploy rejected: {e}", check)
+        engine.clear_deploy_actor()
+        return
+    engine.clear_deploy_actor()
     def watch():
         end = time.time() + 3600
         while time.time() < end:

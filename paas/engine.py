@@ -231,6 +231,8 @@ def deploy(account_id, spec):
     prov = pick_provider(spec); now = time.time()
     if prov == "local-docker":   # fail fast with a clear 503 before queueing; start_instance re-checks per instance
         from . import capacity; capacity.admit(spec["plan"], spec["instances"])
+    pending_actor = _get_pending_actor()
+    if pending_actor[0]: spec["_actor"] = {"account_id": pending_actor[0], "method": pending_actor[1]}
     q("insert into apps(name,account_id,spec,status,provider,created,updated,error) values(?,?,?,?,?,?,?,null) "
       "on conflict(name) do update set account_id=excluded.account_id, spec=excluded.spec, status=excluded.status, provider=excluded.provider, updated=excluded.updated, error=null",
       (name, account_id, dump_spec(spec), "queued", prov, ex["created"] if ex else now, now))
@@ -242,14 +244,23 @@ def deploy(account_id, spec):
 RELEASE_KEEP = 20
 _deploy_actor = threading.local()
 def set_deploy_actor(account_id, method):
-    """Set the actor for the current deploy thread. Called by API/devx endpoints before engine.deploy()."""
+    """Set the actor for the current request thread. The actor is copied into spec._actor before deploy queues."""
     _deploy_actor.account_id = account_id
     _deploy_actor.method = method
-def _get_actor():
+def clear_deploy_actor():
+    """Clear the actor after deploy completes. Prevents leaking to subsequent requests on the same thread."""
+    _deploy_actor.account_id = None
+    _deploy_actor.method = None
+def _get_pending_actor():
+    """Get pending actor from thread-local (set before deploy() is called)."""
     return (getattr(_deploy_actor, "account_id", None), getattr(_deploy_actor, "method", None))
+def _get_actor(spec):
+    """Get actor from spec (stored when deploy was queued)."""
+    actor = spec.get("_actor") or {}
+    return (actor.get("account_id"), actor.get("method"))
 def _new_release(name, spec, reason):
     v = (q("select max(version) v from releases where app=?", (name,), one=True) or {}).get("v") or 0
-    actor_account_id, actor_method = _get_actor()
+    actor_account_id, actor_method = _get_actor(spec)
     q("insert into releases(app,version,image,spec,status,reason,created,owner,actor_account_id,actor_method) values(?,?,?,?,?,?,?,?,?,?)",
       (name, v + 1, spec.get("_image"), dump_spec(spec), "deploying", reason, time.time(), OWNER, actor_account_id, actor_method))
     return v + 1
@@ -292,6 +303,8 @@ def rollback(name, version=None, reason=None, only_if_latest=None):
         for x in json.loads(db["attached"] or "[]"):
             if x["app"] == name and x["var"] in now_spec.get("env", {}): spec["env"][x["var"]] = now_spec["env"][x["var"]]
     spec["_image"] = r["image"]
+    pending_actor = _get_pending_actor()
+    if pending_actor[0]: spec["_actor"] = {"account_id": pending_actor[0], "method": pending_actor[1]}
     q("update apps set spec=?, status='queued', updated=?, error=null, build_owner=? where name=?", (dump_spec(spec), time.time(), OWNER, name))
     event(name, f"rollback to v{r['version']} queued")
     threading.Thread(target=_run_deploy, args=(name, r["image"], reason or f"rollback to v{r['version']}", only_if_latest), daemon=True).start()

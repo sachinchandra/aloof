@@ -259,7 +259,8 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None, actor_meth
             for k, f in vmap.items(): spec["env"][k] = parts[f]
             q("update pg_dbs set attached=?, template_app=? where name=?", (json.dumps([{"app": name, "var": var}]), name, pgn))
         if actor_method: engine.set_deploy_actor(account_id, actor_method)
-        r = engine.deploy(account_id, spec)
+        try: r = engine.deploy(account_id, spec)
+        finally: engine.clear_deploy_actor()
     except Exception:
         if created_pg:
             try: parity.pg_destroy(created_pg)
