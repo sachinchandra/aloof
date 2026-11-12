@@ -3,7 +3,7 @@
 > The self-driving cloud for backends. Deploy a repo (public or private) or a Docker image; Aloof keeps it running. AI agents deploy, debug and scale over MCP. Billed per second in USD.
 
 ## What Aloof does (live today)
-- Self-healing deploys: auto-rollback when a new release raises errors or latency. Covers apps with enough traffic in the 5 min after deploy (>=100 requests, >=10 bad requests from >=3 IPs); can be turned off per app. Health-gated deploys and one-command rollback for everyone.
+- Self-healing deploys: auto-rollback when a new release raises errors or latency. Covers apps with enough traffic in the 5 min after deploy (>=20 requests, >=10 bad requests from >=3 IPs); can be turned off per app. Health-gated deploys and one-command rollback for everyone.
 - Replaces instances that fail health checks; routes traffic away from failing instances.
 - Autoscaling and scale to zero (idle apps cost nothing; volumes still bill).
 - Managed Postgres 16 with daily backups (7 kept); volumes; custom domains with TLS; private networking; workers, cron, release commands.

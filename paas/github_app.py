@@ -113,9 +113,15 @@ def _report(iid, repo, sha, state, app, url, desc, check_id=None):
                                                                        "output": {"title": desc, "summary": desc}})
     except Exception as e: log.warning("check run: %s", e)
 def _deploy_and_report(account_id, spec, iid, repo, sha, url_of, pr=None):
-    from . import engine
+    from . import engine, devx
     name = spec["name"]; url = url_of(name)
     check = _report(iid, repo, sha, "pending", name, url, f"deploying {sha[:7]}")
+    if not pr:
+        st = devx.consume_staged_secrets(name, account_id, "github_webhook")
+        if st["set"] or st["unset"]:
+            spec["env"] = {**spec.get("env", {}), **st["set"]}
+            for k in st["unset"]: spec["env"].pop(k, None)
+    engine.set_deploy_actor(account_id, "github_webhook" if not pr else "github_preview")
     try: engine.deploy(account_id, spec)
     except Exception as e: _report(iid, repo, sha, "failure", name, url, f"deploy rejected: {e}", check); return
     def watch():

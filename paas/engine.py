@@ -240,19 +240,34 @@ def deploy(account_id, spec):
     return get_app(name)
 # ---- releases: every deploy/config change is a numbered release; rollback redeploys an earlier one ----
 RELEASE_KEEP = 20
+_deploy_actor = threading.local()
+def set_deploy_actor(account_id, method):
+    """Set the actor for the current deploy thread. Called by API/devx endpoints before engine.deploy()."""
+    _deploy_actor.account_id = account_id
+    _deploy_actor.method = method
+def _get_actor():
+    return (getattr(_deploy_actor, "account_id", None), getattr(_deploy_actor, "method", None))
 def _new_release(name, spec, reason):
     v = (q("select max(version) v from releases where app=?", (name,), one=True) or {}).get("v") or 0
-    q("insert into releases(app,version,image,spec,status,reason,created,owner) values(?,?,?,?,?,?,?,?)",
-      (name, v + 1, spec.get("_image"), dump_spec(spec), "deploying", reason, time.time(), OWNER))
+    actor_account_id, actor_method = _get_actor()
+    q("insert into releases(app,version,image,spec,status,reason,created,owner,actor_account_id,actor_method) values(?,?,?,?,?,?,?,?,?,?)",
+      (name, v + 1, spec.get("_image"), dump_spec(spec), "deploying", reason, time.time(), OWNER, actor_account_id, actor_method))
     return v + 1
 def _set_release(name, version, status, image=None, spec=None):
     if status == "active": q("update releases set status='superseded' where app=? and status='active'", (name,))
     q("update releases set status=?" + (", image=?" if image else "") + (", spec=?" if spec else "") + " where app=? and version=?",
       (status, *([image] if image else []), *([dump_spec(spec)] if spec else []), name, version))
+def _actor_info(r):
+    """Build actor dict for a release row. Historical releases without actor return None."""
+    aid, method = r.get("actor_account_id"), r.get("actor_method")
+    if not aid: return None
+    a = q("select email from accounts where id=?", (aid,), one=True)
+    return {"account_id": aid, "email": a["email"] if a else None, "method": method}
 def releases(name):
     from . import selfheal
     return [{k: r[k] for k in ("version", "image", "status", "reason", "created")} | {"plan": load_spec(r["spec"]).get("plan"), "env_keys": sorted(load_spec(r["spec"]).get("env", {}))}
             | {"auto_rollback": selfheal.auto_rollback_info(name, r["version"])}
+            | {"actor": _actor_info(r)}
             for r in q("select * from releases where app=? order by version desc limit 50", (name,))]
 def rollback(name, version=None, reason=None, only_if_latest=None):
     """Redeploy an earlier release's image + config (env, plan, port, command, scale, health). Volumes, Postgres attachments and

@@ -5,7 +5,7 @@ from paas import api, selfheal, engine
 from paas.db import q
 from tests.test_parity import fake, user, wait, deploy   # noqa: F401
 
-C = {"window_s": 300, "min_requests": 100, "min_bad": 10, "min_ips": 3, "err_pp": 5, "err_x": 2, "p95_x": 2, "p95_ms": 500}
+C = {"window_s": 300, "min_requests": 20, "min_bad": 10, "min_ips": 3, "err_pp": 5, "err_x": 2, "p95_x": 2, "p95_ms": 500}
 def S(n, e=0, p=50, ips=5): return {"requests": n, "errors_5xx": e, "counted_5xx": e, "error_rate": e / n if n else 0, "error_ips": ips, "p95_ms": p}
 _ip = itertools.cycle([f"198.51.100.{k}" for k in range(1, 8)])
 def _t(app, n, status=200, ms=10, path="/", ip=None):
@@ -18,7 +18,7 @@ def test_verdict_thresholds():
     assert not selfheal.verdict(S(100, 30), S(100, 20), C)         # 1.5x only
     assert not selfheal.verdict(S(100, 9), S(100, 0), C)           # 9% but under 10 errors
     assert not selfheal.verdict(S(200, 20, ips=2), S(200, 0), C)   # errors from only 2 client IPs
-    assert not selfheal.verdict(S(99, 99), S(200, 0), C) and not selfheal.verdict(S(200, 99), S(50, 0), C)
+    assert not selfheal.verdict(S(19, 19), S(200, 0), C) and not selfheal.verdict(S(200, 99), S(19, 0), C)
     assert selfheal.verdict(S(200, 0, 1200), S(200, 0, 200), C, slow=lambda t: (20, 5))
     assert not selfheal.verdict(S(200, 0, 1200), S(200, 0, 200), C, slow=lambda t: (9, 5))   # too few slow requests
     assert not selfheal.verdict(S(200, 0, 300), S(200, 0, 100), C)
@@ -76,11 +76,11 @@ def test_pass_window_and_opt_out_and_no_baseline(fake, user, monkeypatch):
     deploy(user, "sh-ok", "good:v2"); _t("sh-ok", 120, ms=120)
     monkeypatch.setenv("PAAS_SELFHEAL_WINDOW", "0"); selfheal.tick(); monkeypatch.delenv("PAAS_SELFHEAL_WINDOW")
     assert "sh-ok" not in selfheal._watch and any("passed its" in e["msg"] for e in q("select msg from events where app='sh-ok'"))
-    deploy(user, "sh-nb", "good:v1"); _t("sh-nb", 30); deploy(user, "sh-nb", "good:v2"); assert "sh-nb" not in selfheal._watch
+    deploy(user, "sh-nb", "good:v1"); _t("sh-nb", 15); deploy(user, "sh-nb", "good:v2"); assert "sh-nb" not in selfheal._watch
     deploy(user, "sh-off", "good:v1"); _t("sh-off", 150)
     assert user.put("/v1/apps/sh-off/self-heal", json={"enabled": False}).json()["enabled"] is False
     deploy(user, "sh-off", "good:v2"); assert "sh-off" not in selfheal._watch
-    assert user.get("/v1/apps/sh-off/self-heal").json()["thresholds"]["min_requests"] == 100
+    assert user.get("/v1/apps/sh-off/self-heal").json()["thresholds"]["min_requests"] == 20
     assert TestClient(api.app, base_url="http://api.aloof.test").get("/v1/apps/sh-off/self-heal").status_code == 401
 
 def test_edge_records_per_release(fake, user):

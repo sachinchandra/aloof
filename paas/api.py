@@ -121,6 +121,14 @@ async def _strip_legacy_session(request: Request, call_next):
             r.headers.append("set-cookie", f"{auth.LEGACY_COOKIE}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Lax{extra}")
     return r
 SUSPENDED_MSG = "this account is suspended; email support@aloof.si"
+def actor_method(a, request: Request = None):
+    """Determine how this request was authenticated for release actor tracking."""
+    if a.get("_token"): return "deploy_token"
+    if a.get("impersonated_by"): return "admin_view"
+    scope_hdr = (request.headers.get("x-aloof-scope") or "").strip().lower() if request else ""
+    if scope_hdr: return "mcp"
+    if request and request.cookies.get(auth.COOKIE): return "session"
+    return "api_key"
 def acct(request: Request, authorization: str = Header(None)):
     """Bearer API key (CLI/MCP/automation) or session cookie (dashboard). Cookie-authenticated writes need the
     X-Aloof-CSRF header, which cross-site forms cannot set (SameSite=Lax is the first line of defence)."""
@@ -287,10 +295,16 @@ def providers():
 @app.exception_handler(engine.PastDue)
 async def _past_due_402(request, exc): return JSONResponse({"detail": str(exc), "code": "payment_past_due"}, status_code=402)
 @app.post("/v1/apps")
-def deploy(r: DeployReq, a=Depends(acct)):
+def deploy(r: DeployReq, request: Request, a=Depends(acct)):
     if r.name.startswith("pg-"): raise HTTPException(400, "app names starting with pg- are reserved for managed Postgres")
     if not scope_ok(r.name, a): raise HTTPException(403, f"this deploy token is scoped to app {a['_scope_app']}")
     spec = r.model_dump(exclude_unset=True) | {"name": r.name, "source": r.source.model_dump()}; spec["source"] = {k:v for k,v in spec["source"].items() if v}
+    from . import devx
+    st = devx.consume_staged_secrets(r.name, a["id"], _ip(request))
+    if st["set"] or st["unset"]:
+        spec["env"] = {**spec.get("env", {}), **st["set"]}
+        for k in st["unset"]: spec["env"].pop(k, None)
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
     try: return with_url(engine.deploy(a["id"], spec))
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
@@ -315,6 +329,12 @@ def app_retry(name: str, request: Request, a=Depends(acct)):
         _audit(a["id"], name, "deploy.retry_stale", f"status={ap['status']}", _ip(request))   # stale: no deploy thread holds the lock
     spec = {"name": name, "source": (ap.get("spec") or {}).get("source") or {}}
     if not spec["source"]: raise HTTPException(400, "this app has no source to redeploy")
+    from . import devx
+    st = devx.consume_staged_secrets(name, a["id"], _ip(request))
+    if st["set"] or st["unset"]:
+        spec["env"] = {**spec.get("env", {}), **st["set"]}
+        for k in st["unset"]: spec["env"].pop(k, None)
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
     try: r = engine.deploy(a["id"], spec)
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))

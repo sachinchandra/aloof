@@ -90,6 +90,10 @@ def deploy_config(name: str, b: DeployCfg, request: Request, a=Depends(acct)):
     elif b.upload_id: src = {"upload": b.upload_id} | {k: x for k, x in src.items() if k in ("subdir", "dockerfile", "build_args")}
     if not (src.get("image") or src.get("git") or src.get("upload")): raise HTTPException(400, "nothing to deploy: set [build] image/git in aloof.toml or upload the directory (aloof deploy)")
     spec["source"] = src; spec["env"] = {**spec.get("env", {}), **b.env}
+    st = consume_staged_secrets(name, a["id"], _ip(request))
+    if st["set"] or st["unset"]:
+        spec["env"] = {**spec.get("env", {}), **st["set"]}
+        for k in st["unset"]: spec["env"].pop(k, None)
     ex = engine.get_app(name)
     for m in v["mounts"]:
         vol = q("select * from volumes where name=?", (m["name"],), one=True)
@@ -101,6 +105,8 @@ def deploy_config(name: str, b: DeployCfg, request: Request, a=Depends(acct)):
         q("update volumes set app=?, mount_path=? where name=?", (name, m["path"], m["name"]))
     if v["mounts"]: spec["volumes"] = [{"name": m["name"], "path": m["path"]} for m in v["mounts"]]
     if ex and ex["status"] != "destroyed" and "env" not in (b.config or {}): pass
+    from .api import actor_method
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
     try: r = engine.deploy(a["id"], spec)
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
@@ -153,6 +159,17 @@ def token_revoke(tid: str, request: Request, a=Depends(acct)):
 def _staged(app):
     raw = kv_get("staged_secrets", app); return crypto.dec_json(raw) if raw else {"set": {}, "unset": []}
 def _put_staged(app, st): kv_put("staged_secrets", app, crypto.enc_json(st))
+def get_staged_secrets(app):
+    """Return pending staged secrets for an app (public API for other modules)."""
+    return _staged(app)
+def consume_staged_secrets(app, account_id, ip=None):
+    """Consume staged secrets: clear from KV and audit. Returns the staged dict (set/unset).
+    The caller merges into spec before deploy. Returns empty dict if none staged."""
+    st = _staged(app)
+    if not st["set"] and not st["unset"]: return {"set": {}, "unset": []}
+    kv_del("staged_secrets", app)
+    _audit(account_id, app, "secrets.auto_apply", f"{len(st['set'])} set, {len(st['unset'])} unset (applied with code deploy)", ip)
+    return st
 @R.get("/v1/apps/{name}/secrets")
 def secrets_list(name: str, a=Depends(acct)):
     own(name, a); spec = load_spec(q("select spec from apps where name=?", (name,), one=True)["spec"]); st = _staged(name)
@@ -307,6 +324,8 @@ def preview_create(name: str, b: PreviewReq, request: Request, a=Depends(acct)):
     git = b.git or (spec.get("source") or {}).get("git")
     if not git: raise HTTPException(400, "app was not deployed from git; pass git=")
     ps = github_app.preview_spec(name, b.pr, git, b.ref, (spec.get("source") or {}).get("github_installation"))
+    from .api import actor_method
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
     try: r = engine.deploy(a["id"], ps)
     except (ValueError, PermissionError) as e: raise HTTPException(400, str(e))
     _audit(a["id"], name, "preview.deploy", f"{ps['name']} @ {b.ref}", _ip(request)); return _api().with_url(r)
@@ -394,6 +413,12 @@ def gh_link(name: str, b: LinkReq, request: Request, a=Depends(acct)):
     _audit(a["id"], name, "github.link", f"{l['repo']}@{l['branch']}", _ip(request)); out = {"linked": l}
     if b.deploy:
         ex = engine.get_app(name); spec = {"name": name, "source": {"git": f"{github_app.WEB}/{l['repo']}.git", "ref": l["branch"], "github_installation": l["installation_id"]}}
+        st = consume_staged_secrets(name, a["id"], _ip(request))
+        if st["set"] or st["unset"]:
+            spec["env"] = {**spec.get("env", {}), **st["set"]}
+            for k in st["unset"]: spec["env"].pop(k, None)
+        from .api import actor_method
+        engine.set_deploy_actor(a["id"], actor_method(a, request))
         try: out["app"] = _api().with_url(engine.deploy(a["id"], spec))
         except (ValueError, PermissionError) as e: raise HTTPException(400, str(e))
     return out

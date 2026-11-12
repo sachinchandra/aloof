@@ -208,7 +208,7 @@ def repo_template(repo, ref=None, port=8080, plan=None):
     return validate({"id": "from-repo", "name": "Repository", "description": repo, "source": {"repo": check_repo(repo), **({"ref": ref} if ref else {})},
                      "app": {"port": int(port or 8080), "plan": plan or "shared-1x-512mb"}})
 
-def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
+def deploy(account_id, t, name, env=None, plan=None, url_domain=None, actor_method=None):
     """Create volumes + Postgres the template needs, then deploy the app. Returns app record plus the generated secrets (once)."""
     if t.get("disabled"): raise TemplateError(f"The {t['name']} template is temporarily disabled: {t['disabled']} Nothing was created.")
     from . import engine, parity
@@ -258,6 +258,7 @@ def deploy(account_id, t, name, env=None, plan=None, url_domain=None):
             spec["networks"] = [parity.pg_net(pgn)]
             for k, f in vmap.items(): spec["env"][k] = parts[f]
             q("update pg_dbs set attached=?, template_app=? where name=?", (json.dumps([{"app": name, "var": var}]), name, pgn))
+        if actor_method: engine.set_deploy_actor(account_id, actor_method)
         r = engine.deploy(account_id, spec)
     except Exception:
         if created_pg:
@@ -294,9 +295,10 @@ def _acct(request):
     if a.get("_token") or a.get("_scope_app"): raise HTTPException(403, "deploy tokens can't create apps from templates or repos")
     return a
 
-def _run(a, t, b):
+def _run(a, t, b, request):
     from . import api
-    try: r = deploy(a["id"], t, b.name, b.env, b.plan, api.URL_DOMAIN); api.with_url(r["app"]); return r
+    method = api.actor_method(a, request)
+    try: r = deploy(a["id"], t, b.name, b.env, b.plan, api.URL_DOMAIN, method); api.with_url(r["app"]); return r
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
     except HTTPException: raise
@@ -319,13 +321,13 @@ def deploy_template(tid: str, b: TplDeploy, request: Request):
     try: t = get(tid)
     except KeyError: raise HTTPException(404, "template not found")
     if t.get("disabled"): raise HTTPException(503, f"The {t['name']} template is temporarily disabled: {t['disabled']} Nothing was created.")
-    return _run(a, t, b)
+    return _run(a, t, b, request)
 @R.post("/v1/deploy/repo")
 def deploy_repo(b: RepoDeploy, request: Request):
     a = _acct(request)
     try: t = repo_template(b.repo, b.ref, b.port, b.plan)
     except ValueError as e: raise HTTPException(400, str(e))
-    return _run(a, t, b)
+    return _run(a, t, b, request)
 @R.get("/llms-templates.md", response_class=PlainTextResponse)
 def llms_templates():
     lines = ["# Aloof one-click templates", "", "Deploy: POST https://api.aloof.si/v1/templates/<id>/deploy {\"name\": \"<app>\"} or MCP deploy_template, or `aloof deploy --template <id>`.", ""]
