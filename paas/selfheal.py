@@ -11,7 +11,7 @@ from .db import q, event, kv_get, kv_put, kv_del, audit
 
 def _f(k, d): return float(os.environ.get(k, d))
 def cfg():
-    return {"window_s": _f("PAAS_SELFHEAL_WINDOW", 300), "min_requests": int(_f("PAAS_SELFHEAL_MIN_REQS", 100)),
+    return {"window_s": _f("PAAS_SELFHEAL_WINDOW", 300), "min_requests": int(_f("PAAS_SELFHEAL_MIN_REQS", 20)),
             "min_bad": int(_f("PAAS_SELFHEAL_MIN_BAD", 10)), "min_ips": int(_f("PAAS_SELFHEAL_MIN_IPS", 3)),
             "err_pp": _f("PAAS_SELFHEAL_ERR_PP", 5), "err_x": _f("PAAS_SELFHEAL_ERR_X", 2),
             "p95_x": _f("PAAS_SELFHEAL_P95_X", 2), "p95_ms": _f("PAAS_SELFHEAL_P95_MS", 500)}
@@ -79,11 +79,19 @@ def on_active(app, version, prev_version, reason, release_id=None):
         base = _stats.get((app, prev_version)) if prev_version else None
         for k in [k for k in _stats if k[0] == app and k[1] not in (version, prev_version)]: _stats.pop(k)
         _stats[(app, version)] = Stats()
-    if is_rollback(reason) or reason in ("scale", "cold start") or not prev_version: return None
-    if not enabled(app): event(app, f"self-heal: v{version} not watched (disabled for this app)"); return None
+    _not_watched_reason.pop(app, None)
+    if is_rollback(reason) or reason in ("scale", "cold start") or not prev_version:
+        _set_not_watched(app, "rollback" if is_rollback(reason) else "no_previous_release" if not prev_version else "config_change")
+        return None
+    if not enabled(app):
+        event(app, f"self-heal: v{version} not watched (disabled for this app)")
+        _set_not_watched(app, "disabled")
+        return None
     c = cfg()
     if not base or base.n < c["min_requests"]:
-        event(app, f"self-heal: v{version} not watched (no baseline: v{prev_version} served {base.n if base else 0} requests, need {c['min_requests']})"); return None
+        event(app, f"self-heal: v{version} not watched (no baseline: v{prev_version} served {base.n if base else 0} requests, need {c['min_requests']})")
+        _set_not_watched(app, "insufficient_baseline", base.n if base else 0)
+        return None
     w = {"version": version, "release_id": release_id, "prev": prev_version, "start": time.time(), "baseline": base.summary(),
          "baseline_err_routes": set(base.err_routes)}
     with _lock: _watch[app] = w
@@ -148,7 +156,14 @@ def tick():
 
 def auto_rollback_info(app, version):
     v = kv_get("autorb", f"{app}:{version}"); return json.loads(v) if v else None
+_not_watched_reason = {}
+def _set_not_watched(app, reason, baseline_requests=None):
+    """Store why the latest release is not being watched (for dashboard display)."""
+    _not_watched_reason[app] = {"reason": reason, "baseline_requests": baseline_requests}
 def status(app):
-    w = _watch.get(app)
-    return {"enabled": enabled(app), "watching": ({"version": w["version"], "against": w["prev"], "seconds_left": max(0, int(cfg()["window_s"] - (time.time() - w["start"])))} if w else None),
-            "thresholds": cfg()}
+    w = _watch.get(app); c = cfg()
+    nw = _not_watched_reason.get(app)
+    return {"enabled": enabled(app),
+            "watching": ({"version": w["version"], "against": w["prev"], "seconds_left": max(0, int(c["window_s"] - (time.time() - w["start"])))} if w else None),
+            "not_watched_reason": nw if not w else None,
+            "thresholds": c}

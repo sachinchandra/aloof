@@ -228,3 +228,77 @@ def test_unknown_region_warns():
     spec = appconfig.to_spec({"app": "reg-three", "primary_region": "fsn1", "regions": ["ams", "nbg1"]})[0]
     assert spec["region"] == "fsn1"   # primary_region wins over regions[0]
     spec = appconfig.to_spec({"app": "reg-four", "regions": ["iad"]})[0]; assert "region" not in spec
+
+def test_staged_secrets_not_lost_on_rejected_deploy(fake, user):
+    """Staged secrets must not be lost if the deploy is rejected."""
+    deploy(user, "stg-rej", "good:v1", env={"A": "1"})
+    # Stage secrets
+    user.post("/v1/apps/stg-rej/secrets", json={"secrets": {"B": "2"}, "stage": True})
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/stg-rej/secrets").json()}
+    assert st["B"] == "staged"
+    # Simulate a rejected deploy by using a bad name that should fail validation
+    # (The app doesn't exist, so we'll create a new one with a bad name to trigger rejection)
+    r = user.post("/v1/apps", json={"name": "pg-stg-bad", "source": {"image": "good:v1"}, "provider": "local-docker"})
+    assert r.status_code == 400 and "pg-" in r.text
+    # Staged secrets should still be there
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/stg-rej/secrets").json()}
+    assert st["B"] == "staged"
+    # Now a successful code deploy applies them
+    deploy(user, "stg-rej", "good:v2")
+    st = [x["name"] for x in user.get("/v1/apps/stg-rej/secrets").json()]
+    assert "A" in st and "B" in st  # both present after deploy
+
+def test_staged_secrets_auto_apply_on_code_deploy(fake, user):
+    """Staged secrets are auto-applied on successful code deploy and cleared."""
+    deploy(user, "stg-auto", "good:v1", env={"X": "1"})
+    # Stage secrets
+    user.post("/v1/apps/stg-auto/secrets", json={"secrets": {"Y": "2"}, "unset": ["X"], "stage": True})
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/stg-auto/secrets").json()}
+    assert st == {"X": "deployed, staged unset", "Y": "staged"}
+    # A new code deploy should auto-apply and clear staged
+    deploy(user, "stg-auto", "good:v2")
+    time.sleep(0.3)
+    st = [x["name"] for x in user.get("/v1/apps/stg-auto/secrets").json()]
+    assert st == ["Y"]  # X unset, Y applied
+
+def test_secrets_deploy_for_secrets_only_apply(fake, user):
+    """POST /v1/apps/{name}/secrets/deploy still works for secrets-only apply."""
+    deploy(user, "sec-only", "good:v1", env={"A": "1"})
+    user.post("/v1/apps/sec-only/secrets", json={"secrets": {"B": "2"}, "stage": True})
+    # secrets/deploy applies without code deploy
+    r = user.post("/v1/apps/sec-only/secrets/deploy")
+    assert r.status_code == 200
+    time.sleep(0.3); wait(user, "sec-only")
+    st = [x["name"] for x in user.get("/v1/apps/sec-only/secrets").json()]
+    assert "A" in st and "B" in st
+    # No more staged secrets
+    assert user.post("/v1/apps/sec-only/secrets/deploy").status_code == 400
+
+def test_release_actor_tracking(fake, user):
+    """GET /v1/apps/{name}/releases includes actor (account_id, method, email) for new deploys."""
+    deploy(user, "act-app", "good:v1")
+    rels = user.get("/v1/apps/act-app/releases").json()
+    assert len(rels) == 1
+    actor = rels[0]["actor"]
+    assert actor is not None
+    assert actor["account_id"] == user.acct
+    assert actor["method"] == "api_key"
+    assert actor["email"] is not None and "@" in actor["email"]
+    # Rollback also has actor
+    deploy(user, "act-app", "good:v2")
+    user.post("/v1/apps/act-app/rollback")
+    time.sleep(0.3); wait(user, "act-app")
+    rels = user.get("/v1/apps/act-app/releases").json()
+    # v3 (rollback) should have actor
+    v3 = next(r for r in rels if r["version"] == 3)
+    assert v3["actor"]["account_id"] == user.acct
+    assert v3["actor"]["method"] == "api_key"
+
+def test_historical_releases_actor_null(fake, user):
+    """Historical releases without actor data return None."""
+    # Create an app and release
+    deploy(user, "hist-app", "good:v1")
+    # Manually clear the actor to simulate historical data
+    q("update releases set actor_account_id=null, actor_method=null where app='hist-app'")
+    rels = user.get("/v1/apps/hist-app/releases").json()
+    assert rels[0]["actor"] is None

@@ -121,6 +121,14 @@ async def _strip_legacy_session(request: Request, call_next):
             r.headers.append("set-cookie", f"{auth.LEGACY_COOKIE}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Lax{extra}")
     return r
 SUSPENDED_MSG = "this account is suspended; email support@aloof.si"
+def actor_method(a, request: Request = None):
+    """Determine how this request was authenticated for release actor tracking."""
+    if a.get("_token"): return "deploy_token"
+    if a.get("impersonated_by"): return "admin_view"
+    scope_hdr = (request.headers.get("x-aloof-scope") or "").strip().lower() if request else ""
+    if scope_hdr: return "mcp"
+    if request and request.cookies.get(auth.COOKIE): return "session"
+    return "api_key"
 def acct(request: Request, authorization: str = Header(None)):
     """Bearer API key (CLI/MCP/automation) or session cookie (dashboard). Cookie-authenticated writes need the
     X-Aloof-CSRF header, which cross-site forms cannot set (SameSite=Lax is the first line of defence)."""
@@ -287,13 +295,27 @@ def providers():
 @app.exception_handler(engine.PastDue)
 async def _past_due_402(request, exc): return JSONResponse({"detail": str(exc), "code": "payment_past_due"}, status_code=402)
 @app.post("/v1/apps")
-def deploy(r: DeployReq, a=Depends(acct)):
+def deploy(r: DeployReq, request: Request, a=Depends(acct)):
     if r.name.startswith("pg-"): raise HTTPException(400, "app names starting with pg- are reserved for managed Postgres")
     if not scope_ok(r.name, a): raise HTTPException(403, f"this deploy token is scoped to app {a['_scope_app']}")
     spec = r.model_dump(exclude_unset=True) | {"name": r.name, "source": r.source.model_dump()}; spec["source"] = {k:v for k,v in spec["source"].items() if v}
-    try: return with_url(engine.deploy(a["id"], spec))
+    from . import devx
+    from .crypto import load_spec as _ls
+    st = devx.get_staged_secrets(r.name)
+    if st["set"] or st["unset"]:
+        ex = q("select spec from apps where name=? and status!='destroyed'", (r.name,), one=True)
+        old_env = _ls(ex["spec"]).get("env", {}) if ex else {}
+        spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
+        for k in st["unset"]: spec["env"].pop(k, None)
+        spec["_replace_env"] = True
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
+    try:
+        result = with_url(engine.deploy(a["id"], spec))
+        if st["set"] or st["unset"]: devx.clear_staged_secrets(r.name, a["id"], _ip(request))
+        return result
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
+    finally: engine.clear_deploy_actor()
 @app.get("/v1/apps")
 def list_apps(a=Depends(acct)): return [with_url(engine.get_app(r["name"])) for r in q("select name from apps where account_id=? and status!='destroyed' and name not like ?", (a["id"], "pg-%")) if scope_ok(r["name"], a)]
 @app.get("/v1/apps/{name}")
@@ -315,10 +337,23 @@ def app_retry(name: str, request: Request, a=Depends(acct)):
         _audit(a["id"], name, "deploy.retry_stale", f"status={ap['status']}", _ip(request))   # stale: no deploy thread holds the lock
     spec = {"name": name, "source": (ap.get("spec") or {}).get("source") or {}}
     if not spec["source"]: raise HTTPException(400, "this app has no source to redeploy")
-    try: r = engine.deploy(a["id"], spec)
+    from . import devx
+    from .crypto import load_spec as _ls
+    st = devx.get_staged_secrets(name)
+    if st["set"] or st["unset"]:
+        ex = q("select spec from apps where name=?", (name,), one=True)
+        old_env = _ls(ex["spec"]).get("env", {}) if ex else {}
+        spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
+        for k in st["unset"]: spec["env"].pop(k, None)
+        spec["_replace_env"] = True
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
+    try:
+        r = engine.deploy(a["id"], spec)
+        if st["set"] or st["unset"]: devx.clear_staged_secrets(name, a["id"], _ip(request))
+        _audit(a["id"], name, "deploy.retry", "", _ip(request)); return with_url(r)
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
-    _audit(a["id"], name, "deploy.retry", "", _ip(request)); return with_url(r)
+    finally: engine.clear_deploy_actor()
 @app.get("/v1/apps/{name}/logs", response_class=PlainTextResponse)
 def logs(name: str, tail: int=200, a=Depends(acct)): own(name, a); return engine.logs(name, tail)
 class Scale(BaseModel): instances: int
@@ -338,7 +373,11 @@ def scale(name: str, s: Scale, a=Depends(acct)):
     return with_url(engine.scale(name, s.instances))
 class Env(BaseModel): env: dict[str, str|None]
 @app.post("/v1/apps/{name}/env")
-def env(name: str, e: Env, a=Depends(acct)): own(name, a); return with_url(engine.set_env(name, e.env))
+def env(name: str, e: Env, request: Request, a=Depends(acct)):
+    own(name, a)
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
+    try: return with_url(engine.set_env(name, e.env))
+    finally: engine.clear_deploy_actor()
 @app.delete("/v1/apps/{name}")
 def delete(name: str, with_volumes: bool = False, a=Depends(acct)):
     """Delete the app plus the volumes and Postgres its template created. Volumes you attached yourself are kept unless with_volumes=true."""
@@ -1097,9 +1136,12 @@ class RollbackReq(BaseModel): version: int|None=None
 def app_rollback(name: str, request: Request, b: RollbackReq|None=None, a=Depends(acct)):
     """Redeploy an earlier release (default: the previous one) with zero downtime. No rebuild."""
     own(name, a)
-    try: r = engine.rollback(name, b.version if b else None)
+    engine.set_deploy_actor(a["id"], actor_method(a, request))
+    try:
+        r = engine.rollback(name, b.version if b else None)
+        _audit(a["id"], name, "rollback", f"to v{b.version}" if b and b.version else "previous", _ip(request)); return with_url(r)
     except ValueError as e: raise HTTPException(400, str(e))
-    _audit(a["id"], name, "rollback", f"to v{b.version}" if b and b.version else "previous", _ip(request)); return with_url(r)
+    finally: engine.clear_deploy_actor()
 # managed Postgres
 class PgReq(BaseModel): name: str; plan: str="pg-dev"; region: str|None=None
 def own_pg(n, a):

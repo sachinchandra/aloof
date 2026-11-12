@@ -204,6 +204,10 @@ create table if not exists site_salt(day TEXT primary key, salt TEXT not null);
 create table if not exists site_visitors(day TEXT not null, vh TEXT not null, primary key(day, vh));
 create table if not exists site_counts(day TEXT not null, kind TEXT not null, key TEXT not null, n bigint not null default 0, primary key(day, kind, key));
 """)
+    ,(26, """
+alter table releases add column if not exists actor_account_id bigint;
+alter table releases add column if not exists actor_method TEXT;
+""")
 ]
 def _dialect(sql):
     if PG: return sql.replace("AUTOPK", "bigserial primary key").replace("REAL", "double precision")
