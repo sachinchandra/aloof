@@ -118,7 +118,6 @@ def _deploy_and_report(account_id, spec, iid, repo, sha, url_of, pr=None):
     from .crypto import load_spec
     name = spec["name"]; url = url_of(name)
     check = _report(iid, repo, sha, "pending", name, url, f"deploying {sha[:7]}")
-    st = {"set": {}, "unset": []}
     if not pr:
         st = devx.get_staged_secrets(name)
         if st["set"] or st["unset"]:
@@ -127,10 +126,10 @@ def _deploy_and_report(account_id, spec, iid, repo, sha, url_of, pr=None):
             spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
             for k in st["unset"]: spec["env"].pop(k, None)
             spec["_replace_env"] = True
+            spec["_clear_staged_on_success"] = True
     engine.set_deploy_actor(account_id, "github_webhook" if not pr else "github_preview")
     try:
         engine.deploy(account_id, spec)
-        if st["set"] or st["unset"]: devx.clear_staged_secrets(name, account_id, None)
     except Exception as e:
         _report(iid, repo, sha, "failure", name, url, f"deploy rejected: {e}", check)
         engine.clear_deploy_actor()

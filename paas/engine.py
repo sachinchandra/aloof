@@ -374,6 +374,11 @@ def _run_deploy(name, image=None, reason=None, only_if_latest=None):
             q("update apps set status=?, updated=?, error=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(),
               (f"{len(bad)} instance(s) not ready" if bad else None), name))
             _set_release(name, ver, "active"); log(f"deploy complete (v{ver} live)")
+            if spec.get("_clear_staged_on_success"):
+                try:
+                    from . import devx
+                    devx.clear_staged_secrets(name, app["account_id"])
+                except Exception as e: log(f"staged secrets clear: {e}")
             try:
                 from . import selfheal
                 rid = (q("select id from releases where app=? and version=?", (name, ver), one=True) or {}).get("id")

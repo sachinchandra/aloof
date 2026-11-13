@@ -98,6 +98,7 @@ def deploy_config(name: str, b: DeployCfg, request: Request, a=Depends(acct)):
         spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
         for k in st["unset"]: spec["env"].pop(k, None)
         spec["_replace_env"] = True
+        spec["_clear_staged_on_success"] = True
     for m in v["mounts"]:
         vol = q("select * from volumes where name=?", (m["name"],), one=True)
         if vol and vol["account_id"] != a["id"]: raise HTTPException(409, f"volume {m['name']} belongs to another account")
@@ -112,7 +113,6 @@ def deploy_config(name: str, b: DeployCfg, request: Request, a=Depends(acct)):
     engine.set_deploy_actor(a["id"], actor_method(a, request))
     try:
         r = engine.deploy(a["id"], spec)
-        if st["set"] or st["unset"]: clear_staged_secrets(name, a["id"], _ip(request))
         _audit(a["id"], name, "deploy", json.dumps({"source": {k: x for k, x in src.items() if k != "build_args"}})[:500], _ip(request))
         return _api().with_url(r) | {"warnings": v["warnings"]}
     except PermissionError as e: raise HTTPException(409, str(e))
@@ -201,10 +201,13 @@ def secrets_set(name: str, b: SecReq, request: Request, a=Depends(acct)):
 def secrets_deploy(name: str, request: Request, a=Depends(acct)):
     own(name, a); st = _staged(name)
     if not st["set"] and not st["unset"]: raise HTTPException(400, "no staged secrets")
-    kv_del("staged_secrets", name); _audit(a["id"], name, "secrets.deploy", f"{len(st['set'])} set, {len(st['unset'])} unset", _ip(request))
     from .api import actor_method
     engine.set_deploy_actor(a["id"], actor_method(a, request))
-    try: return _api().with_url(engine.set_env(name, dict(st["set"]) | {k: None for k in st["unset"]}))
+    try:
+        result = _api().with_url(engine.set_env(name, dict(st["set"]) | {k: None for k in st["unset"]}))
+        kv_del("staged_secrets", name)
+        _audit(a["id"], name, "secrets.deploy", f"{len(st['set'])} set, {len(st['unset'])} unset", _ip(request))
+        return result
     finally: engine.clear_deploy_actor()
 # ---------------- status / scale ----------------
 @R.get("/v1/apps/{name}/status")
@@ -432,11 +435,11 @@ def gh_link(name: str, b: LinkReq, request: Request, a=Depends(acct)):
             spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
             for k in st["unset"]: spec["env"].pop(k, None)
             spec["_replace_env"] = True
+            spec["_clear_staged_on_success"] = True
         from .api import actor_method
         engine.set_deploy_actor(a["id"], actor_method(a, request))
         try:
             out["app"] = _api().with_url(engine.deploy(a["id"], spec))
-            if st["set"] or st["unset"]: clear_staged_secrets(name, a["id"], _ip(request))
         except (ValueError, PermissionError) as e: raise HTTPException(400, str(e))
         finally: engine.clear_deploy_actor()
     return out
