@@ -308,10 +308,10 @@ def deploy(r: DeployReq, request: Request, a=Depends(acct)):
         spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
         for k in st["unset"]: spec["env"].pop(k, None)
         spec["_replace_env"] = True
+        spec["_clear_staged_on_success"] = True
     engine.set_deploy_actor(a["id"], actor_method(a, request))
     try:
         result = with_url(engine.deploy(a["id"], spec))
-        if st["set"] or st["unset"]: devx.clear_staged_secrets(r.name, a["id"], _ip(request))
         return result
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))
@@ -346,10 +346,10 @@ def app_retry(name: str, request: Request, a=Depends(acct)):
         spec["env"] = {**old_env, **spec.get("env", {}), **st["set"]}
         for k in st["unset"]: spec["env"].pop(k, None)
         spec["_replace_env"] = True
+        spec["_clear_staged_on_success"] = True
     engine.set_deploy_actor(a["id"], actor_method(a, request))
     try:
         r = engine.deploy(a["id"], spec)
-        if st["set"] or st["unset"]: devx.clear_staged_secrets(name, a["id"], _ip(request))
         _audit(a["id"], name, "deploy.retry", "", _ip(request)); return with_url(r)
     except PermissionError as e: raise HTTPException(409, str(e))
     except ValueError as e: raise HTTPException(400, str(e))

@@ -230,14 +230,20 @@ def test_unknown_region_warns():
     spec = appconfig.to_spec({"app": "reg-four", "regions": ["iad"]})[0]; assert "region" not in spec
 
 def test_staged_secrets_not_lost_on_rejected_deploy(fake, user):
-    """Staged secrets must not be lost if the deploy is rejected."""
+    """Staged secrets must not be lost if the deploy is rejected (same-app rejection test)."""
     deploy(user, "stg-rej", "good:v1", env={"A": "1"})
     # Stage secrets
     user.post("/v1/apps/stg-rej/secrets", json={"secrets": {"B": "2"}, "stage": True})
     st = {x["name"]: x["status"] for x in user.get("/v1/apps/stg-rej/secrets").json()}
     assert st["B"] == "staged"
-    # Simulate a rejected deploy by using a bad name that should fail validation
-    # (The app doesn't exist, so we'll create a new one with a bad name to trigger rejection)
+    # Simulate a rejected deploy for the SAME app by using an invalid provider
+    # This tests that clear_staged_secrets is not called when deploy() raises
+    r = user.post("/v1/apps", json={"name": "stg-rej", "source": {"image": "good:v2"}, "provider": "invalid-driver"})
+    assert r.status_code == 400 and "unknown provider" in r.text
+    # Staged secrets should still be there after same-app rejection
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/stg-rej/secrets").json()}
+    assert st["B"] == "staged", "staged secrets lost after same-app rejection"
+    # Also test rejection with reserved name (different app)
     r = user.post("/v1/apps", json={"name": "pg-stg-bad", "source": {"image": "good:v1"}, "provider": "local-docker"})
     assert r.status_code == 400 and "pg-" in r.text
     # Staged secrets should still be there
@@ -247,6 +253,105 @@ def test_staged_secrets_not_lost_on_rejected_deploy(fake, user):
     deploy(user, "stg-rej", "good:v2")
     st = [x["name"] for x in user.get("/v1/apps/stg-rej/secrets").json()]
     assert "A" in st and "B" in st  # both present after deploy
+
+
+def test_staged_secrets_not_lost_on_failed_deploy_after_queue(fake, user):
+    """Staged secrets must not be lost when a queued deploy later fails (N13-1).
+    
+    This tests the case where engine.deploy() accepts and queues the deploy,
+    but the background thread fails (e.g., bad image, failed readiness).
+    The previous release should still be serving, and staged secrets must be preserved.
+    """
+    deploy(user, "stg-fail", "good:v1", env={"OLD": "1"})
+    # Stage new secrets
+    user.post("/v1/apps/stg-fail/secrets", json={"secrets": {"NEW": "2"}, "stage": True})
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/stg-fail/secrets").json()}
+    assert st["NEW"] == "staged"
+    
+    # Deploy with a 'bad:*' image that will fail readiness after being queued
+    r = user.post("/v1/apps", json={"name": "stg-fail", "source": {"image": "bad:v2"}, "provider": "local-docker"})
+    assert r.status_code == 200  # deploy is accepted (queued)
+    
+    # Wait for deploy to fail
+    time.sleep(2)
+    app = user.get("/v1/apps/stg-fail").json()
+    # The app should still be running the previous release (v1)
+    assert app["status"] in ("running", "failed"), f"unexpected status: {app['status']}"
+    
+    # Check that staged secrets are NOT lost
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/stg-fail/secrets").json()}
+    assert "NEW" in st and "staged" in st["NEW"], f"staged secrets lost after failed deploy: {st}"
+    
+    # The old env should still be deployed
+    assert "OLD" in [x["name"] for x in user.get("/v1/apps/stg-fail/secrets").json()]
+
+
+def test_secrets_deploy_failure_preserves_staged(fake, user, monkeypatch):
+    """POST /secrets/deploy raise-before-queue failure must not lose staged keys (N13-2).
+    
+    If set_env raises before queueing, the staged secrets should remain in KV.
+    """
+    deploy(user, "sec-fail", "good:v1", env={"A": "1"})
+    # Stage secrets
+    user.post("/v1/apps/sec-fail/secrets", json={"secrets": {"B": "2"}, "stage": True})
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/sec-fail/secrets").json()}
+    assert st["B"] == "staged"
+    
+    # Inject a failure into set_env by making update_spec raise ValueError
+    orig_update_spec = engine.update_spec
+    def fail_update_spec(name, fn):
+        raise ValueError("injected failure")
+    monkeypatch.setattr(engine, "update_spec", fail_update_spec)
+    
+    # Try to deploy secrets - this should fail with 400 (ValueError mapped)
+    r = user.post("/v1/apps/sec-fail/secrets/deploy")
+    assert r.status_code == 400
+    
+    # Restore original to read secrets
+    monkeypatch.setattr(engine, "update_spec", orig_update_spec)
+    
+    # Staged secrets should still be there
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/sec-fail/secrets").json()}
+    assert "B" in st and "staged" in st["B"], f"staged secrets lost after raise-before-queue: {st}"
+
+
+def test_secrets_deploy_not_lost_on_failed_deploy_after_queue(fake, user):
+    """POST /secrets/deploy post-queue failure must not lose staged keys (N13-2b).
+    
+    This tests the case where set_env → deploy() queues successfully (returns 200),
+    but the background thread fails (e.g., bad image, failed readiness).
+    The previous release should still be serving, and staged secrets must remain staged.
+    """
+    deploy(user, "sec-postq", "good:v1", env={"OLD": "1"})
+    # Stage new secrets
+    user.post("/v1/apps/sec-postq/secrets", json={"secrets": {"NEW": "2"}, "stage": True})
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/sec-postq/secrets").json()}
+    assert st["NEW"] == "staged"
+    
+    # Manually set the app's image to a bad:* image so the next deploy fails readiness
+    # We need to make update_spec use a bad image
+    from paas.crypto import load_spec, dump_spec
+    row = q("select spec from apps where name='sec-postq'", one=True)
+    spec = load_spec(row["spec"])
+    spec["_image"] = "bad:env-fail"  # update_spec uses _image for source
+    q("update apps set spec=? where name='sec-postq'", (dump_spec(spec),))
+    
+    # POST /secrets/deploy - this should queue the deploy (return 200) but fail later
+    r = user.post("/v1/apps/sec-postq/secrets/deploy")
+    assert r.status_code == 200  # deploy is accepted (queued)
+    
+    # Wait for deploy to fail
+    time.sleep(2)
+    app = user.get("/v1/apps/sec-postq").json()
+    # The app should still be running the previous release (with an error)
+    assert app["status"] in ("running", "failed"), f"unexpected status: {app['status']}"
+    
+    # Check that staged secrets are NOT lost - they should still be staged
+    st = {x["name"]: x["status"] for x in user.get("/v1/apps/sec-postq/secrets").json()}
+    assert "NEW" in st and "staged" in st["NEW"], f"staged secrets lost after post-queue failure: {st}"
+    
+    # The old env should still be deployed
+    assert "OLD" in [x["name"] for x in user.get("/v1/apps/sec-postq/secrets").json()]
 
 def test_staged_secrets_auto_apply_on_code_deploy(fake, user):
     """Staged secrets are auto-applied on successful code deploy and cleared."""
