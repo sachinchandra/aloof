@@ -204,10 +204,10 @@ def secrets_deploy(name: str, request: Request, a=Depends(acct)):
     from .api import actor_method
     engine.set_deploy_actor(a["id"], actor_method(a, request))
     try:
-        result = _api().with_url(engine.set_env(name, dict(st["set"]) | {k: None for k in st["unset"]}))
-        kv_del("staged_secrets", name)
+        result = _api().with_url(engine.set_env(name, dict(st["set"]) | {k: None for k in st["unset"]}, clear_staged_on_success=True))
         _audit(a["id"], name, "secrets.deploy", f"{len(st['set'])} set, {len(st['unset'])} unset", _ip(request))
         return result
+    except ValueError as e: raise HTTPException(400, str(e))
     finally: engine.clear_deploy_actor()
 # ---------------- status / scale ----------------
 @R.get("/v1/apps/{name}/status")

@@ -522,11 +522,13 @@ def update_spec(name, fn):
     spec["source"] = {"image": spec["_image"]} if spec.get("_image") else spec["source"]; spec["_replace_env"] = True   # full env (unsets stick)
     spec["instances"] = max(spec["instances"], 1) if not spec.get("autoscale") else max(spec["autoscale"]["min"], min(max(spec["instances"],1), spec["autoscale"]["max"]))
     return deploy(app["account_id"], spec)
-def set_env(name, env):
+def set_env(name, env, clear_staged_on_success=False):
     def f(spec):
         for k,v in env.items():
             if v is None: spec["env"].pop(k, None)
             else: spec["env"][k] = v
+        if clear_staged_on_success:
+            spec["_clear_staged_on_success"] = True
     return update_spec(name, f)
 def set_autoscale(name, cfg):
     def f(spec): spec["autoscale"] = cfg
