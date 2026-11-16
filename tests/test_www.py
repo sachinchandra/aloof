@@ -29,6 +29,11 @@ def test_prices_in_posts_match_plans():
     assert f"${PLANS['shared-1x-256mb']['price_usd_month']:,.2f}" in t
     t = c.get("/blog/scale-to-zero-economics").text
     assert f"${PLANS['shared-1x-1gb']['price_usd_month']:,.2f}" in t
+def test_staged_secrets_wording_in_blog():
+    t = c.get("/blog/deploy-nextjs-and-rails").text
+    assert "go out with your next code deploy" in t
+    assert "right now without a new build" in t
+    assert "aloof secrets deploy</code>" in t
 def test_rss_sitemap_robots():
     r = c.get("/rss.xml"); md.parseString(r.content); assert r.text.count("<item>") == 8
     s = c.get("/sitemap.xml"); md.parseString(s.content); assert "/blog/postgres-offsite-backups" in s.text and "/regions" in s.text
