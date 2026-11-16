@@ -205,8 +205,8 @@ def landing(brand, base, api, mcp):
     faqh = "".join(f"<details class=faq><summary>{q}</summary><p>{a}</p></details>" for q, a in faq4)
     body = f"""<section class="hero v5"><div class=wrap><div>
 <div class=eyebrow>The self-driving cloud</div>
-<h1>Infrastructure for the age of <span class=grad>superintelligence.</span></h1>
-<p class=lead>Deploy your backend. Aloof keeps it running: it rolls back bad deploys, routes around failures and scales itself.</p>
+<h1>Deploy your backend. <span class=grad>It rolls itself back when a release breaks.</span></h1>
+<p class=lead>Aloof also routes around failures, scales itself and bills per second.</p>
 <div class=cta><a class="btn pri" href="/login#register" data-cta=deploy_free data-cta-loc=hero>Deploy free</a><a class="btn ghost" href="/docs/mcp" data-cta=connect_mcp data-cta-loc=hero>Connect your AI</a></div>
 <p class=v5-small>Free plan · No credit card · Billed per second</p></div>
 {_hero_visual(base)}</div></section>
