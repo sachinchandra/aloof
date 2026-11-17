@@ -320,6 +320,7 @@ a.logo i{width:28px;height:28px;flex:none}
 /* home v5 */
 .hero.v5{padding:120px 0 104px;background:radial-gradient(900px 520px at 15% 10%,color-mix(in srgb,var(--acc) 34%,transparent),transparent 70%),radial-gradient(700px 480px at 90% 30%,color-mix(in srgb,var(--acc2) 26%,transparent),transparent 70%),linear-gradient(180deg,#0b0a10,#120c0c)}
 html[data-theme=light] .hero.v5{background:radial-gradient(900px 520px at 15% 10%,color-mix(in srgb,var(--acc) 22%,transparent),transparent 70%),radial-gradient(700px 480px at 90% 30%,color-mix(in srgb,var(--acc2) 16%,transparent),transparent 70%),var(--bg)}
+.hero.v5 h1{text-wrap:balance}.hero.v5 .lead{text-wrap:pretty}
 .v5-small{font-size:13.5px;color:var(--fg2);margin:16px 0 0}
 .v5s{padding:104px 0}.v5s .t{margin-bottom:40px}.c{text-align:center}.lead2{font-size:18px;color:var(--fg2);max-width:460px}
 .v5c{padding:30px}.v5c h3{margin:16px 0 6px;font-size:19px}.v5c p{margin:0;color:var(--fg2)}
