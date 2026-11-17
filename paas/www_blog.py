@@ -64,10 +64,11 @@ CMD ["npm","run","start"]</pre>
 <h2>Rails</h2><p>A <code>Gemfile</code> containing <code>rails</code> produces a <code>ruby:3.3-slim</code> image with build tools and <code>libpq</code>, <code>bundle install</code> without development and test groups, and a best-effort <code>assets:precompile</code>. It also sets a release command:</p>
 <pre>[deploy]
   release_command = "bin/rails db:migrate"</pre>
-<p>Set your secrets once, staged so you deploy only once:</p>
+<p>Stage your secrets up front. They go out with your next code deploy:</p>
 <pre>aloof secrets set RAILS_MASTER_KEY=$(cat config/master.key) --stage
 aloof pg create shop-db &amp;&amp; aloof pg attach shop-db shop
-aloof secrets deploy</pre>
+aloof deploy</pre>
+<p>If you need to apply staged secrets right now without a new build, run <code>aloof secrets deploy</code>.</p>
 <p>Background jobs go in <code>[processes]</code> (for example <code>worker = "bundle exec sidekiq"</code> or <code>"bin/jobs"</code> for Solid Queue), and recurring tasks in <code>[[cron]]</code>.</p>
 <h2>Same workflow, same guarantees</h2><ul><li>Builds run remotely; <code>.dockerignore</code> is respected when the directory is uploaded.</li><li>The release command runs before new instances start; a failure keeps the old release live.</li><li>Every deploy is a numbered release you can roll back to without rebuilding.</li></ul>
 <p>Full walkthroughs: <a href="/guides/nextjs">Next.js guide</a>, <a href="/guides/rails">Rails guide</a>.</p>"""},

@@ -29,6 +29,11 @@ def test_prices_in_posts_match_plans():
     assert f"${PLANS['shared-1x-256mb']['price_usd_month']:,.2f}" in t
     t = c.get("/blog/scale-to-zero-economics").text
     assert f"${PLANS['shared-1x-1gb']['price_usd_month']:,.2f}" in t
+def test_staged_secrets_wording_in_blog():
+    t = c.get("/blog/deploy-nextjs-and-rails").text
+    assert "go out with your next code deploy" in t
+    assert "right now without a new build" in t
+    assert "aloof secrets deploy</code>" in t
 def test_rss_sitemap_robots():
     r = c.get("/rss.xml"); md.parseString(r.content); assert r.text.count("<item>") == 8
     s = c.get("/sitemap.xml"); md.parseString(s.content); assert "/blog/postgres-offsite-backups" in s.text and "/regions" in s.text
@@ -131,7 +136,7 @@ def test_client_events_no_server_duplicates():
     assert "aloofIdentify(String(me.id),null,!!me.is_test)" in js and "post('/v1/auth/magic'" in js and js.count("attribution:window.aloofAttribution") == 2
 def test_hero_and_footer_copy():
     h = c.get("/").text
-    assert "The self-driving cloud" in h and "Infrastructure for the age of" in h and "They run in the EU" not in h
+    assert "The self-driving cloud" in h and "It rolls itself back when a release breaks" in h and "They run in the EU" not in h
     for pth in ("/", "/pricing", "/docs", "/examples", "/terms"): assert "The cloud for apps your AI ships." in c.get(pth).text, pth
 def test_llms_txt_tools_and_copy():
     import re, os
