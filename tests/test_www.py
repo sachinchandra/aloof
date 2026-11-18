@@ -136,8 +136,13 @@ def test_client_events_no_server_duplicates():
     assert "aloofIdentify(String(me.id),null,!!me.is_test)" in js and "post('/v1/auth/magic'" in js and js.count("attribution:window.aloofAttribution") == 2
 def test_hero_and_footer_copy():
     h = c.get("/").text
-    assert "The self-driving cloud" in h and "It rolls itself back when a release breaks" in h and "They run in the EU" not in h
+    assert "The self-driving cloud" in h and "They run in the EU" not in h
     for pth in ("/", "/pricing", "/docs", "/examples", "/terms"): assert "The cloud for apps your AI ships." in c.get(pth).text, pth
+
+def test_homepage_hero_copy():
+    h = c.get("/").text
+    assert "Infrastructure for <span class=grad>Super Intelligent Apps</span>" in h
+    assert '<p class=lead>Deploy your backend. It rolls itself back when a release breaks.</p>' in h
 def test_llms_txt_tools_and_copy():
     import re, os
     t = c.get("/llms.txt").text
