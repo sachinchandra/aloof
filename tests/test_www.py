@@ -142,7 +142,7 @@ def test_hero_and_footer_copy():
 def test_homepage_hero_copy():
     h = c.get("/").text
     assert "Infrastructure for <span class=grad>Super Intelligent Apps</span>" in h
-    assert '<p class=lead>Deploy your backend. It rolls itself back when a release breaks.</p>' in h
+    assert '<p class=lead>Deploy your backend. It rolls itself back when a&nbsp;release breaks.</p>' in h
 def test_llms_txt_tools_and_copy():
     import re, os
     t = c.get("/llms.txt").text
