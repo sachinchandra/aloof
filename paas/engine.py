@@ -374,6 +374,11 @@ def _run_deploy(name, image=None, reason=None, only_if_latest=None):
             q("update apps set status=?, updated=?, error=? where name=?", ("running" if new else ("idle" if spec.get("autoscale") else "stopped"), time.time(),
               (f"{len(bad)} instance(s) not ready" if bad else None), name))
             _set_release(name, ver, "active"); log(f"deploy complete (v{ver} live)")
+            if spec.get("_clear_staged_on_success"):
+                try:
+                    from . import devx
+                    devx.clear_staged_secrets(name, app["account_id"])
+                except Exception as e: log(f"staged secrets clear: {e}")
             try:
                 from . import selfheal
                 rid = (q("select id from releases where app=? and version=?", (name, ver), one=True) or {}).get("id")
@@ -517,11 +522,13 @@ def update_spec(name, fn):
     spec["source"] = {"image": spec["_image"]} if spec.get("_image") else spec["source"]; spec["_replace_env"] = True   # full env (unsets stick)
     spec["instances"] = max(spec["instances"], 1) if not spec.get("autoscale") else max(spec["autoscale"]["min"], min(max(spec["instances"],1), spec["autoscale"]["max"]))
     return deploy(app["account_id"], spec)
-def set_env(name, env):
+def set_env(name, env, clear_staged_on_success=False):
     def f(spec):
         for k,v in env.items():
             if v is None: spec["env"].pop(k, None)
             else: spec["env"][k] = v
+        if clear_staged_on_success:
+            spec["_clear_staged_on_success"] = True
     return update_spec(name, f)
 def set_autoscale(name, cfg):
     def f(spec): spec["autoscale"] = cfg
